@@ -18,32 +18,28 @@ import (
 	"epsilon/wabt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-const simdSpecTestsDirPath = "../spec/test/core/simd"
-
-func TestSimdSpec(t *testing.T) {
-	files, err := os.ReadDir(simdSpecTestsDirPath)
+func testSpec(t *testing.T, dirPath string, excluded []string) {
+	files, err := os.ReadDir(dirPath)
 	if err != nil {
-		t.Fatalf("failed to read directory: %v", err)
+		t.Fatalf("failed to read wast directory: %v", err)
 	}
 
 	for _, file := range files {
-		name := file.Name()
-		if !strings.HasSuffix(name, ".wast") {
+		if !strings.HasSuffix(file.Name(), ".wast") {
 			continue
 		}
 
-		if name == "simd_conversions.wast" || name == "simd_f64x2_arith.wast" {
-			// TODO(pivetta): These test require to properly handle NaN for simd
-			//   instructions.
+		if slices.Contains(excluded, file.Name()) {
 			continue
 		}
 
-		wastFile := filepath.Join(simdSpecTestsDirPath, name)
-		t.Run(name, func(t *testing.T) {
+		wastFile := filepath.Join(dirPath, file.Name())
+		t.Run(file.Name(), func(t *testing.T) {
 			jsonData, wasmDict, err := wabt.Wast2json(wastFile)
 			if err != nil {
 				t.Fatalf("failed to run wast2json: %v", err)
@@ -52,4 +48,17 @@ func TestSimdSpec(t *testing.T) {
 			runner.run(jsonData.Commands)
 		})
 	}
+}
+
+func TestCoreSpec(t *testing.T) {
+	// "elem.wast" seems to be broken due to wast2wasm.
+	excludedTests := []string{"elem.wast"}
+	testSpec(t, "../spec/test/core", excludedTests)
+}
+
+func TestSimdSpec(t *testing.T) {
+	// "simd_conversions.wast" and "simd_f64x2_arith.wast" require to properly
+	// handle NaN for simd instructions.
+	excludedTests := []string{"simd_conversions.wast", "simd_f64x2_arith.wast"}
+	testSpec(t, "../spec/test/core/simd", excludedTests)
 }
