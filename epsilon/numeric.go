@@ -287,20 +287,14 @@ func Min[T WasmFloat](a, b T) T {
 	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 		return T(math.NaN())
 	}
-	if a < b {
-		return a
-	}
-	return b
+	return min(a, b)
 }
 
 func Max[T WasmFloat](a, b T) T {
 	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 		return T(math.NaN())
 	}
-	if a > b {
-		return a
-	}
-	return b
+	return max(a, b)
 }
 
 func Abs[T WasmFloat](a T) T {

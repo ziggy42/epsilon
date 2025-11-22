@@ -1658,7 +1658,7 @@ func SimdF32x4Min(v1, v2 V128Value) V128Value {
 		if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 			return float32(math.NaN())
 		}
-		return float32(math.Min(float64(a), float64(b)))
+		return min(a, b)
 	})
 }
 
@@ -1667,7 +1667,7 @@ func SimdF32x4Max(v1, v2 V128Value) V128Value {
 		if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 			return float32(math.NaN())
 		}
-		return float32(math.Max(float64(a), float64(b)))
+		return max(a, b)
 	})
 }
 
@@ -1776,7 +1776,7 @@ func SimdF64x2Min(v1, v2 V128Value) V128Value {
 		if math.IsNaN(a) || math.IsNaN(b) {
 			return math.NaN()
 		}
-		return math.Min(a, b)
+		return min(a, b)
 	})
 }
 
@@ -1785,7 +1785,7 @@ func SimdF64x2Max(v1, v2 V128Value) V128Value {
 		if math.IsNaN(a) || math.IsNaN(b) {
 			return math.NaN()
 		}
-		return math.Max(a, b)
+		return max(a, b)
 	})
 }
 
