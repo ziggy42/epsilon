@@ -1,0 +1,22 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Coverage output
+*.out
+
+# OS-specific
+.DS_Store
+
+# Go workspace file
+go.work
+
+# Custom
+prompt.txt
+cpu.prof
