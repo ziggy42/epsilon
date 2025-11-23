@@ -35,7 +35,13 @@ func Wat2Wasm(watCode string) ([]byte, error) {
 	}
 
 	wasmPath := filepath.Join(tmpdir, "test.wasm")
-	cmd := exec.Command("wat2wasm", watPath, "-o", wasmPath)
+	cmd := exec.Command(
+		"wat2wasm",
+		"--enable-multi-memory",
+		watPath,
+		"-o",
+		wasmPath,
+	)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {

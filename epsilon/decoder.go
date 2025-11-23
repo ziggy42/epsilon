@@ -120,7 +120,22 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		}
 		return append(vector, immediate), nil
 	case CallIndirect,
-		I32Load,
+		MemoryInit,
+		MemoryCopy,
+		TableInit,
+		TableCopy:
+		immediate1, err := d.readUleb128()
+		if err != nil {
+			return nil, err
+		}
+		immediate2, err := d.readUleb128()
+		if err != nil {
+			return nil, err
+		}
+		immediatesBuffer[0] = immediate1
+		immediatesBuffer[1] = immediate2
+		return immediatesBuffer[:2], nil
+	case I32Load,
 		I64Load,
 		F32Load,
 		F64Load,
@@ -143,10 +158,6 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		I64Store8,
 		I64Store16,
 		I64Store32,
-		MemoryInit,
-		MemoryCopy,
-		TableInit,
-		TableCopy,
 		V128Load,
 		V128Load32Zero,
 		V128Load64Zero,
@@ -161,17 +172,15 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		V128Load32x2S,
 		V128Load32x2U,
 		V128Store:
-		immediate1, err := d.readUleb128()
+		align, memoryIndex, offset, err := d.readMemArg()
 		if err != nil {
 			return nil, err
 		}
-		immediate2, err := d.readUleb128()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate1
-		immediatesBuffer[1] = immediate2
-		return immediatesBuffer[:2], nil
+
+		immediatesBuffer[0] = align
+		immediatesBuffer[1] = memoryIndex
+		immediatesBuffer[2] = offset
+		return immediatesBuffer[:3], nil
 	case SelectT:
 		return d.readImmediateVector()
 	case I64Const:
@@ -212,22 +221,20 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		V128Store16Lane,
 		V128Store32Lane,
 		V128Store64Lane:
-		immediate1, err := d.readUleb128()
+		align, memoryIndex, offset, err := d.readMemArg()
 		if err != nil {
 			return nil, err
 		}
-		immediate2, err := d.readUleb128()
+
+		laneIndex, err := d.readUleb128()
 		if err != nil {
 			return nil, err
 		}
-		immediate3, err := d.readUleb128()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate1
-		immediatesBuffer[1] = immediate2
-		immediatesBuffer[2] = immediate3
-		return immediatesBuffer[:3], nil
+		immediatesBuffer[0] = align
+		immediatesBuffer[1] = memoryIndex
+		immediatesBuffer[2] = offset
+		immediatesBuffer[3] = laneIndex
+		return immediatesBuffer[:4], nil
 	case I8x16Shuffle:
 		for i := range 16 {
 			val, err := d.readUleb128()
@@ -313,6 +320,30 @@ func (d *Decoder) readFloat64() (uint64, error) {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(bytes), nil
+}
+
+func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
+	align, err := d.readUleb128()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	memoryIndex := uint64(0)
+	// If bit 6 is set, this instruction is using an explicit memory index.
+	// This is relevant in WASM 3.
+	if align&(1<<6) != 0 {
+		memoryIndex, err = d.readUleb128()
+		if err != nil {
+			return 0, 0, 0, err
+		}
+	}
+
+	offset, err := d.readUleb128()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	return align, memoryIndex, offset, nil
 }
 
 // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).

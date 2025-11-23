@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"epsilon/wabt"
@@ -807,4 +808,154 @@ func TestGlobalGet(t *testing.T) {
 	if result[0] != expected {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
+}
+
+func TestInstantiateMultipleMemories(t *testing.T) {
+	wat := `(module
+		(memory $mem0 (export "mem0") 1)
+		(memory $mem1 (export "mem1") 1)
+
+		(data (memory $mem0) (i32.const 0) "hello")
+		(data (memory $mem1) (i32.const 0) "world")
+	)`
+
+	_, moduleInstance, err := initVm(wat)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	checkMemory := func(exportName, expectedValue string) {
+		t.Helper()
+
+		mem, err := getExportedMemory(moduleInstance, exportName)
+		if err != nil {
+			t.Fatalf("failed to get %s: %v", exportName, err)
+		}
+
+		data, err := mem.Get(0, 0, uint32(len(expectedValue)))
+		if err != nil {
+			t.Fatalf("failed to read %s: %v", exportName, err)
+		}
+
+		if got := string(data); got != expectedValue {
+			t.Errorf("%s: expected %q, got %q", exportName, expectedValue, got)
+		}
+	}
+
+	checkMemory("mem0", "hello")
+	checkMemory("mem1", "world")
+}
+
+func TestStoreLoadMultipleMemories(t *testing.T) {
+	wat := `(module
+		(memory $mem0 (export "mem0") 1)
+		(memory $mem1 (export "mem1") 1)
+
+		(data (memory $mem0) (i32.const 0) "hello")
+
+		;; Loads from mem0 the value at index $idx, stores it in mem1 at index 0,
+		;; loads the value back from mem1.
+		(func (export "test") (param $idx i32) (result i32)
+			i32.const 0
+			local.get $idx
+			i32.load8_u $mem0
+			i32.store8 $mem1
+			i32.const 0
+			i32.load8_u $mem1
+		)
+	)`
+	vm, moduleInstance, err := initVm(wat)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := vm.Invoke(moduleInstance, "test", int32(2))
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	if got := result[0]; got != int32('l') {
+		t.Fatalf("expected %d, got %d", int32('l'), got)
+	}
+}
+
+func TestV128StoreLoadMultipleMemories(t *testing.T) {
+	wat := `(module
+		(memory $mem0 (export "mem0") 1)
+		(memory $mem1 (export "mem1") 1)
+
+		(data (memory $mem0) (i32.const 0) "hello")
+
+		;; Loads from mem0 using v128.load8_lane, stores to mem1 using 
+		;; v128.store8_lane, then loads back using v128.load8_lane to return the 
+		;; result.
+		(func (export "test") (param $idx i32) (result i32)
+			i32.const 0
+			local.get $idx
+			v128.const i64x2 0 0
+			v128.load8_lane $mem0 0
+			v128.store8_lane $mem1 0
+			i32.const 0
+			v128.const i64x2 0 0
+			v128.load8_lane $mem1 0
+			i32x4.extract_lane 0
+		)
+	)`
+
+	vm, moduleInstance, err := initVm(wat)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := vm.Invoke(moduleInstance, "test", int32(2))
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	if got := result[0]; got != int32('l') {
+		t.Fatalf("expected %d, got %d", int32('l'), got)
+	}
+}
+
+func TestMemoryInitCopyMultipleMemories(t *testing.T) {
+	wat := `(module
+		(memory $mem0 1)
+		(memory $mem1 1)
+		(memory $mem2 1)
+		(data $d0 "\2a\00\00\00")
+		(func (export "test") (result i32)
+			i32.const 0
+			i32.const 0
+			i32.const 4
+			memory.init $mem1 $d0
+			i32.const 0
+			i32.const 0
+			i32.const 4
+			memory.copy $mem2 $mem1
+			i32.const 0
+			i32.load $mem2
+		)
+	)`
+	vm, moduleInstance, err := initVm(wat)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := vm.Invoke(moduleInstance, "test")
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	if got := result[0]; got != int32(0x2a) {
+		t.Fatalf("expected %d, got %d", 0x2a, got)
+	}
+}
+
+func getExportedMemory(module *ModuleInstance, name string) (*Memory, error) {
+	for _, export := range module.Exports {
+		if export.Name == name {
+			return export.Value.(*Memory), nil
+		}
+	}
+	return nil, fmt.Errorf("Memory %s not found", name)
 }
