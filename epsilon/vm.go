@@ -27,7 +27,6 @@ var (
 	errReturn = errors.New("return instruction")
 )
 
-const defaultMemoryIndex = 0
 const maxCallStackDepth = 1000
 
 type CallFrame struct {
@@ -317,51 +316,51 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableSet:
 		return vm.handleTableSet(instruction)
 	case I32Load:
-		return handleLoad(vm, instruction, Int32From4Bytes, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, Int32From4Bytes, 32)
 	case I64Load:
-		return handleLoad(vm, instruction, Int64From8Bytes, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, Int64From8Bytes, 64)
 	case F32Load:
-		return handleLoad(vm, instruction, Float32From4Bytes, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, Float32From4Bytes, 32)
 	case F64Load:
-		return handleLoad(vm, instruction, Float64From8Bytes, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, Float64From8Bytes, 64)
 	case I32Load8S:
-		return handleLoad(vm, instruction, IntFrom1Byte[int32], defaultMemoryIndex, 8)
+		return handleLoad(vm, instruction, IntFrom1Byte[int32], 8)
 	case I32Load8U:
-		return handleLoad(vm, instruction, UintFrom1Byte[int32], defaultMemoryIndex, 8)
+		return handleLoad(vm, instruction, UintFrom1Byte[int32], 8)
 	case I32Load16S:
-		return handleLoad(vm, instruction, IntFrom2Bytes[int32], defaultMemoryIndex, 16)
+		return handleLoad(vm, instruction, IntFrom2Bytes[int32], 16)
 	case I32Load16U:
-		return handleLoad(vm, instruction, UintFrom2Bytes[int32], defaultMemoryIndex, 16)
+		return handleLoad(vm, instruction, UintFrom2Bytes[int32], 16)
 	case I64Load8S:
-		return handleLoad(vm, instruction, IntFrom1Byte[int64], defaultMemoryIndex, 8)
+		return handleLoad(vm, instruction, IntFrom1Byte[int64], 8)
 	case I64Load8U:
-		return handleLoad(vm, instruction, UintFrom1Byte[int64], defaultMemoryIndex, 8)
+		return handleLoad(vm, instruction, UintFrom1Byte[int64], 8)
 	case I64Load16S:
-		return handleLoad(vm, instruction, IntFrom2Bytes[int64], defaultMemoryIndex, 16)
+		return handleLoad(vm, instruction, IntFrom2Bytes[int64], 16)
 	case I64Load16U:
-		return handleLoad(vm, instruction, UintFrom2Bytes[int64], defaultMemoryIndex, 16)
+		return handleLoad(vm, instruction, UintFrom2Bytes[int64], 16)
 	case I64Load32S:
-		return handleLoad(vm, instruction, Int64From4Bytes, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, Int64From4Bytes, 32)
 	case I64Load32U:
-		return handleLoad(vm, instruction, Uint64From4Bytes, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, Uint64From4Bytes, 32)
 	case I32Store:
-		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, defaultMemoryIndex, 32)
+		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 32)
 	case I64Store:
-		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, defaultMemoryIndex, 64)
+		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 64)
 	case F32Store:
-		return handleStore(vm, instruction, vm.stack.PopFloat32, BytesFromFloat32, defaultMemoryIndex, 32)
+		return handleStore(vm, instruction, vm.stack.PopFloat32, BytesFromFloat32, 32)
 	case F64Store:
-		return handleStore(vm, instruction, vm.stack.PopFloat64, BytesFromFloat64, defaultMemoryIndex, 64)
+		return handleStore(vm, instruction, vm.stack.PopFloat64, BytesFromFloat64, 64)
 	case I32Store8:
-		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, defaultMemoryIndex, 8)
+		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 8)
 	case I32Store16:
-		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, defaultMemoryIndex, 16)
+		return handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 16)
 	case I64Store8:
-		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, defaultMemoryIndex, 8)
+		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 8)
 	case I64Store16:
-		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, defaultMemoryIndex, 16)
+		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 16)
 	case I64Store32:
-		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, defaultMemoryIndex, 32)
+		return handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 32)
 	case MemorySize:
 		return vm.handleMemorySize(instruction)
 	case MemoryGrow:
@@ -673,29 +672,29 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableFill:
 		return vm.handleTableFill(instruction)
 	case V128Load:
-		return handleLoad(vm, instruction, NewV128ValueFromSlice, defaultMemoryIndex, 128)
+		return handleLoad(vm, instruction, NewV128ValueFromSlice, 128)
 	case V128Load8x8S:
-		return handleLoad(vm, instruction, SimdV128Load8x8S, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load8x8S, 64)
 	case V128Load8x8U:
-		return handleLoad(vm, instruction, SimdV128Load8x8U, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load8x8U, 64)
 	case V128Load16x4S:
-		return handleLoad(vm, instruction, SimdV128Load16x4S, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load16x4S, 64)
 	case V128Load16x4U:
-		return handleLoad(vm, instruction, SimdV128Load16x4U, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load16x4U, 64)
 	case V128Load32x2S:
-		return handleLoad(vm, instruction, SimdV128Load32x2S, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load32x2S, 64)
 	case V128Load32x2U:
-		return handleLoad(vm, instruction, SimdV128Load32x2U, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load32x2U, 64)
 	case V128Load8Splat:
-		return handleLoad(vm, instruction, SimdI8x16SplatFromBytes, defaultMemoryIndex, 8)
+		return handleLoad(vm, instruction, SimdI8x16SplatFromBytes, 8)
 	case V128Load16Splat:
-		return handleLoad(vm, instruction, SimdI16x8SplatFromBytes, defaultMemoryIndex, 16)
+		return handleLoad(vm, instruction, SimdI16x8SplatFromBytes, 16)
 	case V128Load32Splat:
-		return handleLoad(vm, instruction, SimdI32x4SplatFromBytes, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, SimdI32x4SplatFromBytes, 32)
 	case V128Load64Splat:
-		return handleLoad(vm, instruction, SimdI64x2SplatFromBytes, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdI64x2SplatFromBytes, 64)
 	case V128Store:
-		return handleStore(vm, instruction, vm.stack.PopV128, GetBytes, defaultMemoryIndex, 128)
+		return handleStore(vm, instruction, vm.stack.PopV128, GetBytes, 128)
 	case V128Const:
 		return vm.handleSimdConst(instruction)
 	case I8x16Shuffle:
@@ -841,25 +840,25 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case V128AnyTrue:
 		return handleUnaryBool(vm, vm.stack.PopV128, SimdV128AnyTrue)
 	case V128Load8Lane:
-		return vm.handleSimdLoadLane(instruction, defaultMemoryIndex, 8)
+		return vm.handleSimdLoadLane(instruction, 8)
 	case V128Load16Lane:
-		return vm.handleSimdLoadLane(instruction, defaultMemoryIndex, 16)
+		return vm.handleSimdLoadLane(instruction, 16)
 	case V128Load32Lane:
-		return vm.handleSimdLoadLane(instruction, defaultMemoryIndex, 32)
+		return vm.handleSimdLoadLane(instruction, 32)
 	case V128Load64Lane:
-		return vm.handleSimdLoadLane(instruction, defaultMemoryIndex, 64)
+		return vm.handleSimdLoadLane(instruction, 64)
 	case V128Store8Lane:
-		return vm.handleSimdStoreLane(instruction, defaultMemoryIndex, 8)
+		return vm.handleSimdStoreLane(instruction, 8)
 	case V128Store16Lane:
-		return vm.handleSimdStoreLane(instruction, defaultMemoryIndex, 16)
+		return vm.handleSimdStoreLane(instruction, 16)
 	case V128Store32Lane:
-		return vm.handleSimdStoreLane(instruction, defaultMemoryIndex, 32)
+		return vm.handleSimdStoreLane(instruction, 32)
 	case V128Store64Lane:
-		return vm.handleSimdStoreLane(instruction, defaultMemoryIndex, 64)
+		return vm.handleSimdStoreLane(instruction, 64)
 	case V128Load32Zero:
-		return handleLoad(vm, instruction, SimdV128Load32Zero, defaultMemoryIndex, 32)
+		return handleLoad(vm, instruction, SimdV128Load32Zero, 32)
 	case V128Load64Zero:
-		return handleLoad(vm, instruction, SimdV128Load64Zero, defaultMemoryIndex, 64)
+		return handleLoad(vm, instruction, SimdV128Load64Zero, 64)
 	case F32x4DemoteF64x2Zero:
 		return handleUnary(vm, vm.stack.PopV128, SimdF32x4DemoteF64x2Zero)
 	case F64x2PromoteLowF32x4:
@@ -1535,8 +1534,8 @@ func (vm *VM) handleDataDrop(instruction Instruction) error {
 }
 
 func (vm *VM) handleMemoryCopy(instruction Instruction) error {
-	srcMemory := vm.getMemory(uint32(instruction.Immediates[0]))
-	destMemory := vm.getMemory(uint32(instruction.Immediates[1]))
+	destMemory := vm.getMemory(uint32(instruction.Immediates[0]))
+	srcMemory := vm.getMemory(uint32(instruction.Immediates[1]))
 	n, s, d, err := vm.stack.Pop3Int32()
 	if err != nil {
 		return err
@@ -1795,10 +1794,10 @@ func handleStore[T WasmNumber | V128Value](
 	vm *VM,
 	instruction Instruction,
 	pop func() (T, error), toBytes func(T) []byte,
-	memoryIndex, explicitSize uint32,
+	explicitSize uint32,
 ) error {
-	offset := uint32(instruction.Immediates[1])
-	memory := vm.getMemory(memoryIndex)
+	memory := vm.getMemory(uint32(instruction.Immediates[1]))
+	offset := uint32(instruction.Immediates[2])
 	value, err := pop()
 	if err != nil {
 		return err
@@ -1818,10 +1817,10 @@ func handleLoad[T WasmNumber | V128Value](
 	vm *VM,
 	instruction Instruction,
 	fromBytes func(bytes []byte) T,
-	memoryIndex, explicitSize uint32,
+	explicitSize uint32,
 ) error {
-	offset := uint32(instruction.Immediates[1])
-	memory := vm.getMemory(memoryIndex)
+	memory := vm.getMemory(uint32(instruction.Immediates[1]))
+	offset := uint32(instruction.Immediates[2])
 	index, err := vm.stack.PopInt32()
 	if err != nil {
 		return err
@@ -1844,11 +1843,11 @@ func (vm *VM) handleSimdConst(instruction Instruction) error {
 
 func (vm *VM) handleSimdLoadLane(
 	instruction Instruction,
-	memoryIndex, laneSize uint32,
+	laneSize uint32,
 ) error {
-	offset := uint32(instruction.Immediates[1])
-	laneIndex := uint32(instruction.Immediates[2])
-	memory := vm.getMemory(memoryIndex)
+	offset := uint32(instruction.Immediates[2])
+	laneIndex := uint32(instruction.Immediates[3])
+	memory := vm.getMemory(uint32(instruction.Immediates[1]))
 	v, err := vm.stack.PopV128()
 	if err != nil {
 		return err
@@ -1872,11 +1871,11 @@ func (vm *VM) handleSimdLoadLane(
 
 func (vm *VM) handleSimdStoreLane(
 	instruction Instruction,
-	memoryIndex, laneSize uint32,
+	laneSize uint32,
 ) error {
-	offset := uint32(instruction.Immediates[1])
-	laneIndex := uint32(instruction.Immediates[2])
-	memory := vm.getMemory(memoryIndex)
+	offset := uint32(instruction.Immediates[2])
+	laneIndex := uint32(instruction.Immediates[3])
+	memory := vm.getMemory(uint32(instruction.Immediates[1]))
 	v, err := vm.stack.PopV128()
 	if err != nil {
 		return err
