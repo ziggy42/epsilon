@@ -109,10 +109,6 @@ func (vm *VM) Instantiate(
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
-	if err := vm.initActiveElements(module, moduleInstance); err != nil {
-		return nil, err
-	}
-
 	for _, memory := range memories {
 		storeIndex := uint32(len(vm.store.memories))
 		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
@@ -130,10 +126,6 @@ func (vm *VM) Instantiate(
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, global)
-	}
-
-	if err := vm.initActiveDatas(module, moduleInstance); err != nil {
-		return nil, err
 	}
 
 	for _, global := range module.GlobalVariables {
@@ -166,6 +158,14 @@ func (vm *VM) Instantiate(
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.DataAddrs = append(moduleInstance.DataAddrs, storeIndex)
 		vm.store.datas = append(vm.store.datas, data)
+	}
+
+	if err := vm.initActiveElements(module, moduleInstance); err != nil {
+		return nil, err
+	}
+
+	if err := vm.initActiveDatas(module, moduleInstance); err != nil {
+		return nil, err
 	}
 
 	if module.StartIndex != nil {
@@ -2010,14 +2010,38 @@ func (vm *VM) initActiveElements(
 		}
 
 		table := vm.store.tables[storeTableIndex]
-		funcIndexes := activeElem.FuncIndexes
-		storeIndexes, err := toStoreFuncIndexes(moduleInstance, funcIndexes)
-		if err != nil {
-			return err
+		if offset > int32(table.Size()) {
+			return ErrTableOutOfBounds
 		}
 
-		if err := table.InitFromSlice(offset, storeIndexes); err != nil {
-			return err
+		if len(activeElem.FuncIndexes) > 0 {
+			indexes, err := toStoreFuncIndexes(moduleInstance, activeElem.FuncIndexes)
+			if err != nil {
+				return err
+			}
+			if err := table.InitFromSlice(offset, indexes); err != nil {
+				return err
+			}
+		}
+
+		if len(activeElem.FuncIndexesExpressions) > 0 {
+			values := make([]any, len(activeElem.FuncIndexesExpressions))
+			for i, expr := range activeElem.FuncIndexesExpressions {
+				refAny, err := vm.invokeInitExpression(
+					expr,
+					activeElem.Kind,
+					moduleInstance,
+				)
+				if err != nil {
+					return err
+				}
+				// Note that this reference might be nil.
+				values[i] = refAny
+			}
+
+			if err := table.InitFromAnySlice(offset, values); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -2175,7 +2199,7 @@ func (vm *VM) invokeHostFunction(fun *HostFunc) (res []any, err error) {
 
 func (vm *VM) invokeInitExpression(
 	expression []byte,
-	valueType ValueType,
+	resultType ValueType,
 	moduleInstance *ModuleInstance,
 ) (any, error) {
 	// We create a fake function to execute the expression.
@@ -2183,7 +2207,7 @@ func (vm *VM) invokeInitExpression(
 	function := WasmFunc{
 		Type: FunctionType{
 			ParamTypes:  []ValueType{},
-			ResultTypes: []ValueType{valueType},
+			ResultTypes: []ValueType{resultType},
 		},
 		Code:   Function{Body: expression},
 		Module: moduleInstance,

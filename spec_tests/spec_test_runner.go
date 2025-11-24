@@ -94,6 +94,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
 
 func (r *SpecTestRunner) run(commands []wabt.Command) {
 	for _, cmd := range commands {
+		r.t.Logf("Line %d: executing command type: %s", cmd.Line, cmd.Type)
 		switch cmd.Type {
 		case "module":
 			r.handleModule(cmd)
@@ -202,9 +203,30 @@ func (r *SpecTestRunner) handleAssertReturn(cmd wabt.Command) {
 }
 
 func (r *SpecTestRunner) handleAssertTrap(cmd wabt.Command) {
-	_, err := r.handleAction(cmd.Action)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected trap, but got no error")
+	if cmd.Filename != "" {
+		// This is asserting that instantiating a module will trap.
+		wasmBytes, ok := r.wasmDict[cmd.Filename]
+		if !ok {
+			r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
+		}
+
+		parser := epsilon.NewParser(bytes.NewReader(wasmBytes))
+		module, err := parser.Parse()
+		if err != nil {
+			// A parsing error is a valid form of trap.
+			return
+		}
+
+		_, err = r.vm.Instantiate(module, r.buildImports())
+		if err == nil {
+			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
+		}
+	} else {
+		// This is asserting that a function call will trap.
+		_, err := r.handleAction(cmd.Action)
+		if err == nil {
+			r.fatalf(cmd.Line, "expected trap, but got no error")
+		}
 	}
 }
 

@@ -51,9 +51,7 @@ func testSpec(t *testing.T, dirPath string, excluded []string) {
 }
 
 func TestCoreSpec(t *testing.T) {
-	// "elem.wast" seems to be broken due to wast2wasm.
-	excludedTests := []string{"elem.wast"}
-	testSpec(t, "../spec/test/core", excludedTests)
+	testSpec(t, "../spec/test/core", []string{})
 }
 
 func TestSimdSpec(t *testing.T) {
