@@ -18,12 +18,11 @@ import (
 	"epsilon/wabt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
 
-func testSpec(t *testing.T, dirPath string, excluded []string) {
+func testSpec(t *testing.T, dirPath string) {
 	files, err := os.ReadDir(dirPath)
 	if err != nil {
 		t.Fatalf("failed to read wast directory: %v", err)
@@ -31,10 +30,6 @@ func testSpec(t *testing.T, dirPath string, excluded []string) {
 
 	for _, file := range files {
 		if !strings.HasSuffix(file.Name(), ".wast") {
-			continue
-		}
-
-		if slices.Contains(excluded, file.Name()) {
 			continue
 		}
 
@@ -51,9 +46,9 @@ func testSpec(t *testing.T, dirPath string, excluded []string) {
 }
 
 func TestCoreSpec(t *testing.T) {
-	testSpec(t, "../spec/test/core", []string{})
+	testSpec(t, "../spec/test/core")
 }
 
 func TestSimdSpec(t *testing.T) {
-	testSpec(t, "../spec/test/core/simd", []string{"simd_f64x2_arith.wast"})
+	testSpec(t, "../spec/test/core/simd")
 }

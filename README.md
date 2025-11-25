@@ -7,15 +7,13 @@ with zero runtime dependencies.
 
 ## Features
 
-- **Full WebAssembly 2.0 support*** — Implements the complete spec including
+* **Full WebAssembly 2.0 support**: Implements the complete spec including
 SIMD, bulk memory operations, and reference types
-- **Zero dependencies** — Pure Go implementation with no external runtime
+* **Zero dependencies**: Pure Go implementation with no external runtime
 dependencies
-- **Spec-compliant*** — Passes the official WebAssembly test suite
-- **Interactive REPL** — Experiment with WASM modules directly from the command
+* **Spec-compliant**: Passes the official WebAssembly test suite
+* **Interactive REPL**: Experiment with WASM modules directly from the command
 line
-
-\* See [Spec Deviations](#spec-deviations) for minor implementation differences.
 
 ## Usage
 
@@ -97,19 +95,6 @@ go test ./spec_tests/...
 ```bash
 go test -bench . ./benchmarks
 ```
-
-## Spec Deviations
-
-This implementation deviates from the WASM specification in the following ways:
-
-- **NaN Payloads**: The spec defines precise rules for managing NaN payloads
-(the specific bit pattern within a NaN), including propagating them from inputs
-or using a "canonical" form. This implementation uses Go's default NaN behavior
-without inspecting or manipulating payloads.
-
-- **NaN Sign**: The spec requires a non-deterministic sign for resulting NaNs.
-This implementation produces a deterministic sign based on the operation and
-underlying hardware.
 
 ## Contributing
 

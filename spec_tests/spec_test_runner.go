@@ -180,25 +180,17 @@ func (r *SpecTestRunner) handleAssertReturn(cmd wabt.Command) {
 		r.fatalf(cmd.Line, "action failed unexpectedly: %v", err)
 	}
 
-	expected := make([]any, len(cmd.Expected))
-	for i, v := range cmd.Expected {
-		expected[i], err = valueToGolang(v)
-		if err != nil {
-			r.fatalf(cmd.Line, "failed to convert expected value: %v", err)
-		}
-	}
-
-	if len(actual) != len(expected) {
+	if len(actual) != len(cmd.Expected) {
 		r.fatalf(
 			cmd.Line,
 			"expected %d results, got %d",
-			len(expected),
+			len(cmd.Expected),
 			len(actual),
 		)
 	}
 
 	for i := range actual {
-		r.assertValuesEqual(cmd.Line, expected[i], actual[i])
+		r.assertValuesEqual(cmd.Line, cmd.Expected[i], actual[i])
 	}
 }
 
@@ -271,34 +263,17 @@ func (r *SpecTestRunner) handleAction(action *wabt.Action) ([]any, error) {
 	}
 }
 
-func (r *SpecTestRunner) assertValuesEqual(line int, expected, actual any) {
-	r.t.Helper()
-	// Special case for NaN, as NaN != NaN
-	if f32, ok := expected.(float32); ok && math.IsNaN(float64(f32)) {
-		if !math.IsNaN(float64(actual.(float32))) {
-			r.fatalf(line, "expected NaN, got %v", actual)
-		}
-		return
-	}
-	if f64, ok := expected.(float64); ok && math.IsNaN(f64) {
-		if !math.IsNaN(actual.(float64)) {
-			r.fatalf(line, "expected NaN, got %v", actual)
-		}
-		return
+func (r *SpecTestRunner) assertValuesEqual(
+	line int,
+	expectedVal wabt.Value,
+	actual any,
+) {
+	expected, err := valueToGolang(expectedVal)
+	if err != nil {
+		r.fatalf(line, "failed to convert expected value: %v", err)
 	}
 
-	if v128, ok := expected.(epsilon.V128Value); ok {
-		actualV128, ok := actual.(epsilon.V128Value)
-		if !ok {
-			r.fatalf(line, "mismatch: expected V128, got %T", actual)
-		}
-		if v128 != actualV128 {
-			r.fatalf(line, "mismatch: expected %v, got %v", v128, actualV128)
-		}
-		return
-	}
-
-	if expected != actual {
+	if !areEqual(expected, actual, expectedVal.LaneType) {
 		r.fatalf(
 			line,
 			"mismatch: expected %v (%T), got %v (%T)",
@@ -308,6 +283,55 @@ func (r *SpecTestRunner) assertValuesEqual(line int, expected, actual any) {
 			actual,
 		)
 	}
+}
+
+func areEqual(expected, actual any, laneType string) bool {
+	switch exp := expected.(type) {
+	case float32:
+		return floatsEqual(exp, actual.(float32))
+	case float64:
+		return floatsEqual(exp, actual.(float64))
+	case epsilon.V128Value:
+		act, ok := actual.(epsilon.V128Value)
+		if !ok {
+			return false
+		}
+		return v128Equal(exp, act, laneType)
+	default:
+		return expected == actual
+	}
+}
+
+func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
+	switch laneType {
+	case "f32":
+		for i := range uint32(4) {
+			expLane, _ := epsilon.SimdF32x4ExtractLane(expected, i)
+			actLane, _ := epsilon.SimdF32x4ExtractLane(actual, i)
+			if !floatsEqual(expLane, actLane) {
+				return false
+			}
+		}
+		return true
+	case "f64":
+		for i := range uint32(2) {
+			expLane, _ := epsilon.SimdF64x2ExtractLane(expected, i)
+			actLane, _ := epsilon.SimdF64x2ExtractLane(actual, i)
+			if !floatsEqual(expLane, actLane) {
+				return false
+			}
+		}
+		return true
+	default:
+		return expected == actual
+	}
+}
+
+func floatsEqual[T float32 | float64](expected, actual T) bool {
+	if math.IsNaN(float64(expected)) {
+		return math.IsNaN(float64(actual))
+	}
+	return expected == actual
 }
 
 func (r *SpecTestRunner) getModuleInstance(
@@ -407,8 +431,15 @@ func parseScalar(value string, valueType string) (any, error) {
 }
 
 func parseF32(s string) (float32, error) {
-	if strings.HasPrefix(s, "nan:") {
-		return float32(math.NaN()), nil
+	if pattern, ok := strings.CutPrefix(s, "nan:"); ok {
+		switch pattern {
+		case "canonical":
+			return math.Float32frombits(0x7ff80000), nil
+		case "arithmetic":
+			return math.Float32frombits(0x7ff80001), nil
+		default:
+			return 0, fmt.Errorf("unknown NaN pattern: %s", s)
+		}
 	}
 	val, err := strconv.ParseUint(s, 10, 32)
 	if err != nil {
@@ -418,8 +449,15 @@ func parseF32(s string) (float32, error) {
 }
 
 func parseF64(s string) (float64, error) {
-	if strings.HasPrefix(s, "nan:") {
-		return math.NaN(), nil
+	if pattern, ok := strings.CutPrefix(s, "nan:"); ok {
+		switch pattern {
+		case "canonical":
+			return math.Float64frombits(0x7ff8000000000000), nil
+		case "arithmetic":
+			return math.Float64frombits(0x7ff8000000000001), nil
+		default:
+			return 0, fmt.Errorf("unknown NaN pattern: %s", s)
+		}
 	}
 	val, err := strconv.ParseUint(s, 10, 64)
 	if err != nil {
