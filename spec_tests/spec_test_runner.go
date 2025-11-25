@@ -331,94 +331,79 @@ func (r *SpecTestRunner) fatalf(line int, format string, args ...any) {
 	r.t.Fatalf("line %d: %s", line, fmt.Sprintf(format, args...))
 }
 
-func v128ToGolang(v wabt.Value) (any, error) {
+func valueToGolang(v wabt.Value) (any, error) {
+	if v.Type == "v128" {
+		return parseV128(v)
+	}
+
+	s, ok := v.Value.(string)
+	if !ok {
+		return nil, fmt.Errorf("val for type %s not a string: %T", v.Type, v.Value)
+	}
+
+	return parseScalar(s, v.Type)
+}
+
+func parseV128(v wabt.Value) (any, error) {
 	lanes, ok := v.Value.([]any)
 	if !ok {
 		return nil, fmt.Errorf("v128 value is not an array: %T", v.Value)
 	}
 
 	buf := new(bytes.Buffer)
-	switch v.LaneType {
-	case "i8":
-		if len(lanes) != 16 {
-			return nil, fmt.Errorf("i8x16 requires 16 lanes, got %d", len(lanes))
+	for _, lane := range lanes {
+		lane, err := parseScalar(lane.(string), v.LaneType)
+		if err != nil {
+			return nil, err
 		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			u, err := strconv.ParseUint(s, 10, 8)
-			if err != nil {
-				return nil, err
-			}
-			buf.WriteByte(byte(u))
-		}
-	case "i16":
-		if len(lanes) != 8 {
-			return nil, fmt.Errorf("i16x8 requires 8 lanes, got %d", len(lanes))
-		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			u, err := strconv.ParseUint(s, 10, 16)
-			if err != nil {
-				return nil, err
-			}
-			binary.Write(buf, binary.LittleEndian, uint16(u))
-		}
-	case "i32":
-		if len(lanes) != 4 {
-			return nil, fmt.Errorf("i32x4 requires 4 lanes, got %d", len(lanes))
-		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			u, err := strconv.ParseUint(s, 10, 32)
-			if err != nil {
-				return nil, err
-			}
-			binary.Write(buf, binary.LittleEndian, uint32(u))
-		}
-	case "i64":
-		if len(lanes) != 2 {
-			return nil, fmt.Errorf("i64x2 requires 2 lanes, got %d", len(lanes))
-		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			u, err := strconv.ParseUint(s, 10, 64)
-			if err != nil {
-				return nil, err
-			}
-			binary.Write(buf, binary.LittleEndian, u)
-		}
-	case "f32":
-		if len(lanes) != 4 {
-			return nil, fmt.Errorf("f32x4 requires 4 lanes, got %d", len(lanes))
-		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			val, err := parseF32(s)
-			if err != nil {
-				return nil, err
-			}
-			binary.Write(buf, binary.LittleEndian, val)
-		}
-	case "f64":
-		if len(lanes) != 2 {
-			return nil, fmt.Errorf("f64x2 requires 2 lanes, got %d", len(lanes))
-		}
-		for _, lane := range lanes {
-			s, _ := lane.(string)
-			val, err := parseF64(s)
-			if err != nil {
-				return nil, err
-			}
-			binary.Write(buf, binary.LittleEndian, val)
-		}
-	default:
-		return nil, fmt.Errorf("unsupported v128 lane type: %s", v.LaneType)
+		binary.Write(buf, binary.LittleEndian, lane)
 	}
 
-	var v128 epsilon.V128Value
-	v128.Low = binary.LittleEndian.Uint64(buf.Bytes()[0:8])
-	v128.High = binary.LittleEndian.Uint64(buf.Bytes()[8:16])
-	return v128, nil
+	return epsilon.NewV128ValueFromSlice(buf.Bytes()), nil
+}
+
+func parseScalar(value string, valueType string) (any, error) {
+	switch valueType {
+	case "i8":
+		val, err := strconv.ParseUint(value, 10, 8)
+		if err != nil {
+			return nil, err
+		}
+		return int8(val), nil
+	case "i16":
+		val, err := strconv.ParseUint(value, 10, 16)
+		if err != nil {
+			return nil, err
+		}
+		return int16(val), nil
+	case "i32":
+		val, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		return int32(val), nil
+	case "i64":
+		val, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return int64(val), nil
+	case "f32":
+		return parseF32(value)
+	case "f64":
+		return parseF64(value)
+	case "externref", "funcref":
+		if value == "null" {
+			return epsilon.NullVal, nil
+		}
+		val, err := strconv.ParseUint(value, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		return int32(val), nil
+	default:
+		return nil, fmt.Errorf("unsupported value type: %s", valueType)
+	}
 }
 
 func parseF32(s string) (float32, error) {
@@ -441,45 +426,4 @@ func parseF64(s string) (float64, error) {
 		return 0, err
 	}
 	return math.Float64frombits(val), nil
-}
-
-func valueToGolang(v wabt.Value) (any, error) {
-	if v.Type == "v128" {
-		return v128ToGolang(v)
-	}
-
-	s, ok := v.Value.(string)
-	if !ok {
-		return nil, fmt.Errorf("value for type %s is not a string: %T", v.Type, v.Value)
-	}
-
-	switch v.Type {
-	case "i32":
-		val, err := strconv.ParseUint(s, 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		return int32(val), nil
-	case "i64":
-		val, err := strconv.ParseUint(s, 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		return int64(val), nil
-	case "f32":
-		return parseF32(s)
-	case "f64":
-		return parseF64(s)
-	case "externref", "funcref":
-		if s == "null" {
-			return epsilon.NullVal, nil
-		}
-		val, err := strconv.ParseUint(s, 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		return int32(val), nil
-	default:
-		return nil, fmt.Errorf("unsupported value type: %s", v.Type)
-	}
 }
