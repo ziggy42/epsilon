@@ -3,17 +3,7 @@
 A WebAssembly virtual machine written in Go.
 
 Implements the [WebAssembly 2.0 specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
-with zero runtime dependencies.
-
-## Features
-
-* **Full WebAssembly 2.0 support**: Implements the complete spec including
-SIMD, bulk memory operations, and reference types
-* **Zero dependencies**: Pure Go implementation with no external runtime
-dependencies
-* **Spec-compliant**: Passes the official WebAssembly test suite
-* **Interactive REPL**: Experiment with WASM modules directly from the command
-line
+with no runtime dependencies.
 
 ## Usage
 
