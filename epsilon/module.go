@@ -160,56 +160,36 @@ type MemoryType struct {
 	Limits Limits
 }
 
-// Element is an interface representing any type of element segment.
-// In the WebAssembly specification, this can be an active, passive, or
-// declarative element.
-// See https://webassembly.github.io/spec/core/syntax/modules.html#syntax-elem
-type Element interface {
-	isElement()
-}
+// ElementMode specifies how an element segment should be handled.
+type ElementMode int
 
-// ElementData holds the common fields for all element segment types.
-// It is embedded into ActiveElement, PassiveElement, and DeclarativeElement.
-type ElementData struct {
-	// Kind specifies the type of references in the element segment.
-	// Defaults to FuncRef.
+const (
+	ActiveElementMode ElementMode = iota
+	PassiveElementMode
+	DeclarativeElementMode
+)
+
+// ElementSegment represents an element segment in a WebAssembly module.
+// See https://webassembly.github.io/spec/core/syntax/modules.html#syntax-elem
+type ElementSegment struct {
+	Mode ElementMode
 	Kind ReferenceType
 
-	// FuncIndexes is a list of function indices.
-	// This field is used when FuncIndexesExpressions is empty.
+	// FuncIndexes is a list of function indices. Used when FuncIndexesExpressions
+	// is empty.
 	FuncIndexes []int32
 
 	// FuncIndexesExpressions is a list of constant expressions that produce
-	// function references. This field is used when FuncIndexes is empty.
+	// function references. Used when FuncIndexes is empty.
 	FuncIndexesExpressions [][]byte
-}
 
-// isElement is a marker method to satisfy the Element interface.
-func (ElementData) isElement() {}
-
-// ActiveElement represents an element segment that should be loaded into a
-// table at module instantiation time.
-type ActiveElement struct {
-	ElementData
-
-	// TableIndex is the index of the table to initialize.
+	// TableIndex is the index of the table to initialize. Only used when
+	// Mode == ActiveElementMode.
 	TableIndex uint32
 
 	// OffsetExpression is a constant expression that computes the starting offset
-	// in the table.
+	// in the table. Only used when Mode == ActiveElementMode.
 	OffsetExpression []byte
-}
-
-// PassiveElement represents an element segment that can be loaded into a table
-// on demand using the `table.init` instruction.
-type PassiveElement struct {
-	ElementData
-}
-
-// DeclarativeElement represents an element segment that is not loaded into a
-// table by the runtime but may be used by tools like linkers.
-type DeclarativeElement struct {
-	ElementData
 }
 
 // GlobalType defines the type of a global variable, which includes its value
@@ -227,23 +207,28 @@ type GlobalVariable struct {
 	InitExpression []byte
 }
 
+// DataMode specifies how a data segment should be handled.
+type DataMode int
+
+const (
+	ActiveDataMode DataMode = iota
+	PassiveDataMode
+)
+
+// DataSegment represents a data segment in a WebAssembly module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#data-segments
-type Data interface {
-	isData()
-}
-
-type ActiveData struct {
-	MemoryIndex      uint32
-	OffsetExpression []byte
-	Content          []byte
-}
-
-type PassiveData struct {
+type DataSegment struct {
+	Mode    DataMode
 	Content []byte
-}
 
-func (ad *ActiveData) isData()  {}
-func (pd *PassiveData) isData() {}
+	// MemoryIndex is the index of the memory to initialize. Only used when
+	// Mode == ActiveDataMode.
+	MemoryIndex uint32
+
+	// OffsetExpression is a constant expression that computes the starting offset
+	// in memory. Only used when Mode == ActiveDataMode.
+	OffsetExpression []byte
+}
 
 // Module represents a WASM module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#modules.
@@ -255,7 +240,7 @@ type Module struct {
 	Tables          []TableType
 	Memories        []MemoryType
 	Funcs           []Function
-	Elements        []Element
+	ElementSegments []ElementSegment
 	GlobalVariables []GlobalVariable
-	DataSegments    []Data
+	DataSegments    []DataSegment
 }

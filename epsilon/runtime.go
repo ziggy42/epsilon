@@ -89,8 +89,8 @@ type Store struct {
 	tables   []*Table
 	memories []*Memory
 	globals  []*Global
-	elements []Element
-	datas    []Data
+	elements []ElementSegment
+	datas    []DataSegment
 }
 
 // Global is a global variable.
@@ -105,7 +105,7 @@ func NewStore() *Store {
 		tables:   []*Table{},
 		memories: []*Memory{},
 		globals:  []*Global{},
-		elements: []Element{},
-		datas:    []Data{},
+		elements: []ElementSegment{},
+		datas:    []DataSegment{},
 	}
 }

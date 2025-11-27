@@ -148,7 +148,7 @@ func (vm *VM) Instantiate(
 
 	// TODO: elements and data segments should at the very least be copied, but we
 	// should probably have some runtime representation for them.
-	for _, elem := range module.Elements {
+	for _, elem := range module.ElementSegments {
 		storeIndex := uint32(len(vm.store.elements))
 		moduleInstance.ElemAddrs = append(moduleInstance.ElemAddrs, storeIndex)
 		vm.store.elements = append(vm.store.elements, elem)
@@ -1511,24 +1511,12 @@ func (vm *VM) handleMemoryInit(instruction Instruction) error {
 	if err != nil {
 		return err
 	}
-	var content []byte
-	switch data := data.(type) {
-	case *PassiveData:
-		content = data.Content
-	case *ActiveData:
-		content = data.Content
-	}
-	return memory.Init(uint32(n), uint32(s), uint32(d), content)
+	return memory.Init(uint32(n), uint32(s), uint32(d), data.Content)
 }
 
 func (vm *VM) handleDataDrop(instruction Instruction) error {
 	dataSegment := vm.getData(uint32(instruction.Immediates[0]))
-	switch data := dataSegment.(type) {
-	case *PassiveData:
-		data.Content = nil
-	case *ActiveData:
-		data.Content = nil
-	}
+	dataSegment.Content = nil
 	return nil
 }
 
@@ -1559,17 +1547,17 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 		return err
 	}
 
-	switch e := element.(type) {
-	case *ActiveElement:
+	switch element.Mode {
+	case ActiveElementMode:
 		// Trap if using an active, non-dropped element segment.
 		// A dropped segment has its FuncIndexes slice set to nil.
-		if e.FuncIndexes != nil {
+		if element.FuncIndexes != nil {
 			return ErrTableOutOfBounds
 		}
-		return table.Init(n, d, s, e.FuncIndexes)
-	case *PassiveElement:
+		return table.Init(n, d, s, element.FuncIndexes)
+	case PassiveElementMode:
 		moduleInstance := vm.currentModuleInstance()
-		storeIndexes, err := toStoreFuncIndexes(moduleInstance, e.FuncIndexes)
+		storeIndexes, err := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
 		if err != nil {
 			return err
 		}
@@ -1581,18 +1569,12 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 
 func (vm *VM) handleElemDrop(instruction Instruction) error {
 	element := vm.getElement(uint32(instruction.Immediates[0]))
-	var data *ElementData
-	switch e := element.(type) {
-	case *ActiveElement:
-		data = &e.ElementData
-	case *PassiveElement:
-		data = &e.ElementData
-	case *DeclarativeElement:
+	if element.Mode == DeclarativeElementMode {
 		return nil
 	}
 
-	data.FuncIndexes = nil
-	data.FuncIndexesExpressions = nil
+	element.FuncIndexes = nil
+	element.FuncIndexesExpressions = nil
 	return nil
 }
 
@@ -1991,20 +1973,19 @@ func (vm *VM) initActiveElements(
 	module *Module,
 	moduleInstance *ModuleInstance,
 ) error {
-	for _, element := range module.Elements {
-		activeElem, ok := element.(*ActiveElement)
-		if !ok {
+	for _, element := range module.ElementSegments {
+		if element.Mode != ActiveElementMode {
 			continue
 		}
 
-		expression := activeElem.OffsetExpression
+		expression := element.OffsetExpression
 		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
 		offset := offsetAny.(int32)
 
-		storeTableIndex := moduleInstance.TableAddrs[activeElem.TableIndex]
+		storeTableIndex := moduleInstance.TableAddrs[element.TableIndex]
 		if storeTableIndex >= uint32(len(vm.store.tables)) {
 			return fmt.Errorf("unknown table")
 		}
@@ -2014,8 +1995,8 @@ func (vm *VM) initActiveElements(
 			return ErrTableOutOfBounds
 		}
 
-		if len(activeElem.FuncIndexes) > 0 {
-			indexes, err := toStoreFuncIndexes(moduleInstance, activeElem.FuncIndexes)
+		if len(element.FuncIndexes) > 0 {
+			indexes, err := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
 			if err != nil {
 				return err
 			}
@@ -2024,12 +2005,12 @@ func (vm *VM) initActiveElements(
 			}
 		}
 
-		if len(activeElem.FuncIndexesExpressions) > 0 {
-			values := make([]any, len(activeElem.FuncIndexesExpressions))
-			for i, expr := range activeElem.FuncIndexesExpressions {
+		if len(element.FuncIndexesExpressions) > 0 {
+			values := make([]any, len(element.FuncIndexesExpressions))
+			for i, expr := range element.FuncIndexesExpressions {
 				refAny, err := vm.invokeInitExpression(
 					expr,
-					activeElem.Kind,
+					element.Kind,
 					moduleInstance,
 				)
 				if err != nil {
@@ -2052,20 +2033,19 @@ func (vm *VM) initActiveDatas(
 	moduleInstance *ModuleInstance,
 ) error {
 	for _, segment := range module.DataSegments {
-		activeData, ok := segment.(*ActiveData)
-		if !ok {
+		if segment.Mode != ActiveDataMode {
 			continue
 		}
 
-		expression := activeData.OffsetExpression
+		expression := segment.OffsetExpression
 		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
 		offset := offsetAny.(int32)
-		storeMemoryIndex := moduleInstance.MemAddrs[activeData.MemoryIndex]
+		storeMemoryIndex := moduleInstance.MemAddrs[segment.MemoryIndex]
 		memory := vm.store.memories[storeMemoryIndex]
-		if err := memory.Set(uint32(offset), 0, activeData.Content); err != nil {
+		if err := memory.Set(uint32(offset), 0, segment.Content); err != nil {
 			return err
 		}
 	}
@@ -2253,12 +2233,12 @@ func (vm *VM) getGlobal(localIndex uint32) *Global {
 	return vm.store.globals[globalIndex]
 }
 
-func (vm *VM) getElement(localIndex uint32) Element {
+func (vm *VM) getElement(localIndex uint32) *ElementSegment {
 	elementIndex := vm.currentModuleInstance().ElemAddrs[localIndex]
-	return vm.store.elements[elementIndex]
+	return &vm.store.elements[elementIndex]
 }
 
-func (vm *VM) getData(localIndex uint32) Data {
+func (vm *VM) getData(localIndex uint32) *DataSegment {
 	dataIndex := vm.currentModuleInstance().DataAddrs[localIndex]
-	return vm.store.datas[dataIndex]
+	return &vm.store.datas[dataIndex]
 }

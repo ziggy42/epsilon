@@ -73,9 +73,9 @@ func (p *Parser) Parse() (*Module, error) {
 	var tables []TableType
 	var memories []MemoryType
 	var functions []Function
-	var elements []Element
+	var elementSegments []ElementSegment
 	var globals []GlobalVariable
-	var dataSegments []Data
+	var dataSegments []DataSegment
 	var dataCount *uint64
 
 	for {
@@ -142,7 +142,7 @@ func (p *Parser) Parse() (*Module, error) {
 			}
 			startIndex = &index
 		case ElementSectionId:
-			elements, err = parseVector(p, p.parseElement)
+			elementSegments, err = parseVector(p, p.parseElementSegment)
 			if err != nil {
 				return nil, err
 			}
@@ -188,7 +188,7 @@ func (p *Parser) Parse() (*Module, error) {
 		Tables:          tables,
 		Memories:        memories,
 		Funcs:           functions,
-		Elements:        elements,
+		ElementSegments: elementSegments,
 		GlobalVariables: globals,
 		DataSegments:    dataSegments,
 	}, nil
@@ -323,39 +323,40 @@ func (p *Parser) parseExport() (Export, error) {
 	return Export{Name: name, IndexType: IndexType(b), Index: uint32(index)}, nil
 }
 
-func (p *Parser) parseDataSegment() (Data, error) {
+func (p *Parser) parseDataSegment() (DataSegment, error) {
 	dataMode, err := p.parseUleb128()
 	if err != nil {
-		return nil, err
+		return DataSegment{}, err
 	}
 
 	if dataMode&1 != 0 {
 		content, err := parseVector(p, p.reader.ReadByte)
 		if err != nil {
-			return nil, err
+			return DataSegment{}, err
 		}
-		return &PassiveData{Content: content}, nil
+		return DataSegment{Mode: PassiveDataMode, Content: content}, nil
 	}
 
 	memoryIndex := uint64(0)
 	if dataMode != 0 {
 		memoryIndex, err = p.parseUleb128()
 		if err != nil {
-			return nil, err
+			return DataSegment{}, err
 		}
 	}
 
 	offsetExpression, err := p.parseExpression()
 	if err != nil {
-		return nil, err
+		return DataSegment{}, err
 	}
 
 	content, err := parseVector(p, p.reader.ReadByte)
 	if err != nil {
-		return nil, err
+		return DataSegment{}, err
 	}
 
-	return &ActiveData{
+	return DataSegment{
+		Mode:             ActiveDataMode,
 		MemoryIndex:      uint32(memoryIndex),
 		OffsetExpression: offsetExpression,
 		Content:          content,
@@ -445,166 +446,179 @@ func (p *Parser) parseGlobalType() (GlobalType, error) {
 	return GlobalType{ValueType: valueType, IsMutable: isMutable == 1}, nil
 }
 
-func (p *Parser) parseElement() (Element, error) {
+func (p *Parser) parseElementSegment() (ElementSegment, error) {
 	flags, err := p.parseUleb128()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read element flags: %w", err)
+		return ElementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
 	}
 
 	switch flags {
 	case 0: // Active element with func indexes.
 		offset, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		indexes, err := parseVector(p, p.parseUleb128)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		funcIndexes, err := uint64SliceToInt32(indexes)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		elementData := ElementData{Kind: FuncRefType, FuncIndexes: funcIndexes}
-		return &ActiveElement{
-			ElementData:      elementData,
+		return ElementSegment{
+			Mode:             ActiveElementMode,
+			Kind:             FuncRefType,
+			FuncIndexes:      funcIndexes,
 			TableIndex:       defaultTableIndex,
 			OffsetExpression: offset,
 		}, nil
 	case 1: // Passive element with func indexes.
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return nil, ErrElementKindNotZero
+			return ElementSegment{}, ErrElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUleb128)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		funcIndexes, err := uint64SliceToInt32(indexes)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		return &PassiveElement{
-			ElementData: ElementData{Kind: FuncRefType, FuncIndexes: funcIndexes},
+		return ElementSegment{
+			Mode:        PassiveElementMode,
+			Kind:        FuncRefType,
+			FuncIndexes: funcIndexes,
 		}, nil
 	case 2: // Active element with explicit table index and func indexes.
 		tableIdx, err := p.parseUleb128()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		offset, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return nil, ErrElementKindNotZero
+			return ElementSegment{}, ErrElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUleb128)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		funcIndexes, err := uint64SliceToInt32(indexes)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		elementData := ElementData{Kind: FuncRefType, FuncIndexes: funcIndexes}
-		return &ActiveElement{
-			ElementData:      elementData,
+		return ElementSegment{
+			Mode:             ActiveElementMode,
+			Kind:             FuncRefType,
+			FuncIndexes:      funcIndexes,
 			TableIndex:       uint32(tableIdx),
 			OffsetExpression: offset,
 		}, nil
 	case 3: // Declarative element with func indexes.
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return nil, ErrElementKindNotZero
+			return ElementSegment{}, ErrElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUleb128)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		funcIndexes, err := uint64SliceToInt32(indexes)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		return &DeclarativeElement{
-			ElementData: ElementData{Kind: FuncRefType, FuncIndexes: funcIndexes},
+		return ElementSegment{
+			Mode:        DeclarativeElementMode,
+			Kind:        FuncRefType,
+			FuncIndexes: funcIndexes,
 		}, nil
 	case 4: // Active element with expressions.
 		offset, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		elementData := ElementData{Kind: FuncRefType, FuncIndexesExpressions: exprs}
-		return &ActiveElement{
-			ElementData:      elementData,
-			TableIndex:       defaultTableIndex,
-			OffsetExpression: offset,
+		return ElementSegment{
+			Mode:                   ActiveElementMode,
+			Kind:                   FuncRefType,
+			FuncIndexesExpressions: exprs,
+			TableIndex:             defaultTableIndex,
+			OffsetExpression:       offset,
 		}, nil
 	case 5: // Passive element with expressions.
 		b, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		kind := ReferenceType(b)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		return &PassiveElement{
-			ElementData: ElementData{Kind: kind, FuncIndexesExpressions: exprs},
+		return ElementSegment{
+			Mode:                   PassiveElementMode,
+			Kind:                   kind,
+			FuncIndexesExpressions: exprs,
 		}, nil
 	case 6: // Active element with explicit table index and expressions.
 		tableIdx, err := p.parseUleb128()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		offset, err := p.parseExpression()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		refTypeByte, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		return &ActiveElement{
-			ElementData:      ElementData{Kind: kind, FuncIndexesExpressions: exprs},
-			TableIndex:       uint32(tableIdx),
-			OffsetExpression: offset,
+		return ElementSegment{
+			Mode:                   ActiveElementMode,
+			Kind:                   kind,
+			FuncIndexesExpressions: exprs,
+			TableIndex:             uint32(tableIdx),
+			OffsetExpression:       offset,
 		}, nil
 	case 7: // Declarative element with expressions.
 		refTypeByte, err := p.reader.ReadByte()
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
 		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return nil, err
+			return ElementSegment{}, err
 		}
-		return &DeclarativeElement{
-			ElementData: ElementData{Kind: kind, FuncIndexesExpressions: exprs},
+		return ElementSegment{
+			Mode:                   DeclarativeElementMode,
+			Kind:                   kind,
+			FuncIndexesExpressions: exprs,
 		}, nil
 	default:
-		return nil, fmt.Errorf("invalid element flags: %d", flags)
+		return ElementSegment{}, fmt.Errorf("invalid element flags: %d", flags)
 	}
 }
 

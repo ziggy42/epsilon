@@ -139,47 +139,47 @@ func TestParseActiveElement(t *testing.T) {
 		t.Fatalf("parsing module failed: %v", err)
 	}
 
-	if len(module.Elements) != 1 {
-		t.Fatalf("expected 1 element, got %d", len(module.Elements))
+	if len(module.ElementSegments) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(module.ElementSegments))
 	}
 
-	activeElement, ok := module.Elements[0].(*ActiveElement)
-	if !ok {
-		t.Fatalf("expected active element, got %T", module.Elements[0])
+	element := module.ElementSegments[0]
+	if element.Mode != ActiveElementMode {
+		t.Fatalf("expected active element, got mode %d", element.Mode)
 	}
 
-	if activeElement.TableIndex != 0 {
-		t.Fatalf("expected table index 0, got %d", activeElement.TableIndex)
+	if element.TableIndex != 0 {
+		t.Fatalf("expected table index 0, got %d", element.TableIndex)
 	}
 
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(activeElement.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(element.OffsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset %v, got %v",
 			expectedOffsetExpression,
-			activeElement.OffsetExpression,
+			element.OffsetExpression,
 		)
 	}
-	if activeElement.Kind != FuncRefType {
-		t.Fatalf("expected FuncRefType, got %d", activeElement.Kind)
+	if element.Kind != FuncRefType {
+		t.Fatalf("expected FuncRefType, got %d", element.Kind)
 	}
 
-	if len(activeElement.FuncIndexes) != 2 {
-		t.Fatalf("expected 2 func indexes, got %d", len(activeElement.FuncIndexes))
+	if len(element.FuncIndexes) != 2 {
+		t.Fatalf("expected 2 func indexes, got %d", len(element.FuncIndexes))
 	}
 
-	if activeElement.FuncIndexes[0] != 0 {
-		t.Fatalf("expected func index 0, got %d", activeElement.FuncIndexes[0])
+	if element.FuncIndexes[0] != 0 {
+		t.Fatalf("expected func index 0, got %d", element.FuncIndexes[0])
 	}
 
-	if activeElement.FuncIndexes[1] != 1 {
-		t.Fatalf("expected func index 1, got %d", activeElement.FuncIndexes[1])
+	if element.FuncIndexes[1] != 1 {
+		t.Fatalf("expected func index 1, got %d", element.FuncIndexes[1])
 	}
 
-	if len(activeElement.FuncIndexesExpressions) != 0 {
+	if len(element.FuncIndexesExpressions) != 0 {
 		t.Fatalf(
 			"expected 0 func indexes expressions, got %d",
-			len(activeElement.FuncIndexesExpressions),
+			len(element.FuncIndexesExpressions),
 		)
 	}
 }
@@ -383,24 +383,24 @@ func TestParseActiveDataSegment(t *testing.T) {
 	if len(module.DataSegments) != 1 {
 		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
 	}
-	activeData, ok := module.DataSegments[0].(*ActiveData)
-	if !ok {
-		t.Fatalf("expected active data segment, got %T", module.DataSegments[0])
+	data := module.DataSegments[0]
+	if data.Mode != ActiveDataMode {
+		t.Fatalf("expected active data segment, got mode %d", data.Mode)
 	}
-	if activeData.MemoryIndex != 0 {
-		t.Fatalf("expected memory index 0, got %d", activeData.MemoryIndex)
+	if data.MemoryIndex != 0 {
+		t.Fatalf("expected memory index 0, got %d", data.MemoryIndex)
 	}
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(activeData.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(data.OffsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
 			expectedOffsetExpression,
-			activeData.OffsetExpression,
+			data.OffsetExpression,
 		)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(activeData.Content, expectedContent) {
-		t.Fatalf("expected content %v, got %v", expectedContent, activeData.Content)
+	if !bytes.Equal(data.Content, expectedContent) {
+		t.Fatalf("expected content %v, got %v", expectedContent, data.Content)
 	}
 }
 
@@ -415,24 +415,24 @@ func TestParseActiveDataSegmentWithMemoryIndex(t *testing.T) {
 	if len(module.DataSegments) != 1 {
 		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
 	}
-	activeData, ok := module.DataSegments[0].(*ActiveData)
-	if !ok {
-		t.Fatalf("expected active data segment, got %T", module.DataSegments[0])
+	data := module.DataSegments[0]
+	if data.Mode != ActiveDataMode {
+		t.Fatalf("expected active data segment, got mode %d", data.Mode)
 	}
-	if activeData.MemoryIndex != 0 {
-		t.Fatalf("expected memory index 0, got %d", activeData.MemoryIndex)
+	if data.MemoryIndex != 0 {
+		t.Fatalf("expected memory index 0, got %d", data.MemoryIndex)
 	}
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(activeData.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(data.OffsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
 			expectedOffsetExpression,
-			activeData.OffsetExpression,
+			data.OffsetExpression,
 		)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(activeData.Content, expectedContent) {
-		t.Fatalf("expected content %v, got %v", expectedContent, activeData.Content)
+	if !bytes.Equal(data.Content, expectedContent) {
+		t.Fatalf("expected content %v, got %v", expectedContent, data.Content)
 	}
 }
 
@@ -447,16 +447,16 @@ func TestParsePassiveDataSegment(t *testing.T) {
 	if len(module.DataSegments) != 1 {
 		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
 	}
-	passiveData, ok := module.DataSegments[0].(*PassiveData)
-	if !ok {
-		t.Fatalf("expected passive data segment, got %T", module.DataSegments[0])
+	data := module.DataSegments[0]
+	if data.Mode != PassiveDataMode {
+		t.Fatalf("expected passive data segment, got mode %d", data.Mode)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(passiveData.Content, expectedContent) {
+	if !bytes.Equal(data.Content, expectedContent) {
 		t.Fatalf(
 			"expected content %v, got %v",
 			expectedContent,
-			passiveData.Content,
+			data.Content,
 		)
 	}
 }
