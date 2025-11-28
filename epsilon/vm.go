@@ -1646,8 +1646,15 @@ func handleBinary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	pop func() (T, error),
 	op func(a, b T) R,
 ) error {
-	safeOp := func(a, b T) (R, error) { return op(a, b), nil }
-	return handleBinarySafe(vm, pop, safeOp)
+	b, err := pop()
+	if err != nil {
+		return err
+	}
+	a, err := pop()
+	if err != nil {
+		return err
+	}
+	return vm.stack.Push(op(a, b))
 }
 
 func handleBinarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
@@ -1691,8 +1698,11 @@ func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	pop func() (T, error),
 	op func(a T) R,
 ) error {
-	safeOp := func(a T) (R, error) { return op(a), nil }
-	return handleUnarySafe(vm, pop, safeOp)
+	a, err := pop()
+	if err != nil {
+		return err
+	}
+	return vm.stack.Push(op(a))
 }
 
 func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
