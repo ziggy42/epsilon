@@ -462,14 +462,10 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if err != nil {
 			return ElementSegment{}, err
 		}
-		funcIndexes, err := uint64SliceToInt32(indexes)
-		if err != nil {
-			return ElementSegment{}, err
-		}
 		return ElementSegment{
 			Mode:             ActiveElementMode,
 			Kind:             FuncRefType,
-			FuncIndexes:      funcIndexes,
+			FuncIndexes:      uint64SliceToInt32(indexes),
 			TableIndex:       defaultTableIndex,
 			OffsetExpression: offset,
 		}, nil
@@ -485,14 +481,10 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if err != nil {
 			return ElementSegment{}, err
 		}
-		funcIndexes, err := uint64SliceToInt32(indexes)
-		if err != nil {
-			return ElementSegment{}, err
-		}
 		return ElementSegment{
 			Mode:        PassiveElementMode,
 			Kind:        FuncRefType,
-			FuncIndexes: funcIndexes,
+			FuncIndexes: uint64SliceToInt32(indexes),
 		}, nil
 	case 2: // Active element with explicit table index and func indexes.
 		tableIdx, err := p.parseUleb128()
@@ -514,14 +506,10 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if err != nil {
 			return ElementSegment{}, err
 		}
-		funcIndexes, err := uint64SliceToInt32(indexes)
-		if err != nil {
-			return ElementSegment{}, err
-		}
 		return ElementSegment{
 			Mode:             ActiveElementMode,
 			Kind:             FuncRefType,
-			FuncIndexes:      funcIndexes,
+			FuncIndexes:      uint64SliceToInt32(indexes),
 			TableIndex:       uint32(tableIdx),
 			OffsetExpression: offset,
 		}, nil
@@ -537,14 +525,10 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if err != nil {
 			return ElementSegment{}, err
 		}
-		funcIndexes, err := uint64SliceToInt32(indexes)
-		if err != nil {
-			return ElementSegment{}, err
-		}
 		return ElementSegment{
 			Mode:        DeclarativeElementMode,
 			Kind:        FuncRefType,
-			FuncIndexes: funcIndexes,
+			FuncIndexes: uint64SliceToInt32(indexes),
 		}, nil
 	case 4: // Active element with expressions.
 		offset, err := p.parseExpression()
@@ -741,10 +725,10 @@ func (p *Parser) parseUtf8String() (string, error) {
 	return string(buf), nil
 }
 
-func uint64SliceToInt32(uint64Slice []uint64) ([]int32, error) {
-	uint32Slice := make([]int32, len(uint64Slice))
-	for i, val := range uint64Slice {
-		uint32Slice[i] = int32(val)
+func uint64SliceToInt32(slice []uint64) []int32 {
+	result := make([]int32, len(slice))
+	for i, val := range slice {
+		result[i] = int32(val)
 	}
-	return uint32Slice, nil
+	return result
 }
