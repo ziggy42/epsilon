@@ -360,7 +360,19 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateUnaryOp(V128, F32)
 	case F64x2ExtractLane:
 		return v.validateUnaryOp(V128, F64)
-	case V128Not:
+	case V128Not, I8x16Abs, I8x16Neg, I8x16Popcnt, I16x8Abs, I16x8Neg,
+		I16x8ExtaddPairwiseI8x16S, I16x8ExtaddPairwiseI8x16U, I32x4Abs, I32x4Neg,
+		I32x4ExtaddPairwiseI16x8S, I32x4ExtaddPairwiseI16x8U, I64x2Abs, I64x2Neg,
+		F32x4Abs, F32x4Neg, F32x4Sqrt, F32x4Ceil, F32x4Floor, F32x4Trunc,
+		F32x4Nearest, F64x2Abs, F64x2Neg, F64x2Sqrt, F64x2Ceil, F64x2Floor,
+		F64x2Trunc, F64x2Nearest, I32x4TruncSatF32x4S, I32x4TruncSatF32x4U,
+		F32x4ConvertI32x4S, F32x4ConvertI32x4U, I16x8ExtendLowI8x16S,
+		I16x8ExtendHighI8x16S, I16x8ExtendLowI8x16U, I16x8ExtendHighI8x16U,
+		I32x4ExtendLowI16x8S, I32x4ExtendHighI16x8S, I32x4ExtendLowI16x8U,
+		I32x4ExtendHighI16x8U, I64x2ExtendLowI32x4S, I64x2ExtendHighI32x4S,
+		I64x2ExtendLowI32x4U, I64x2ExtendHighI32x4U, F64x2PromoteLowF32x4,
+		F32x4DemoteF64x2Zero, I32x4TruncSatF64x2SZero, I32x4TruncSatF64x2UZero,
+		F64x2ConvertLowI32x4S, F64x2ConvertLowI32x4U:
 		return v.validateUnaryOp(V128, V128)
 	case V128And, V128Andnot, V128Or, V128Xor, I8x16Shuffle, I8x16Swizzle,
 		I8x16Eq, I8x16Ne, I8x16LtS, I8x16LtU, I8x16GtS, I8x16GtU, I8x16LeS,
@@ -405,20 +417,6 @@ func (v *validator) validate(instruction Instruction) error {
 	case I8x16Shl, I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU,
 		I32x4Shl, I32x4ShrS, I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
 		return v.validateSimdShift()
-	case I8x16Abs, I8x16Neg, I8x16Popcnt,
-		I16x8Abs, I16x8Neg, I16x8ExtaddPairwiseI8x16S, I16x8ExtaddPairwiseI8x16U,
-		I32x4Abs, I32x4Neg, I32x4ExtaddPairwiseI16x8S, I32x4ExtaddPairwiseI16x8U,
-		I64x2Abs, I64x2Neg, F32x4Abs, F32x4Neg, F32x4Sqrt, F32x4Ceil, F32x4Floor,
-		F32x4Trunc, F32x4Nearest, F64x2Abs, F64x2Neg, F64x2Sqrt, F64x2Ceil,
-		F64x2Floor, F64x2Trunc, F64x2Nearest, I32x4TruncSatF32x4S,
-		I32x4TruncSatF32x4U, F32x4ConvertI32x4S, F32x4ConvertI32x4U,
-		I16x8ExtendLowI8x16S, I16x8ExtendHighI8x16S, I16x8ExtendLowI8x16U,
-		I16x8ExtendHighI8x16U, I32x4ExtendLowI16x8S, I32x4ExtendHighI16x8S,
-		I32x4ExtendLowI16x8U, I32x4ExtendHighI16x8U, I64x2ExtendLowI32x4S,
-		I64x2ExtendHighI32x4S, I64x2ExtendLowI32x4U, I64x2ExtendHighI32x4U,
-		F64x2PromoteLowF32x4, F32x4DemoteF64x2Zero, I32x4TruncSatF64x2SZero,
-		I32x4TruncSatF64x2UZero, F64x2ConvertLowI32x4S, F64x2ConvertLowI32x4U:
-		return v.validateUnaryOp(V128, V128)
 	case MemoryInit:
 		return v.validateMemoryInit(instruction)
 	case MemoryCopy:
