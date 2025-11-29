@@ -700,10 +700,10 @@ func (v *validator) validateStoreN(
 		return err
 	}
 
-	if _, err := v.popExpectedValue(I32); err != nil {
+	if _, err := v.popExpectedValue(valueType); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(valueType); err != nil {
+	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
 	return nil
