@@ -65,16 +65,24 @@ type VM struct {
 	stack          *ValueStack
 	callStack      []*CallFrame
 	callStackDepth int
+	validator      *validator
 }
 
 func NewVM() *VM {
-	return &VM{store: NewStore(), stack: NewValueStack()}
+	return &VM{
+		store:     NewStore(),
+		stack:     NewValueStack(),
+		validator: NewValidator(),
+	}
 }
 
 func (vm *VM) Instantiate(
 	module *Module,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
+	if err := vm.validator.validateModule(module); err != nil {
+		return nil, err
+	}
 	moduleInstance := &ModuleInstance{Types: module.Types}
 
 	functions, tables, memories, globals, err := resolveImports(module, imports)
@@ -1916,7 +1924,7 @@ func (vm *VM) getBlockInputOutputCount(blockType int32) (uint, uint) {
 		return 0, 0
 	}
 
-	if blockType > 0 { // type index.
+	if blockType >= 0 { // type index.
 		funcType := vm.currentModuleInstance().Types[blockType]
 		return uint(len(funcType.ParamTypes)), uint(len(funcType.ResultTypes))
 	}
