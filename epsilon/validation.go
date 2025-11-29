@@ -34,27 +34,73 @@ type controlFrame struct {
 type validator struct {
 	valueStack   []ValueType
 	controlStack []controlFrame
+	locals       []ValueType
+	returnType   []ValueType
+	typeDefs     []FunctionType
+	funcTypes    []FunctionType
+	tableTypes   []TableType
+	memTypes     []MemoryType
+	globalTypes  []GlobalType
+	elemTypes    []ReferenceType
+	dataCount    int
 }
 
 func NewValidator() *validator {
 	return &validator{
 		valueStack:   make([]ValueType, 0),
 		controlStack: make([]controlFrame, 0),
+		locals:       make([]ValueType, 0),
+		returnType:   make([]ValueType, 0),
 	}
 }
 
 func (v *validator) validateModule(module *Module) error {
+	v.typeDefs = module.Types
+	v.funcTypes = make([]FunctionType, 0, len(module.Imports)+len(module.Funcs))
+	v.tableTypes = make([]TableType, 0, len(module.Imports)+len(module.Tables))
+	v.memTypes = make([]MemoryType, 0, len(module.Imports)+len(module.Memories))
+	v.globalTypes = make([]GlobalType, 0, len(module.Imports)+len(module.GlobalVariables))
+
+	for _, imp := range module.Imports {
+		switch t := imp.Type.(type) {
+		case FunctionTypeIndex:
+			v.funcTypes = append(v.funcTypes, module.Types[t])
+		case TableType:
+			v.tableTypes = append(v.tableTypes, t)
+		case MemoryType:
+			v.memTypes = append(v.memTypes, t)
+		case GlobalType:
+			v.globalTypes = append(v.globalTypes, t)
+		}
+	}
+
 	for _, function := range module.Funcs {
-		if err := v.validateFunction(module, &function); err != nil {
+		v.funcTypes = append(v.funcTypes, module.Types[function.TypeIndex])
+	}
+	v.tableTypes = append(v.tableTypes, module.Tables...)
+	v.memTypes = append(v.memTypes, module.Memories...)
+	for _, globalVariable := range module.GlobalVariables {
+		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
+	}
+
+	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
+	for i, elem := range module.ElementSegments {
+		v.elemTypes[i] = elem.Kind
+	}
+	v.dataCount = len(module.DataSegments)
+
+	for _, function := range module.Funcs {
+		if err := v.validateFunction(&function); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (v *validator) validateFunction(module *Module, function *Function) error {
-	functionType := module.Types[function.TypeIndex]
-	locals := append(function.Locals, functionType.ParamTypes...)
+func (v *validator) validateFunction(function *Function) error {
+	functionType := v.typeDefs[function.TypeIndex]
+	v.locals = append(functionType.ParamTypes, function.Locals...)
+	v.returnType = functionType.ResultTypes
 
 	v.pushControlFrame(Block, functionType.ParamTypes, functionType.ResultTypes)
 
@@ -64,25 +110,21 @@ func (v *validator) validateFunction(module *Module, function *Function) error {
 		if err != nil {
 			return err
 		}
-		if err := v.validate(module, locals, instruction); err != nil {
+		if err := v.validate(instruction); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (v *validator) validate(
-	module *Module,
-	locals []ValueType,
-	instruction Instruction,
-) error {
+func (v *validator) validate(instruction Instruction) error {
 	switch instruction.Opcode {
 	case Unreachable:
 		return v.markFrameUnreachable()
 	case Block, Loop:
-		return v.validateBlock(module, instruction)
+		return v.validateBlock(instruction)
 	case If:
-		return v.validateIf(module, instruction)
+		return v.validateIf(instruction)
 	case Else:
 		return v.validateElse()
 	case End:
@@ -94,7 +136,7 @@ func (v *validator) validate(
 	case BrTable:
 		return v.validateBrTable(instruction)
 	case Call:
-		return v.validateCall(module, instruction)
+		return v.validateCall(instruction)
 	case Drop:
 		return v.validateDrop()
 	case Select:
@@ -102,9 +144,17 @@ func (v *validator) validate(
 	case SelectT:
 		return v.validateSelect(toValueType(instruction.Immediates[0]))
 	case LocalGet:
-		return v.validateLocalGet(locals, instruction)
+		return v.validateLocalGet(instruction)
+	case LocalSet:
+		return v.validateLocalSet(instruction)
 	case I32Const:
 		return v.validateConst(I32)
+	case I64Const:
+		return v.validateConst(I64)
+	case F32Const:
+		return v.validateConst(F32)
+	case F64Const:
+		return v.validateConst(F64)
 	case I32Eq, I32LtS:
 		return v.validateComparisonOp(I32)
 	case I32Add, I32Sub, I32Mul:
@@ -115,14 +165,8 @@ func (v *validator) validate(
 	}
 }
 
-func (v *validator) validateBlock(
-	module *Module,
-	instruction Instruction,
-) error {
-	startTypes, endTypes := v.getBlockTypes(
-		module,
-		int32(instruction.Immediates[0]),
-	)
+func (v *validator) validateBlock(instruction Instruction) error {
+	startTypes, endTypes := v.getBlockTypes(int32(instruction.Immediates[0]))
 	if _, err := v.popExpectedValues(startTypes); err != nil {
 		return err
 	}
@@ -131,14 +175,11 @@ func (v *validator) validateBlock(
 	return nil
 }
 
-func (v *validator) validateIf(
-	module *Module,
-	instruction Instruction,
-) error {
+func (v *validator) validateIf(instruction Instruction) error {
 	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
-	return v.validateBlock(module, instruction)
+	return v.validateBlock(instruction)
 }
 
 func (v *validator) validateElse() error {
@@ -241,13 +282,12 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 	return v.markFrameUnreachable()
 }
 
-func (v *validator) validateCall(module *Module, instruction Instruction) error {
+func (v *validator) validateCall(instruction Instruction) error {
 	functionIndex := uint32(instruction.Immediates[0])
-	if functionIndex >= uint32(len(module.Funcs)) {
+	if functionIndex >= uint32(len(v.funcTypes)) {
 		return errors.New("call function index out of bounds")
 	}
-	function := module.Funcs[functionIndex]
-	functionType := module.Types[function.TypeIndex]
+	functionType := v.funcTypes[functionIndex]
 	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
 		return err
 	}
@@ -291,16 +331,22 @@ func (v *validator) validateSelect(t ValueType) error {
 	return nil
 }
 
-func (v *validator) validateLocalGet(
-	locals []ValueType,
-	instruction Instruction,
-) error {
-	localIndex := int32(instruction.Immediates[0])
-	if localIndex >= int32(len(locals)) {
+func (v *validator) validateLocalGet(instruction Instruction) error {
+	localIndex := instruction.Immediates[0]
+	if localIndex >= uint64(len(v.locals)) {
 		return errors.New("local index out of bounds")
 	}
-	v.pushValue(locals[localIndex])
+	v.pushValue(v.locals[localIndex])
 	return nil
+}
+
+func (v *validator) validateLocalSet(instruction Instruction) error {
+	localIndex := instruction.Immediates[0]
+	if localIndex >= uint64(len(v.locals)) {
+		return errors.New("local index out of bounds")
+	}
+	_, err := v.popExpectedValue(v.locals[localIndex])
+	return err
 }
 
 func (v *validator) validateConst(valueType ValueType) error {
@@ -436,17 +482,14 @@ func (v *validator) markFrameUnreachable() error {
 	return nil
 }
 
-func (v *validator) getBlockTypes(
-	module *Module,
-	blockType int32,
-) ([]ValueType, []ValueType) {
+func (v *validator) getBlockTypes(blockType int32) ([]ValueType, []ValueType) {
 	if blockType == -0x40 { // empty block type.
 		return []ValueType{}, []ValueType{}
 	}
 
 	if blockType >= 0 {
-		blockType := module.Types[blockType]
-		return blockType.ParamTypes, blockType.ResultTypes
+		funcType := v.typeDefs[blockType]
+		return funcType.ParamTypes, funcType.ResultTypes
 	}
 
 	return []ValueType{}, []ValueType{toValueType(uint64(blockType))}

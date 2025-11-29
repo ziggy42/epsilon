@@ -65,22 +65,18 @@ type VM struct {
 	stack          *ValueStack
 	callStack      []*CallFrame
 	callStackDepth int
-	validator      *validator
 }
 
 func NewVM() *VM {
-	return &VM{
-		store:     NewStore(),
-		stack:     NewValueStack(),
-		validator: NewValidator(),
-	}
+	return &VM{store: NewStore(), stack: NewValueStack()}
 }
 
 func (vm *VM) Instantiate(
 	module *Module,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	if err := vm.validator.validateModule(module); err != nil {
+	validator := NewValidator()
+	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
 	moduleInstance := &ModuleInstance{Types: module.Types}
