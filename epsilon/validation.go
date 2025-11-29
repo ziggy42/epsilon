@@ -252,31 +252,31 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateBinaryOp(F32, F32)
 	case F64Add, F64Sub, F64Mul, F64Div, F64Min, F64Max, F64Copysign:
 		return v.validateBinaryOp(F64, F64)
-	case I32Eqz:
+	case I32Eqz, I32Clz, I32Ctz, I32Popcnt, I32Extend8S, I32Extend16S:
 		return v.validateUnaryOp(I32, I32)
-	case I64Eqz:
+	case I64Eqz, I32WrapI64:
 		return v.validateUnaryOp(I64, I32)
-	case I64Clz, I64Ctz, I64Popcnt:
+	case I64Clz, I64Ctz, I64Popcnt, I64Extend8S, I64Extend16S, I64Extend32S:
 		return v.validateUnaryOp(I64, I64)
-	case I32Clz, I32Ctz, I32Popcnt:
-		return v.validateUnaryOp(I32, I32)
 	case F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt:
 		return v.validateUnaryOp(F32, F32)
 	case F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt:
 		return v.validateUnaryOp(F64, F64)
-	case I32WrapI64:
-		return v.validateUnaryOp(I64, I32)
-	case I32TruncF32S, I32TruncF32U:
+	case I32TruncF32S,
+		I32TruncF32U,
+		I32ReinterpretF32,
+		I32TruncSatF32S,
+		I32TruncSatF32U:
 		return v.validateUnaryOp(F32, I32)
-	case I32TruncF64S, I32TruncF64U:
+	case I32TruncF64S, I32TruncF64U, I32TruncSatF64S, I32TruncSatF64U:
 		return v.validateUnaryOp(F64, I32)
 	case I64ExtendI32S, I64ExtendI32U:
 		return v.validateUnaryOp(I32, I64)
-	case I64TruncF32S, I64TruncF32U:
+	case I64TruncF32S, I64TruncF32U, I64TruncSatF32S, I64TruncSatF32U:
 		return v.validateUnaryOp(F32, I64)
-	case I64TruncF64S, I64TruncF64U:
+	case I64TruncF64S, I64TruncF64U, I64ReinterpretF64, I64TruncSatF64S, I64TruncSatF64U:
 		return v.validateUnaryOp(F64, I64)
-	case F32ConvertI32S, F32ConvertI32U:
+	case F32ConvertI32S, F32ConvertI32U, F32ReinterpretI32:
 		return v.validateUnaryOp(I32, F32)
 	case F32ConvertI64S, F32ConvertI64U:
 		return v.validateUnaryOp(I64, F32)
@@ -284,30 +284,10 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateUnaryOp(F64, F32)
 	case F64ConvertI32S, F64ConvertI32U:
 		return v.validateUnaryOp(I32, F64)
-	case F64ConvertI64S, F64ConvertI64U:
+	case F64ConvertI64S, F64ConvertI64U, F64ReinterpretI64:
 		return v.validateUnaryOp(I64, F64)
 	case F64PromoteF32:
 		return v.validateUnaryOp(F32, F64)
-	case I32ReinterpretF32:
-		return v.validateUnaryOp(F32, I32)
-	case I64ReinterpretF64:
-		return v.validateUnaryOp(F64, I64)
-	case F32ReinterpretI32:
-		return v.validateUnaryOp(I32, F32)
-	case F64ReinterpretI64:
-		return v.validateUnaryOp(I64, F64)
-	case I32Extend8S, I32Extend16S:
-		return v.validateUnaryOp(I32, I32)
-	case I64Extend8S, I64Extend16S, I64Extend32S:
-		return v.validateUnaryOp(I64, I64)
-	case I32TruncSatF32S, I32TruncSatF32U:
-		return v.validateUnaryOp(F32, I32)
-	case I32TruncSatF64S, I32TruncSatF64U:
-		return v.validateUnaryOp(F64, I32)
-	case I64TruncSatF32S, I64TruncSatF32U:
-		return v.validateUnaryOp(F32, I64)
-	case I64TruncSatF64S, I64TruncSatF64U:
-		return v.validateUnaryOp(F64, I64)
 	case RefNull:
 		return v.validateRefNull(instruction)
 	case RefIsNull:
