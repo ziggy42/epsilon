@@ -54,17 +54,18 @@ type controlFrame struct {
 }
 
 type validator struct {
-	valueStack   []ValueType
-	controlStack []controlFrame
-	locals       []ValueType
-	returnType   []ValueType
-	typeDefs     []FunctionType
-	funcTypes    []FunctionType
-	tableTypes   []TableType
-	memTypes     []MemoryType
-	globalTypes  []GlobalType
-	elemTypes    []ReferenceType
-	dataCount    int
+	valueStack    []ValueType
+	controlStack  []controlFrame
+	locals        []ValueType
+	returnType    []ValueType
+	typeDefs      []FunctionType
+	funcTypes     []FunctionType
+	tableTypes    []TableType
+	memTypes      []MemoryType
+	globalTypes   []GlobalType
+	importedTypes []GlobalType // Only includes imported globals.
+	elemTypes     []ReferenceType
+	dataCount     int
 }
 
 func NewValidator() *validator {
@@ -86,6 +87,7 @@ func (v *validator) validateModule(module *Module) error {
 		0,
 		len(module.Imports)+len(module.GlobalVariables),
 	)
+	v.importedTypes = make([]GlobalType, 0, len(module.Imports))
 
 	for _, imp := range module.Imports {
 		switch t := imp.Type.(type) {
@@ -97,6 +99,7 @@ func (v *validator) validateModule(module *Module) error {
 			v.memTypes = append(v.memTypes, t)
 		case GlobalType:
 			v.globalTypes = append(v.globalTypes, t)
+			v.importedTypes = append(v.importedTypes, t)
 		}
 	}
 
@@ -182,11 +185,11 @@ func (v *validator) isConstantInstruction(instruction Instruction) bool {
 	opcode := instruction.Opcode
 	if opcode == GlobalGet {
 		globalIndex := instruction.Immediates[0]
-		if globalIndex >= uint64(len(v.globalTypes)) {
+		if globalIndex >= uint64(len(v.importedTypes)) {
 			return false
 		}
 
-		return !v.globalTypes[globalIndex].IsMutable
+		return !v.importedTypes[globalIndex].IsMutable
 	}
 
 	return opcode == I32Const ||
