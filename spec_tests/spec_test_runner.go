@@ -110,7 +110,9 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 			r.handleRegister(cmd)
 		case "assert_exhaustion":
 			r.handleAssertExhaustion(cmd)
-		case "assert_invalid", "assert_malformed":
+		// case "assert_invalid":
+		// 	r.handleAssertInvalid(cmd)
+		case "assert_malformed":
 			// TODO(pivetta): We have to actual handle these.
 			r.t.Logf("Line %d: skipping command type: %s", cmd.Line, cmd.Type)
 		}
@@ -202,8 +204,7 @@ func (r *SpecTestRunner) handleAssertTrap(cmd wabt.Command) {
 			r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
 		}
 
-		parser := epsilon.NewParser(bytes.NewReader(wasmBytes))
-		module, err := parser.Parse()
+		module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 		if err != nil {
 			// A parsing error is a valid form of trap.
 			return
@@ -222,14 +223,30 @@ func (r *SpecTestRunner) handleAssertTrap(cmd wabt.Command) {
 	}
 }
 
+func (r *SpecTestRunner) handleAssertInvalid(cmd wabt.Command) {
+	wasmBytes, ok := r.wasmDict[cmd.Filename]
+	if !ok {
+		r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
+	}
+
+	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
+	if err != nil {
+		r.fatalf(cmd.Line, "expected validation error, failed to parse instead")
+	}
+
+	_, err = r.vm.Instantiate(module, r.buildImports())
+	if err == nil {
+		r.fatalf(cmd.Line, "expected validation error, but got no error")
+	}
+}
+
 func (r *SpecTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	wasmBytes, ok := r.wasmDict[cmd.Filename]
 	if !ok {
 		r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
 	}
 
-	parser := epsilon.NewParser(bytes.NewReader(wasmBytes))
-	module, err := parser.Parse()
+	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
 		// A parsing error is a valid form of being uninstantiable.
 		return

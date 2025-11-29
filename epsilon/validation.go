@@ -26,6 +26,7 @@ var (
 	ErrGlobalIsImmutable                = errors.New("global is immutable")
 	ErrRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
 	ErrSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
+	ErrInvalidConstantExpression        = errors.New("invalid constant expression")
 )
 
 type bottomType struct{}
@@ -105,6 +106,10 @@ func (v *validator) validateModule(module *Module) error {
 	v.tableTypes = append(v.tableTypes, module.Tables...)
 	v.memTypes = append(v.memTypes, module.Memories...)
 	for _, globalVariable := range module.GlobalVariables {
+		err := v.validateConstantExpression(globalVariable.InitExpression)
+		if err != nil {
+			return err
+		}
 		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
 	}
 
@@ -148,6 +153,43 @@ func (v *validator) validateFunction(function *Function) error {
 	// the stack, which is only needed for nested blocks.
 	_, err := v.popControlFrame()
 	return err
+}
+
+func (v *validator) validateConstantExpression(data []byte) error {
+	decoder := NewDecoder(data)
+	for decoder.HasMore() {
+		instruction, err := decoder.Decode()
+		if err != nil {
+			return err
+		}
+
+		if !v.isConstantInstruction(instruction) {
+			return ErrInvalidConstantExpression
+		}
+	}
+	// There is an implicit end instruction here we are not validating because it
+	// is stripped by the parser.
+	return nil
+}
+
+func (v *validator) isConstantInstruction(instruction Instruction) bool {
+	opcode := instruction.Opcode
+	if opcode == GlobalGet {
+		globalIndex := instruction.Immediates[0]
+		if globalIndex >= uint64(len(v.globalTypes)) {
+			return false
+		}
+
+		return !v.globalTypes[globalIndex].IsMutable
+	}
+
+	return opcode == I32Const ||
+		opcode == I64Const ||
+		opcode == F32Const ||
+		opcode == F64Const ||
+		opcode == V128Const ||
+		opcode == RefNull ||
+		opcode == RefFunc
 }
 
 func (v *validator) validate(instruction Instruction) error {
@@ -985,6 +1027,49 @@ func (v *validator) validateVectorScalar(scalar ValueType) error {
 	return nil
 }
 
+func (v *validator) validateSimdLoadLane(
+	instruction Instruction,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+	laneIndex := uint32(instruction.Immediates[3])
+	if laneIndex >= 16/sizeBytes {
+		return ErrSimdLaneIndexOutOfBounds
+	}
+	if _, err := v.popExpectedValue(V128); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	v.pushValue(V128)
+	return nil
+}
+
+func (v *validator) validateSimdStoreLane(
+	instruction Instruction,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(V128); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (v *validator) pushValue(value ValueType) {
 	v.valueStack = append(v.valueStack, value)
 }
@@ -1088,49 +1173,6 @@ func (v *validator) markFrameUnreachable() error {
 	}
 	v.valueStack = v.valueStack[:frame.height]
 	frame.unreachable = true
-	return nil
-}
-
-func (v *validator) validateSimdLoadLane(
-	instruction Instruction,
-	sizeBytes uint32,
-) error {
-	if err := v.validateMemoryExists(0); err != nil {
-		return err
-	}
-	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
-		return err
-	}
-	laneIndex := uint32(instruction.Immediates[3])
-	if laneIndex >= 16/sizeBytes {
-		return ErrSimdLaneIndexOutOfBounds
-	}
-	if _, err := v.popExpectedValue(V128); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	v.pushValue(V128)
-	return nil
-}
-
-func (v *validator) validateSimdStoreLane(
-	instruction Instruction,
-	sizeBytes uint32,
-) error {
-	if err := v.validateMemoryExists(0); err != nil {
-		return err
-	}
-	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(V128); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
 	return nil
 }
 
