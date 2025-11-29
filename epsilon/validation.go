@@ -415,7 +415,6 @@ func (v *validator) validateBrIf(instruction Instruction) error {
 	}
 
 	v.pushValues(labelTypes)
-
 	return nil
 }
 
@@ -678,13 +677,7 @@ func (v *validator) validateMemoryFill() error {
 	if err := v.validateMemoryExists(0); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
+	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
 	}
 	return nil
@@ -699,13 +692,7 @@ func (v *validator) validateMemoryInit(instruction Instruction) error {
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
+	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
 	}
 	return nil
@@ -720,13 +707,7 @@ func (v *validator) validateMemoryCopy(instruction Instruction) error {
 	if err := v.validateMemoryExists(srcMemoryIndex); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(I32); err != nil {
+	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
 	}
 	return nil
