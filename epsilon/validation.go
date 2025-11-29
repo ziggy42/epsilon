@@ -131,10 +131,10 @@ func (v *validator) validateFunction(function *Function) error {
 
 func (v *validator) validate(instruction Instruction) error {
 	switch instruction.Opcode {
-	case Nop:
-		return nil
 	case Unreachable:
 		return v.markFrameUnreachable()
+	case Nop:
+		return nil
 	case Block, Loop:
 		return v.validateBlock(instruction)
 	case If:
@@ -165,6 +165,10 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateLocalGet(instruction)
 	case LocalSet:
 		return v.validateLocalSet(instruction)
+	case MemorySize:
+		return v.validateMemorySize()
+	case MemoryGrow:
+		return v.validateMemoryGrow()
 	case I32Const:
 		return v.validateConst(I32)
 	case I64Const:
@@ -297,10 +301,40 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateStore(instruction, F32)
 	case F64Store:
 		return v.validateStore(instruction, F64)
-	case MemorySize:
-		return v.validateMemorySize()
-	case MemoryGrow:
-		return v.validateMemoryGrow()
+	case V128Const:
+		return v.validateConst(V128)
+	case V128Load8Lane:
+		return v.validateSimdLoadLane(instruction, 1)
+	case V128Load16Lane:
+		return v.validateSimdLoadLane(instruction, 2)
+	case V128Load32Lane:
+		return v.validateSimdLoadLane(instruction, 4)
+	case V128Load64Lane:
+		return v.validateSimdLoadLane(instruction, 8)
+	case V128Store8Lane:
+		return v.validateSimdStoreLane(instruction, 1)
+	case V128Store16Lane:
+		return v.validateSimdStoreLane(instruction, 2)
+	case V128Store32Lane:
+		return v.validateSimdStoreLane(instruction, 4)
+	case V128Store64Lane:
+		return v.validateSimdStoreLane(instruction, 8)
+	case I8x16ExtractLaneS,
+		I8x16ExtractLaneU,
+		I16x8ExtractLaneS,
+		I16x8ExtractLaneU,
+		I32x4ExtractLane:
+		return v.validateUnaryOp(V128, I32)
+	case I64x2ExtractLane:
+		return v.validateUnaryOp(V128, I64)
+	case F32x4ExtractLane:
+		return v.validateUnaryOp(V128, F32)
+	case F64x2ExtractLane:
+		return v.validateUnaryOp(V128, F64)
+	case MemoryInit:
+		return v.validateMemoryInit(instruction)
+	case MemoryCopy:
+		return v.validateMemoryCopy(instruction)
 	case MemoryFill:
 		return v.validateMemoryFill()
 	default:
@@ -656,6 +690,48 @@ func (v *validator) validateMemoryFill() error {
 	return nil
 }
 
+func (v *validator) validateMemoryInit(instruction Instruction) error {
+	dataIndex := uint32(instruction.Immediates[0])
+	memoryIndex := uint32(instruction.Immediates[1])
+	if dataIndex >= uint32(v.dataCount) {
+		return errors.New("data index out of bounds")
+	}
+	if err := v.validateMemoryExists(memoryIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateMemoryCopy(instruction Instruction) error {
+	destMemoryIndex := uint32(instruction.Immediates[0])
+	srcMemoryIndex := uint32(instruction.Immediates[1])
+	if err := v.validateMemoryExists(destMemoryIndex); err != nil {
+		return err
+	}
+	if err := v.validateMemoryExists(srcMemoryIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
 		return errors.New("table index out of bounds")
@@ -797,6 +873,45 @@ func (v *validator) markFrameUnreachable() error {
 	}
 	v.valueStack = v.valueStack[:frame.height]
 	frame.unreachable = true
+	return nil
+}
+
+func (v *validator) validateSimdLoadLane(
+	instruction Instruction,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(V128); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	v.pushValue(V128)
+	return nil
+}
+
+func (v *validator) validateSimdStoreLane(
+	instruction Instruction,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(V128); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
 	return nil
 }
 
