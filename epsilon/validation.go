@@ -283,13 +283,13 @@ func (v *validator) validate(instruction Instruction) error {
 	case GlobalSet:
 		return v.validateGlobalSet(instruction)
 	case I32Load:
-		return v.validateLoad(instruction, I32)
+		return v.validateLoadN(instruction, I32, 4)
 	case I32Load8S, I32Load8U:
 		return v.validateLoadN(instruction, I32, 1)
 	case I32Load16S, I32Load16U:
 		return v.validateLoadN(instruction, I32, 2)
 	case I64Load:
-		return v.validateLoad(instruction, I64)
+		return v.validateLoadN(instruction, I64, 8)
 	case I64Load8S, I64Load8U:
 		return v.validateLoadN(instruction, I64, 1)
 	case I64Load16S, I64Load16U:
@@ -297,17 +297,17 @@ func (v *validator) validate(instruction Instruction) error {
 	case I64Load32S, I64Load32U:
 		return v.validateLoadN(instruction, I64, 4)
 	case F32Load:
-		return v.validateLoad(instruction, F32)
+		return v.validateLoadN(instruction, F32, 4)
 	case F64Load:
-		return v.validateLoad(instruction, F64)
+		return v.validateLoadN(instruction, F64, 8)
 	case I32Store:
-		return v.validateStore(instruction, I32)
+		return v.validateStoreN(instruction, I32, 4)
 	case I32Store8:
 		return v.validateStoreN(instruction, I32, 1)
 	case I32Store16:
 		return v.validateStoreN(instruction, I32, 2)
 	case I64Store:
-		return v.validateStore(instruction, I64)
+		return v.validateStoreN(instruction, I64, 8)
 	case I64Store8:
 		return v.validateStoreN(instruction, I64, 1)
 	case I64Store16:
@@ -315,11 +315,11 @@ func (v *validator) validate(instruction Instruction) error {
 	case I64Store32:
 		return v.validateStoreN(instruction, I64, 4)
 	case F32Store:
-		return v.validateStore(instruction, F32)
+		return v.validateStoreN(instruction, F32, 4)
 	case F64Store:
-		return v.validateStore(instruction, F64)
+		return v.validateStoreN(instruction, F64, 8)
 	case V128Load:
-		return v.validateLoad(instruction, V128)
+		return v.validateLoadN(instruction, V128, 16)
 	case V128Load8x8S, V128Load8x8U, V128Load16x4S, V128Load16x4U, V128Load32x2S,
 		V128Load32x2U, V128Load64Splat, V128Load64Zero:
 		return v.validateLoadN(instruction, V128, 8)
@@ -330,7 +330,7 @@ func (v *validator) validate(instruction Instruction) error {
 	case V128Load32Splat, V128Load32Zero:
 		return v.validateLoadN(instruction, V128, 4)
 	case V128Store:
-		return v.validateStore(instruction, V128)
+		return v.validateStoreN(instruction, V128, 16)
 	case V128Const:
 		return v.validateConst(V128)
 	case V128Load8Lane:
@@ -406,17 +406,16 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateUnaryOp(F32, V128)
 	case F64x2Splat:
 		return v.validateUnaryOp(F64, V128)
-	case I8x16ReplaceLane, I16x8ReplaceLane, I32x4ReplaceLane:
-		return v.validateReplaceLane(I32)
+	case I8x16ReplaceLane, I16x8ReplaceLane, I32x4ReplaceLane, I8x16Shl,
+		I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU, I32x4Shl, I32x4ShrS,
+		I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
+		return v.validateVectorScalar(I32)
 	case I64x2ReplaceLane:
-		return v.validateReplaceLane(I64)
+		return v.validateVectorScalar(I64)
 	case F32x4ReplaceLane:
-		return v.validateReplaceLane(F32)
+		return v.validateVectorScalar(F32)
 	case F64x2ReplaceLane:
-		return v.validateReplaceLane(F64)
-	case I8x16Shl, I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU,
-		I32x4Shl, I32x4ShrS, I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
-		return v.validateSimdShift()
+		return v.validateVectorScalar(F64)
 	case MemoryInit:
 		return v.validateMemoryInit(instruction)
 	case MemoryCopy:
@@ -697,13 +696,6 @@ func (v *validator) validateLoadN(
 	return v.validateUnaryOp(I32, valueType)
 }
 
-func (v *validator) validateLoad(
-	instruction Instruction,
-	valueType ValueType,
-) error {
-	return v.validateLoadN(instruction, valueType, bytesWidth(valueType))
-}
-
 func (v *validator) validateStoreN(
 	instruction Instruction,
 	valueType ValueType,
@@ -724,13 +716,6 @@ func (v *validator) validateStoreN(
 		return err
 	}
 	return nil
-}
-
-func (v *validator) validateStore(
-	instruction Instruction,
-	valueType ValueType,
-) error {
-	return v.validateStoreN(instruction, valueType, bytesWidth(valueType))
 }
 
 func (v *validator) validateMemArg(
@@ -989,19 +974,8 @@ func (v *validator) validateBitselect() error {
 	return nil
 }
 
-func (v *validator) validateReplaceLane(scalarType ValueType) error {
-	if _, err := v.popExpectedValue(scalarType); err != nil {
-		return err
-	}
-	if _, err := v.popExpectedValue(V128); err != nil {
-		return err
-	}
-	v.pushValue(V128)
-	return nil
-}
-
-func (v *validator) validateSimdShift() error {
-	if _, err := v.popExpectedValue(I32); err != nil {
+func (v *validator) validateVectorScalar(scalar ValueType) error {
+	if _, err := v.popExpectedValue(scalar); err != nil {
 		return err
 	}
 	if _, err := v.popExpectedValue(V128); err != nil {
@@ -1190,24 +1164,6 @@ func toValueType(code uint64) ValueType {
 	case uint64(ExternRefType):
 		return ExternRefType
 	default:
-		// TODO: ??
 		return Bottom
-	}
-}
-
-func bytesWidth(valueType ValueType) uint32 {
-	switch valueType {
-	case I32:
-		return 4
-	case I64:
-		return 8
-	case F32:
-		return 4
-	case F64:
-		return 8
-	case V128:
-		return 16
-	default:
-		return 0
 	}
 }
