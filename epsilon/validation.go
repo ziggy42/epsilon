@@ -1,6 +1,9 @@
 package epsilon
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	ErrBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
@@ -423,8 +426,7 @@ func (v *validator) validate(instruction Instruction) error {
 	case MemoryFill:
 		return v.validateMemoryFill()
 	default:
-		// TODO: implement other opcodes
-		return nil
+		return fmt.Errorf("unknown opcode %d", instruction.Opcode)
 	}
 }
 
