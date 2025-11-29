@@ -24,6 +24,8 @@ var (
 	ErrTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
 	ErrCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
 	ErrGlobalIsImmutable                = errors.New("global is immutable")
+	ErrRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
+	ErrSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
 )
 
 type bottomType struct{}
@@ -563,15 +565,15 @@ func (v *validator) validateCallIndirect(instruction Instruction) error {
 		return ErrTableTypeMustBeFuncRef
 	}
 
-	if typeIndex >= uint32(len(v.funcTypes)) {
+	if typeIndex >= uint32(len(v.typeDefs)) {
 		return ErrCallIndirectTypeIndexOutOfBounds
 	}
-	functionType := v.funcTypes[typeIndex]
+	functionType := v.typeDefs[typeIndex]
 
-	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
+	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
+	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
 		return err
 	}
 	v.pushValues(functionType.ResultTypes)
@@ -587,22 +589,23 @@ func (v *validator) validateSelect(t ValueType) error {
 	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
-	type1, err := v.popExpectedValue(t)
-	if err != nil {
-		return err
-	}
 	type2, err := v.popExpectedValue(t)
 	if err != nil {
 		return err
 	}
-
-	if !((isNumber(type1) && isNumber(type2)) ||
-		(isVector(type1) && isVector(type2))) {
-		return ErrTypesDoNotMatch
+	type1, err := v.popExpectedValue(t)
+	if err != nil {
+		return err
 	}
 
-	if type1 != type2 && type1 != Bottom && type2 != Bottom {
-		return ErrTypesDoNotMatch
+	if t == Bottom {
+		if !((isNumber(type1) && isNumber(type2)) ||
+			(isVector(type1) && isVector(type2))) {
+			return ErrTypesDoNotMatch
+		}
+		if type1 != type2 && type1 != Bottom && type2 != Bottom {
+			return ErrTypesDoNotMatch
+		}
 	}
 
 	if type1 == Bottom {
@@ -803,6 +806,9 @@ func (v *validator) validateConst(valueType ValueType) error {
 
 func (v *validator) validateRefNull(instruction Instruction) error {
 	refType := toValueType(instruction.Immediates[0])
+	if _, ok := refType.(ReferenceType); !ok {
+		return ErrRefNullRequiresReferenceType
+	}
 	v.pushValue(refType)
 	return nil
 }
@@ -1002,8 +1008,8 @@ func (v *validator) popExpectedValues(
 ) ([]ValueType, error) {
 	values := make([]ValueType, len(expected))
 	var err error
-	for i := range expected {
-		values[len(values)-1-i], err = v.popExpectedValue(expected[i])
+	for i := len(expected) - 1; i >= 0; i-- {
+		values[i], err = v.popExpectedValue(expected[i])
 		if err != nil {
 			return nil, err
 		}
@@ -1071,6 +1077,10 @@ func (v *validator) validateSimdLoadLane(
 	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
 		return err
 	}
+	laneIndex := uint32(instruction.Immediates[3])
+	if laneIndex >= 16/sizeBytes {
+		return ErrSimdLaneIndexOutOfBounds
+	}
 	if _, err := v.popExpectedValue(V128); err != nil {
 		return err
 	}
@@ -1110,7 +1120,7 @@ func (v *validator) getBlockTypes(blockType int32) ([]ValueType, []ValueType) {
 		return funcType.ParamTypes, funcType.ResultTypes
 	}
 
-	return []ValueType{}, []ValueType{toValueType(uint64(blockType))}
+	return []ValueType{}, []ValueType{toValueType(uint64(blockType & 0x7F))}
 }
 
 func toValueType(code uint64) ValueType {
