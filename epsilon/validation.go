@@ -115,6 +115,12 @@ func (v *validator) validateModule(module *Module) error {
 
 	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
 	for i, elem := range module.ElementSegments {
+		if elem.Mode == ActiveElementMode {
+			err := v.validateConstantExpression(elem.OffsetExpression)
+			if err != nil {
+				return err
+			}
+		}
 		v.elemTypes[i] = elem.Kind
 	}
 	v.dataCount = len(module.DataSegments)
