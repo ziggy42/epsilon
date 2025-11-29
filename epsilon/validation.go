@@ -5,6 +5,27 @@ import (
 	"fmt"
 )
 
+var (
+	ErrBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
+	ErrTypesDoNotMatch                  = errors.New("types do not match")
+	ErrLocalIndexOutOfBounds            = errors.New("local index out of bounds")
+	ErrGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
+	ErrTableIndexOutOfBounds            = errors.New("table index out of bounds")
+	ErrMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
+	ErrAlignmentTooLarge                = errors.New("alignment too large")
+	ErrControlStackEmpty                = errors.New("control stack is empty")
+	ErrElementIndexOutOfBounds          = errors.New("element index out of bounds")
+	ErrDataIndexOutOfBounds             = errors.New("data index out of bounds")
+	ErrFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
+	ErrValueStackUnderflow              = errors.New("value stack underflow")
+	ErrValueStackHeightMismatch         = errors.New("value stack height mismatch")
+	ErrReturnTypeNotSet                 = errors.New("return type not set")
+	ErrElseMustMatchIf                  = errors.New("else must match if")
+	ErrTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
+	ErrCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
+	ErrGlobalIsImmutable                = errors.New("global is immutable")
+)
+
 type bottomType struct{}
 
 func (bottomType) isValueType() {}
@@ -18,11 +39,6 @@ func isNumber(vt ValueType) bool {
 
 func isVector(vt ValueType) bool {
 	_, ok := vt.(VectorType)
-	return ok || vt == Bottom
-}
-
-func isReference(vt ValueType) bool {
-	_, ok := vt.(ReferenceType)
 	return ok || vt == Bottom
 }
 
@@ -420,7 +436,7 @@ func (v *validator) validateElse() error {
 	}
 
 	if frame.opcode != If {
-		return errors.New("else must match if")
+		return ErrElseMustMatchIf
 	}
 
 	v.pushControlFrame(Else, frame.startTypes, frame.endTypes)
@@ -439,7 +455,7 @@ func (v *validator) validateEnd() error {
 func (v *validator) validateBr(instruction Instruction) error {
 	labelIndex := uint32(instruction.Immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errors.New("br label index out of bounds")
+		return ErrBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -454,7 +470,7 @@ func (v *validator) validateBr(instruction Instruction) error {
 func (v *validator) validateBrIf(instruction Instruction) error {
 	labelIndex := uint32(instruction.Immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errors.New("br label index out of bounds")
+		return ErrBrLabelIndexOutOfBounds
 	}
 
 	if _, err := v.popExpectedValue(I32); err != nil {
@@ -481,7 +497,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 	}
 
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errors.New("br label index out of bounds")
+		return ErrBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -490,7 +506,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 	for _, index := range table {
 		if index >= uint64(len(v.controlStack)) {
-			return errors.New("br label index out of bounds")
+			return ErrBrLabelIndexOutOfBounds
 		}
 
 		frameIndex := len(v.controlStack) - 1 - int(index)
@@ -514,7 +530,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 func (v *validator) validateReturn() error {
 	if v.returnType == nil {
-		return errors.New("return type not set")
+		return ErrReturnTypeNotSet
 	}
 	if _, err := v.popExpectedValues(v.returnType); err != nil {
 		return err
@@ -525,7 +541,7 @@ func (v *validator) validateReturn() error {
 func (v *validator) validateCall(instruction Instruction) error {
 	functionIndex := uint32(instruction.Immediates[0])
 	if functionIndex >= uint32(len(v.funcTypes)) {
-		return errors.New("call function index out of bounds")
+		return ErrFunctionIndexOutOfBounds
 	}
 	functionType := v.funcTypes[functionIndex]
 	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
@@ -544,11 +560,11 @@ func (v *validator) validateCallIndirect(instruction Instruction) error {
 
 	tableType := v.tableTypes[tableIndex]
 	if tableType.ReferenceType != FuncRefType {
-		return errors.New("table type must be func ref")
+		return ErrTableTypeMustBeFuncRef
 	}
 
 	if typeIndex >= uint32(len(v.funcTypes)) {
-		return errors.New("call indirect type index out of bounds")
+		return ErrCallIndirectTypeIndexOutOfBounds
 	}
 	functionType := v.funcTypes[typeIndex]
 
@@ -582,11 +598,11 @@ func (v *validator) validateSelect(t ValueType) error {
 
 	if !((isNumber(type1) && isNumber(type2)) ||
 		(isVector(type1) && isVector(type2))) {
-		return errors.New("types do not match")
+		return ErrTypesDoNotMatch
 	}
 
 	if type1 != type2 && type1 != Bottom && type2 != Bottom {
-		return errors.New("types do not match")
+		return ErrTypesDoNotMatch
 	}
 
 	if type1 == Bottom {
@@ -601,7 +617,7 @@ func (v *validator) validateSelect(t ValueType) error {
 func (v *validator) validateLocalTee(instruction Instruction) error {
 	localIndex := instruction.Immediates[0]
 	if localIndex >= uint64(len(v.locals)) {
-		return errors.New("local index out of bounds")
+		return ErrLocalIndexOutOfBounds
 	}
 	valueType := v.locals[localIndex]
 	return v.validateUnaryOp(valueType, valueType)
@@ -610,7 +626,7 @@ func (v *validator) validateLocalTee(instruction Instruction) error {
 func (v *validator) validateLocalGet(instruction Instruction) error {
 	localIndex := instruction.Immediates[0]
 	if localIndex >= uint64(len(v.locals)) {
-		return errors.New("local index out of bounds")
+		return ErrLocalIndexOutOfBounds
 	}
 	v.pushValue(v.locals[localIndex])
 	return nil
@@ -619,7 +635,7 @@ func (v *validator) validateLocalGet(instruction Instruction) error {
 func (v *validator) validateLocalSet(instruction Instruction) error {
 	localIndex := instruction.Immediates[0]
 	if localIndex >= uint64(len(v.locals)) {
-		return errors.New("local index out of bounds")
+		return ErrLocalIndexOutOfBounds
 	}
 	_, err := v.popExpectedValue(v.locals[localIndex])
 	return err
@@ -628,7 +644,7 @@ func (v *validator) validateLocalSet(instruction Instruction) error {
 func (v *validator) validateGlobalGet(instruction Instruction) error {
 	globalIndex := instruction.Immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return errors.New("global index out of bounds")
+		return ErrGlobalIndexOutOfBounds
 	}
 	return v.validateConst(v.globalTypes[globalIndex].ValueType)
 }
@@ -636,12 +652,12 @@ func (v *validator) validateGlobalGet(instruction Instruction) error {
 func (v *validator) validateGlobalSet(instruction Instruction) error {
 	globalIndex := instruction.Immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return errors.New("global index out of bounds")
+		return ErrGlobalIndexOutOfBounds
 	}
 
 	globalType := v.globalTypes[globalIndex]
 	if !globalType.IsMutable {
-		return errors.New("global is immutable")
+		return ErrGlobalIsImmutable
 	}
 
 	_, err := v.popExpectedValue(globalType.ValueType)
@@ -706,7 +722,7 @@ func (v *validator) validateMemArg(
 ) error {
 	align := instruction.Immediates[0]
 	if 1<<align > nBytes {
-		return errors.New("alignment too large")
+		return ErrAlignmentTooLarge
 	}
 	return nil
 }
@@ -740,7 +756,7 @@ func (v *validator) validateMemoryInit(instruction Instruction) error {
 	dataIndex := uint32(instruction.Immediates[0])
 	memoryIndex := uint32(instruction.Immediates[1])
 	if dataIndex >= uint32(v.dataCount) {
-		return errors.New("data index out of bounds")
+		return ErrDataIndexOutOfBounds
 	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
@@ -768,14 +784,14 @@ func (v *validator) validateMemoryCopy(instruction Instruction) error {
 
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
-		return errors.New("table index out of bounds")
+		return ErrTableIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateMemoryExists(memoryIndex uint32) error {
 	if memoryIndex >= uint32(len(v.memTypes)) {
-		return errors.New("memory index out of bounds")
+		return ErrMemoryIndexOutOfBounds
 	}
 	return nil
 }
@@ -802,7 +818,7 @@ func (v *validator) validateRefIsNull() error {
 func (v *validator) validateRefFunc(instruction Instruction) error {
 	funcIndex := uint32(instruction.Immediates[0])
 	if funcIndex >= uint32(len(v.funcTypes)) {
-		return errors.New("function index out of bounds")
+		return ErrFunctionIndexOutOfBounds
 	}
 	v.pushValue(FuncRefType)
 	return nil
@@ -835,7 +851,7 @@ func (v *validator) validateTableInit(instruction Instruction) error {
 	elemIndex := uint32(instruction.Immediates[0])
 	tableIndex := uint32(instruction.Immediates[1])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return errors.New("element index out of bounds")
+		return ErrElementIndexOutOfBounds
 	}
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
@@ -907,7 +923,7 @@ func (v *validator) validateTableFill(instruction Instruction) error {
 func (v *validator) validateElemDrop(instruction Instruction) error {
 	elemIndex := uint32(instruction.Immediates[0])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return errors.New("element index out of bounds")
+		return ErrElementIndexOutOfBounds
 	}
 	return nil
 }
@@ -915,7 +931,7 @@ func (v *validator) validateElemDrop(instruction Instruction) error {
 func (v *validator) validateDataDrop(instruction Instruction) error {
 	dataIndex := uint32(instruction.Immediates[0])
 	if dataIndex >= uint32(v.dataCount) {
-		return errors.New("data index out of bounds")
+		return ErrDataIndexOutOfBounds
 	}
 	return nil
 }
@@ -962,7 +978,7 @@ func (v *validator) popValue() (ValueType, error) {
 	}
 
 	if len(v.valueStack) == currentFrame.height {
-		return nil, errors.New("value stack underflow")
+		return nil, ErrValueStackUnderflow
 	}
 
 	value := v.valueStack[len(v.valueStack)-1]
@@ -997,7 +1013,7 @@ func (v *validator) popExpectedValues(
 
 func (v *validator) peekControlFrame() (*controlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return nil, errors.New("control stack is empty")
+		return nil, ErrControlStackEmpty
 	}
 	return &v.controlStack[len(v.controlStack)-1], nil
 }
@@ -1015,14 +1031,14 @@ func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
 
 func (v *validator) popControlFrame() (controlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return controlFrame{}, errors.New("control stack is empty")
+		return controlFrame{}, ErrControlStackEmpty
 	}
 	frame := v.controlStack[len(v.controlStack)-1]
 	if _, err := v.popExpectedValues(frame.endTypes); err != nil {
 		return controlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return controlFrame{}, errors.New("value stack height mismatch")
+		return controlFrame{}, ErrValueStackHeightMismatch
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
