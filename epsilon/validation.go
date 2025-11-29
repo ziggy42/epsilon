@@ -1,6 +1,9 @@
 package epsilon
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 type bottomType struct{}
 
@@ -251,7 +254,9 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateBinaryOp(F64, F64)
 	case I32Eqz:
 		return v.validateUnaryOp(I32, I32)
-	case I64Eqz, I64Clz, I64Ctz, I64Popcnt:
+	case I64Eqz:
+		return v.validateUnaryOp(I64, I32)
+	case I64Clz, I64Ctz, I64Popcnt:
 		return v.validateUnaryOp(I64, I64)
 	case I32Clz, I32Ctz, I32Popcnt:
 		return v.validateUnaryOp(I32, I32)
@@ -259,6 +264,74 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateUnaryOp(F32, F32)
 	case F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt:
 		return v.validateUnaryOp(F64, F64)
+	case I32WrapI64:
+		return v.validateUnaryOp(I64, I32)
+	case I32TruncF32S, I32TruncF32U:
+		return v.validateUnaryOp(F32, I32)
+	case I32TruncF64S, I32TruncF64U:
+		return v.validateUnaryOp(F64, I32)
+	case I64ExtendI32S, I64ExtendI32U:
+		return v.validateUnaryOp(I32, I64)
+	case I64TruncF32S, I64TruncF32U:
+		return v.validateUnaryOp(F32, I64)
+	case I64TruncF64S, I64TruncF64U:
+		return v.validateUnaryOp(F64, I64)
+	case F32ConvertI32S, F32ConvertI32U:
+		return v.validateUnaryOp(I32, F32)
+	case F32ConvertI64S, F32ConvertI64U:
+		return v.validateUnaryOp(I64, F32)
+	case F32DemoteF64:
+		return v.validateUnaryOp(F64, F32)
+	case F64ConvertI32S, F64ConvertI32U:
+		return v.validateUnaryOp(I32, F64)
+	case F64ConvertI64S, F64ConvertI64U:
+		return v.validateUnaryOp(I64, F64)
+	case F64PromoteF32:
+		return v.validateUnaryOp(F32, F64)
+	case I32ReinterpretF32:
+		return v.validateUnaryOp(F32, I32)
+	case I64ReinterpretF64:
+		return v.validateUnaryOp(F64, I64)
+	case F32ReinterpretI32:
+		return v.validateUnaryOp(I32, F32)
+	case F64ReinterpretI64:
+		return v.validateUnaryOp(I64, F64)
+	case I32Extend8S, I32Extend16S:
+		return v.validateUnaryOp(I32, I32)
+	case I64Extend8S, I64Extend16S, I64Extend32S:
+		return v.validateUnaryOp(I64, I64)
+	case I32TruncSatF32S, I32TruncSatF32U:
+		return v.validateUnaryOp(F32, I32)
+	case I32TruncSatF64S, I32TruncSatF64U:
+		return v.validateUnaryOp(F64, I32)
+	case I64TruncSatF32S, I64TruncSatF32U:
+		return v.validateUnaryOp(F32, I64)
+	case I64TruncSatF64S, I64TruncSatF64U:
+		return v.validateUnaryOp(F64, I64)
+	case RefNull:
+		return v.validateRefNull(instruction)
+	case RefIsNull:
+		return v.validateRefIsNull()
+	case RefFunc:
+		return v.validateRefFunc(instruction)
+	case TableGet:
+		return v.validateTableGet(instruction)
+	case TableSet:
+		return v.validateTableSet(instruction)
+	case TableInit:
+		return v.validateTableInit(instruction)
+	case TableCopy:
+		return v.validateTableCopy(instruction)
+	case TableGrow:
+		return v.validateTableGrow(instruction)
+	case TableSize:
+		return v.validateTableSize(instruction)
+	case TableFill:
+		return v.validateTableFill(instruction)
+	case ElemDrop:
+		return v.validateElemDrop(instruction)
+	case DataDrop:
+		return v.validateDataDrop(instruction)
 	case LocalTee:
 		return v.validateLocalTee(instruction)
 	case GlobalGet:
@@ -732,6 +805,141 @@ func (v *validator) validateConst(valueType ValueType) error {
 	return nil
 }
 
+func (v *validator) validateRefNull(instruction Instruction) error {
+	refType := toValueType(instruction.Immediates[0])
+	v.pushValue(refType)
+	return nil
+}
+
+func (v *validator) validateRefIsNull() error {
+	if _, err := v.popValue(); err != nil {
+		return err
+	}
+	v.pushValue(I32)
+	return nil
+}
+
+func (v *validator) validateRefFunc(instruction Instruction) error {
+	funcIndex := uint32(instruction.Immediates[0])
+	if funcIndex >= uint32(len(v.funcTypes)) {
+		return errors.New("function index out of bounds")
+	}
+	v.pushValue(FuncRefType)
+	return nil
+}
+
+func (v *validator) validateTableGet(instruction Instruction) error {
+	tableIndex := uint32(instruction.Immediates[0])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	return v.validateUnaryOp(I32, v.tableTypes[tableIndex].ReferenceType)
+}
+
+func (v *validator) validateTableSet(instruction Instruction) error {
+	tableIndex := uint32(instruction.Immediates[0])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	referenceType := v.tableTypes[tableIndex].ReferenceType
+	if _, err := v.popExpectedValue(referenceType); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateTableInit(instruction Instruction) error {
+	elemIndex := uint32(instruction.Immediates[0])
+	tableIndex := uint32(instruction.Immediates[1])
+	if elemIndex >= uint32(len(v.elemTypes)) {
+		return errors.New("element index out of bounds")
+	}
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateTableCopy(instruction Instruction) error {
+	destTableIndex := uint32(instruction.Immediates[0])
+	srcTableIndex := uint32(instruction.Immediates[1])
+	if err := v.validateTableExists(destTableIndex); err != nil {
+		return err
+	}
+	if err := v.validateTableExists(srcTableIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateTableGrow(instruction Instruction) error {
+	tableIndex := uint32(instruction.Immediates[0])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	referenceType := v.tableTypes[tableIndex].ReferenceType
+	if _, err := v.popExpectedValue(referenceType); err != nil {
+		return err
+	}
+	v.pushValue(I32)
+	return nil
+}
+
+func (v *validator) validateTableSize(instruction Instruction) error {
+	tableIndex := uint32(instruction.Immediates[0])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	v.pushValue(I32)
+	return nil
+}
+
+func (v *validator) validateTableFill(instruction Instruction) error {
+	tableIndex := uint32(instruction.Immediates[0])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	referenceType := v.tableTypes[tableIndex].ReferenceType
+	if _, err := v.popExpectedValue(referenceType); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateElemDrop(instruction Instruction) error {
+	elemIndex := uint32(instruction.Immediates[0])
+	if elemIndex >= uint32(len(v.elemTypes)) {
+		return errors.New("element index out of bounds")
+	}
+	return nil
+}
+
+func (v *validator) validateDataDrop(instruction Instruction) error {
+	dataIndex := uint32(instruction.Immediates[0])
+	if dataIndex >= uint32(v.dataCount) {
+		return errors.New("data index out of bounds")
+	}
+	return nil
+}
+
 func (v *validator) validateUnaryOp(input ValueType, output ValueType) error {
 	if _, err := v.popExpectedValue(input); err != nil {
 		return err
@@ -788,7 +996,7 @@ func (v *validator) popExpectedValue(expected ValueType) (ValueType, error) {
 		return nil, err
 	}
 	if val != expected && val != Bottom && expected != Bottom {
-		return nil, errors.New("expected value type does not match")
+		return nil, fmt.Errorf("expected value type does not match: expected %v (%T), got %v (%T)", expected, expected, val, val)
 	}
 	return val, nil
 }
