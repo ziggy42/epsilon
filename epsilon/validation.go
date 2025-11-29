@@ -59,7 +59,11 @@ func (v *validator) validateModule(module *Module) error {
 	v.funcTypes = make([]FunctionType, 0, len(module.Imports)+len(module.Funcs))
 	v.tableTypes = make([]TableType, 0, len(module.Imports)+len(module.Tables))
 	v.memTypes = make([]MemoryType, 0, len(module.Imports)+len(module.Memories))
-	v.globalTypes = make([]GlobalType, 0, len(module.Imports)+len(module.GlobalVariables))
+	v.globalTypes = make(
+		[]GlobalType,
+		0,
+		len(module.Imports)+len(module.GlobalVariables),
+	)
 
 	for _, imp := range module.Imports {
 		switch t := imp.Type.(type) {
@@ -101,8 +105,10 @@ func (v *validator) validateFunction(function *Function) error {
 	functionType := v.typeDefs[function.TypeIndex]
 	v.locals = append(functionType.ParamTypes, function.Locals...)
 	v.returnType = functionType.ResultTypes
+	v.valueStack = v.valueStack[:0]
+	v.controlStack = v.controlStack[:0]
 
-	v.pushControlFrame(Block, functionType.ParamTypes, functionType.ResultTypes)
+	v.pushControlFrame(Block, []ValueType{}, functionType.ResultTypes)
 
 	decoder := NewDecoder(function.Body)
 	for decoder.HasMore() {
@@ -114,11 +120,19 @@ func (v *validator) validateFunction(function *Function) error {
 			return err
 		}
 	}
-	return nil
+
+	// The parser strips the trailing End instruction from the function body,
+	// but we still need to validate that the control frame is properly closed.
+	// We don't call validateEnd() here because that would push endTypes onto
+	// the stack, which is only needed for nested blocks.
+	_, err := v.popControlFrame()
+	return err
 }
 
 func (v *validator) validate(instruction Instruction) error {
 	switch instruction.Opcode {
+	case Nop:
+		return nil
 	case Unreachable:
 		return v.markFrameUnreachable()
 	case Block, Loop:
@@ -135,8 +149,12 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateBrIf(instruction)
 	case BrTable:
 		return v.validateBrTable(instruction)
+	case Return:
+		return v.validateReturn()
 	case Call:
 		return v.validateCall(instruction)
+	case CallIndirect:
+		return v.validateCallIndirect(instruction)
 	case Drop:
 		return v.validateDrop()
 	case Select:
@@ -155,10 +173,136 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateConst(F32)
 	case F64Const:
 		return v.validateConst(F64)
-	case I32Eq, I32LtS:
-		return v.validateComparisonOp(I32)
-	case I32Add, I32Sub, I32Mul:
-		return v.validateBinaryOp(I32)
+	case I32Eq,
+		I32Ne,
+		I32LtS,
+		I32LtU,
+		I32GtS,
+		I32GtU,
+		I32LeS,
+		I32LeU,
+		I32GeS,
+		I32GeU:
+		return v.validateBinaryOp(I32, I32)
+	case I64Eq,
+		I64Ne,
+		I64LtS,
+		I64LtU,
+		I64GtS,
+		I64GtU,
+		I64LeS,
+		I64LeU,
+		I64GeS,
+		I64GeU:
+		return v.validateBinaryOp(I64, I32)
+	case F32Eq,
+		F32Ne,
+		F32Lt,
+		F32Gt,
+		F32Le,
+		F32Ge:
+		return v.validateBinaryOp(F32, I32)
+	case F64Eq,
+		F64Ne,
+		F64Lt,
+		F64Gt,
+		F64Le,
+		F64Ge:
+		return v.validateBinaryOp(F64, I32)
+	case I32Add,
+		I32Sub,
+		I32Mul,
+		I32DivS,
+		I32DivU,
+		I32RemS,
+		I32RemU,
+		I32And,
+		I32Or,
+		I32Xor,
+		I32Shl,
+		I32ShrS,
+		I32ShrU,
+		I32Rotl,
+		I32Rotr:
+		return v.validateBinaryOp(I32, I32)
+	case I64Add,
+		I64Sub,
+		I64Mul,
+		I64DivS,
+		I64DivU,
+		I64RemS,
+		I64RemU,
+		I64And,
+		I64Or,
+		I64Xor,
+		I64Shl,
+		I64ShrS,
+		I64ShrU,
+		I64Rotl,
+		I64Rotr:
+		return v.validateBinaryOp(I64, I64)
+	case F32Add, F32Sub, F32Mul, F32Div, F32Min, F32Max, F32Copysign:
+		return v.validateBinaryOp(F32, F32)
+	case F64Add, F64Sub, F64Mul, F64Div, F64Min, F64Max, F64Copysign:
+		return v.validateBinaryOp(F64, F64)
+	case I32Eqz:
+		return v.validateUnaryOp(I32, I32)
+	case I64Eqz, I64Clz, I64Ctz, I64Popcnt:
+		return v.validateUnaryOp(I64, I64)
+	case I32Clz, I32Ctz, I32Popcnt:
+		return v.validateUnaryOp(I32, I32)
+	case F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt:
+		return v.validateUnaryOp(F32, F32)
+	case F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt:
+		return v.validateUnaryOp(F64, F64)
+	case LocalTee:
+		return v.validateLocalTee(instruction)
+	case GlobalGet:
+		return v.validateGlobalGet(instruction)
+	case GlobalSet:
+		return v.validateGlobalSet(instruction)
+	case I32Load:
+		return v.validateLoad(instruction, I32)
+	case I32Load8S, I32Load8U:
+		return v.validateLoadN(instruction, I32, 1)
+	case I32Load16S, I32Load16U:
+		return v.validateLoadN(instruction, I32, 2)
+	case I64Load:
+		return v.validateLoad(instruction, I64)
+	case I64Load8S, I64Load8U:
+		return v.validateLoadN(instruction, I64, 1)
+	case I64Load16S, I64Load16U:
+		return v.validateLoadN(instruction, I64, 2)
+	case I64Load32S, I64Load32U:
+		return v.validateLoadN(instruction, I64, 4)
+	case F32Load:
+		return v.validateLoad(instruction, F32)
+	case F64Load:
+		return v.validateLoad(instruction, F64)
+	case I32Store:
+		return v.validateStore(instruction, I32)
+	case I32Store8:
+		return v.validateStoreN(instruction, I32, 1)
+	case I32Store16:
+		return v.validateStoreN(instruction, I32, 2)
+	case I64Store:
+		return v.validateStore(instruction, I64)
+	case I64Store8:
+		return v.validateStoreN(instruction, I64, 1)
+	case I64Store16:
+		return v.validateStoreN(instruction, I64, 2)
+	case I64Store32:
+		return v.validateStoreN(instruction, I64, 4)
+	case F32Store:
+		return v.validateStore(instruction, F32)
+	case F64Store:
+		return v.validateStore(instruction, F64)
+	case MemorySize:
+		return v.validateMemorySize()
+	case MemoryGrow:
+		return v.validateMemoryGrow()
+	case MemoryFill:
+		return v.validateMemoryFill()
 	default:
 		// TODO: implement other opcodes
 		return nil
@@ -282,6 +426,16 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 	return v.markFrameUnreachable()
 }
 
+func (v *validator) validateReturn() error {
+	if v.returnType == nil {
+		return errors.New("return type not set")
+	}
+	if _, err := v.popExpectedValues(v.returnType); err != nil {
+		return err
+	}
+	return v.markFrameUnreachable()
+}
+
 func (v *validator) validateCall(instruction Instruction) error {
 	functionIndex := uint32(instruction.Immediates[0])
 	if functionIndex >= uint32(len(v.funcTypes)) {
@@ -289,6 +443,33 @@ func (v *validator) validateCall(instruction Instruction) error {
 	}
 	functionType := v.funcTypes[functionIndex]
 	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
+		return err
+	}
+	v.pushValues(functionType.ResultTypes)
+	return nil
+}
+
+func (v *validator) validateCallIndirect(instruction Instruction) error {
+	typeIndex := uint32(instruction.Immediates[0])
+	tableIndex := uint32(instruction.Immediates[1])
+	if err := v.validateTableExists(tableIndex); err != nil {
+		return err
+	}
+
+	tableType := v.tableTypes[tableIndex]
+	if tableType.ReferenceType != FuncRefType {
+		return errors.New("table type must be func ref")
+	}
+
+	if typeIndex >= uint32(len(v.funcTypes)) {
+		return errors.New("call indirect type index out of bounds")
+	}
+	functionType := v.funcTypes[typeIndex]
+
+	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
 	v.pushValues(functionType.ResultTypes)
@@ -331,6 +512,15 @@ func (v *validator) validateSelect(t ValueType) error {
 	return nil
 }
 
+func (v *validator) validateLocalTee(instruction Instruction) error {
+	localIndex := instruction.Immediates[0]
+	if localIndex >= uint64(len(v.locals)) {
+		return errors.New("local index out of bounds")
+	}
+	valueType := v.locals[localIndex]
+	return v.validateUnaryOp(valueType, valueType)
+}
+
 func (v *validator) validateLocalGet(instruction Instruction) error {
 	localIndex := instruction.Immediates[0]
 	if localIndex >= uint64(len(v.locals)) {
@@ -349,30 +539,158 @@ func (v *validator) validateLocalSet(instruction Instruction) error {
 	return err
 }
 
+func (v *validator) validateGlobalGet(instruction Instruction) error {
+	globalIndex := instruction.Immediates[0]
+	if globalIndex >= uint64(len(v.globalTypes)) {
+		return errors.New("global index out of bounds")
+	}
+	return v.validateConst(v.globalTypes[globalIndex].ValueType)
+}
+
+func (v *validator) validateGlobalSet(instruction Instruction) error {
+	globalIndex := instruction.Immediates[0]
+	if globalIndex >= uint64(len(v.globalTypes)) {
+		return errors.New("global index out of bounds")
+	}
+
+	globalType := v.globalTypes[globalIndex]
+	if !globalType.IsMutable {
+		return errors.New("global is immutable")
+	}
+
+	_, err := v.popExpectedValue(globalType.ValueType)
+	return err
+}
+
+func (v *validator) validateLoadN(
+	instruction Instruction,
+	valueType ValueType,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+
+	return v.validateUnaryOp(I32, valueType)
+}
+
+func (v *validator) validateLoad(
+	instruction Instruction,
+	valueType ValueType,
+) error {
+	return v.validateLoadN(instruction, valueType, bytesWidth(valueType))
+}
+
+func (v *validator) validateStoreN(
+	instruction Instruction,
+	valueType ValueType,
+	sizeBytes uint32,
+) error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+
+	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
+		return err
+	}
+
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(valueType); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateStore(
+	instruction Instruction,
+	valueType ValueType,
+) error {
+	return v.validateStoreN(instruction, valueType, bytesWidth(valueType))
+}
+
+func (v *validator) validateMemArg(
+	instruction Instruction,
+	nBytes uint32,
+) error {
+	align := instruction.Immediates[0]
+	if 1<<align > nBytes {
+		return errors.New("alignment too large")
+	}
+	return nil
+}
+
+func (v *validator) validateMemorySize() error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	v.pushValue(I32)
+	return nil
+}
+
+func (v *validator) validateMemoryGrow() error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	return v.validateUnaryOp(I32, I32)
+}
+
+func (v *validator) validateMemoryFill() error {
+	if err := v.validateMemoryExists(0); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	if _, err := v.popExpectedValue(I32); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *validator) validateTableExists(tableIndex uint32) error {
+	if tableIndex >= uint32(len(v.tableTypes)) {
+		return errors.New("table index out of bounds")
+	}
+	return nil
+}
+
+func (v *validator) validateMemoryExists(memoryIndex uint32) error {
+	if memoryIndex >= uint32(len(v.memTypes)) {
+		return errors.New("memory index out of bounds")
+	}
+	return nil
+}
+
 func (v *validator) validateConst(valueType ValueType) error {
 	v.pushValue(valueType)
 	return nil
 }
 
-func (v *validator) validateBinaryOp(valueType ValueType) error {
-	if _, err := v.popExpectedValue(valueType); err != nil {
+func (v *validator) validateUnaryOp(input ValueType, output ValueType) error {
+	if _, err := v.popExpectedValue(input); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(valueType); err != nil {
-		return err
-	}
-	v.pushValue(valueType)
+	v.pushValue(output)
 	return nil
 }
 
-func (v *validator) validateComparisonOp(valueType ValueType) error {
-	if _, err := v.popExpectedValue(valueType); err != nil {
+func (v *validator) validateBinaryOp(inputs ValueType, output ValueType) error {
+	if _, err := v.popExpectedValue(inputs); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(valueType); err != nil {
+	if _, err := v.popExpectedValue(inputs); err != nil {
 		return err
 	}
-	v.pushValue(I32)
+	v.pushValue(output)
 	return nil
 }
 
@@ -399,7 +717,7 @@ func (v *validator) popValue() (ValueType, error) {
 	}
 
 	if len(v.valueStack) == currentFrame.height {
-		return nil, errors.New("not enough values on the stack")
+		return nil, errors.New("value stack underflow")
 	}
 
 	value := v.valueStack[len(v.valueStack)-1]
@@ -459,7 +777,7 @@ func (v *validator) popControlFrame() (controlFrame, error) {
 		return controlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return controlFrame{}, errors.New("not enough values on the stack")
+		return controlFrame{}, errors.New("value stack height mismatch")
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
@@ -514,5 +832,22 @@ func toValueType(code uint64) ValueType {
 	default:
 		// TODO: ??
 		return Bottom
+	}
+}
+
+func bytesWidth(valueType ValueType) uint32 {
+	switch valueType {
+	case I32:
+		return 4
+	case I64:
+		return 8
+	case F32:
+		return 4
+	case F64:
+		return 8
+	case V128:
+		return 16
+	default:
+		return 0
 	}
 }
