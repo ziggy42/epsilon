@@ -3,6 +3,7 @@ package epsilon
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 var (
@@ -27,6 +28,9 @@ var (
 	ErrRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
 	ErrSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
 	ErrInvalidConstantExpression        = errors.New("invalid constant expression")
+	ErrInvalidLimits                    = errors.New("invalid limits")
+	ErrDuplicateExport                  = errors.New("duplicate export")
+	ErrInvalidStartFunction             = errors.New("invalid start function")
 )
 
 type bottomType struct{}
@@ -92,6 +96,10 @@ func (v *validator) validateModule(module *Module) error {
 	for _, imp := range module.Imports {
 		switch t := imp.Type.(type) {
 		case FunctionTypeIndex:
+			if uint32(t) >= uint32(len(v.typeDefs)) {
+				return ErrTypesDoNotMatch
+			}
+
 			v.funcTypes = append(v.funcTypes, module.Types[t])
 		case TableType:
 			v.tableTypes = append(v.tableTypes, t)
@@ -104,28 +112,110 @@ func (v *validator) validateModule(module *Module) error {
 	}
 
 	for _, function := range module.Funcs {
+		if function.TypeIndex >= uint32(len(module.Types)) {
+			return ErrFunctionIndexOutOfBounds
+		}
 		v.funcTypes = append(v.funcTypes, module.Types[function.TypeIndex])
 	}
-	v.tableTypes = append(v.tableTypes, module.Tables...)
-	v.memTypes = append(v.memTypes, module.Memories...)
+
+	for _, table := range module.Tables {
+		if err := validateLimits(table.Limits, math.MaxUint32); err != nil {
+			return err
+		}
+		v.tableTypes = append(v.tableTypes, table)
+	}
+	for _, memoryType := range module.Memories {
+		if err := validateLimits(memoryType.Limits, uint64(1)<<16); err != nil {
+			return err
+		}
+		v.memTypes = append(v.memTypes, memoryType)
+	}
 	for _, globalVariable := range module.GlobalVariables {
-		err := v.validateConstantExpression(globalVariable.InitExpression)
+		globalType := globalVariable.GlobalType
+		initExpr := globalVariable.InitExpression
+		err := v.validateConstantExpression(initExpr, globalType.ValueType)
 		if err != nil {
 			return err
 		}
-		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
+		v.globalTypes = append(v.globalTypes, globalType)
+	}
+
+	exportNamesSet := make(map[string]struct{}, len(module.Exports))
+	for _, export := range module.Exports {
+		if _, ok := exportNamesSet[export.Name]; ok {
+			return ErrDuplicateExport
+		}
+		exportNamesSet[export.Name] = struct{}{}
+		switch export.IndexType {
+		case FunctionIndexType:
+			if err := v.validateFunctionTypeExists(export.Index); err != nil {
+				return err
+			}
+		case TableIndexType:
+			if err := v.validateTableExists(export.Index); err != nil {
+				return err
+			}
+		case MemoryIndexType:
+			if err := v.validateMemoryExists(export.Index); err != nil {
+				return err
+			}
+		case GlobalIndexType:
+			if err := v.validateGlobalExists(export.Index); err != nil {
+				return err
+			}
+		}
+	}
+
+	if module.StartIndex != nil {
+		if err := v.validateFunctionTypeExists(*module.StartIndex); err != nil {
+			return err
+		}
+
+		startFunctionType := v.funcTypes[*module.StartIndex]
+		if len(startFunctionType.ParamTypes) != 0 {
+			return ErrInvalidStartFunction
+		}
+
+		if len(startFunctionType.ResultTypes) != 0 {
+			return ErrInvalidStartFunction
+		}
 	}
 
 	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
 	for i, elem := range module.ElementSegments {
 		if elem.Mode == ActiveElementMode {
-			err := v.validateConstantExpression(elem.OffsetExpression)
+			if err := v.validateTableExists(elem.TableIndex); err != nil {
+				return err
+			}
+
+			err := v.validateConstantExpression(elem.OffsetExpression, I32)
 			if err != nil {
 				return err
 			}
+
+			tableType := v.tableTypes[elem.TableIndex]
+			if tableType.ReferenceType != elem.Kind {
+				return ErrTypesDoNotMatch
+			}
 		}
+		for _, expr := range elem.FuncIndexesExpressions {
+			if err := v.validateConstantExpression(expr, elem.Kind); err != nil {
+				return err
+			}
+		}
+
+		for _, funcIndex := range elem.FuncIndexes {
+			if elem.Kind != FuncRefType {
+				return ErrTypesDoNotMatch
+			}
+			if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
+				return err
+			}
+		}
+
 		v.elemTypes[i] = elem.Kind
 	}
+
 	v.dataCount = len(module.DataSegments)
 
 	for _, function := range module.Funcs {
@@ -133,6 +223,20 @@ func (v *validator) validateModule(module *Module) error {
 			return err
 		}
 	}
+
+	for _, data := range module.DataSegments {
+		if data.Mode == ActiveDataMode {
+			if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
+				return err
+			}
+
+			err := v.validateConstantExpression(data.OffsetExpression, I32)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -164,7 +268,17 @@ func (v *validator) validateFunction(function *Function) error {
 	return err
 }
 
-func (v *validator) validateConstantExpression(data []byte) error {
+func (v *validator) validateConstantExpression(
+	data []byte,
+	expectedReturnType ValueType,
+) error {
+	v.locals = nil
+	v.returnType = []ValueType{expectedReturnType}
+	v.valueStack = v.valueStack[:0]
+	v.controlStack = v.controlStack[:0]
+
+	v.pushControlFrame(Block, []ValueType{}, []ValueType{expectedReturnType})
+
 	decoder := NewDecoder(data)
 	for decoder.HasMore() {
 		instruction, err := decoder.Decode()
@@ -175,10 +289,16 @@ func (v *validator) validateConstantExpression(data []byte) error {
 		if !v.isConstantInstruction(instruction) {
 			return ErrInvalidConstantExpression
 		}
+
+		if err := v.validate(instruction); err != nil {
+			return err
+		}
 	}
-	// There is an implicit end instruction here we are not validating because it
-	// is stripped by the parser.
-	return nil
+
+	// Same as validateFunction, we are working around the fact the parser
+	// strips the trailing End instruction from the function body.
+	_, err := v.popControlFrame()
+	return err
 }
 
 func (v *validator) isConstantInstruction(instruction Instruction) bool {
@@ -606,8 +726,8 @@ func (v *validator) validateReturn() error {
 
 func (v *validator) validateCall(instruction Instruction) error {
 	functionIndex := uint32(instruction.Immediates[0])
-	if functionIndex >= uint32(len(v.funcTypes)) {
-		return ErrFunctionIndexOutOfBounds
+	if err := v.validateFunctionTypeExists(functionIndex); err != nil {
+		return err
 	}
 	functionType := v.funcTypes[functionIndex]
 	if _, err := v.popExpectedValues(functionType.ParamTypes); err != nil {
@@ -835,6 +955,13 @@ func (v *validator) validateMemoryCopy(instruction Instruction) error {
 	return nil
 }
 
+func (v *validator) validateFunctionTypeExists(index uint32) error {
+	if index >= uint32(len(v.funcTypes)) {
+		return ErrFunctionIndexOutOfBounds
+	}
+	return nil
+}
+
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
 		return ErrTableIndexOutOfBounds
@@ -845,6 +972,13 @@ func (v *validator) validateTableExists(tableIndex uint32) error {
 func (v *validator) validateMemoryExists(memoryIndex uint32) error {
 	if memoryIndex >= uint32(len(v.memTypes)) {
 		return ErrMemoryIndexOutOfBounds
+	}
+	return nil
+}
+
+func (v *validator) validateGlobalExists(globalIndex uint32) error {
+	if globalIndex >= uint32(len(v.globalTypes)) {
+		return ErrGlobalIndexOutOfBounds
 	}
 	return nil
 }
@@ -873,8 +1007,8 @@ func (v *validator) validateRefIsNull() error {
 
 func (v *validator) validateRefFunc(instruction Instruction) error {
 	funcIndex := uint32(instruction.Immediates[0])
-	if funcIndex >= uint32(len(v.funcTypes)) {
-		return ErrFunctionIndexOutOfBounds
+	if err := v.validateFunctionTypeExists(funcIndex); err != nil {
+		return err
 	}
 	v.pushValue(FuncRefType)
 	return nil
@@ -915,6 +1049,13 @@ func (v *validator) validateTableInit(instruction Instruction) error {
 	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
 	}
+
+	tableType := v.tableTypes[tableIndex]
+	elemType := v.elemTypes[elemIndex]
+	if tableType.ReferenceType != elemType {
+		return ErrTypesDoNotMatch
+	}
+
 	return nil
 }
 
@@ -930,6 +1071,13 @@ func (v *validator) validateTableCopy(instruction Instruction) error {
 	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
 	}
+
+	destTableType := v.tableTypes[destTableIndex]
+	srcTableType := v.tableTypes[srcTableIndex]
+	if destTableType.ReferenceType != srcTableType.ReferenceType {
+		return ErrTypesDoNotMatch
+	}
+
 	return nil
 }
 
@@ -1217,4 +1365,20 @@ func toValueType(code uint64) ValueType {
 	default:
 		return Bottom
 	}
+}
+
+func validateLimits(limits Limits, maximumRange uint64) error {
+	if limits.Min > maximumRange {
+		return ErrInvalidLimits
+	}
+
+	if limits.Max == nil {
+		return nil
+	}
+
+	if *limits.Max > maximumRange {
+		return ErrInvalidLimits
+	}
+
+	return nil
 }

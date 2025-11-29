@@ -38,6 +38,7 @@ func Wat2Wasm(watCode string) ([]byte, error) {
 	cmd := exec.Command(
 		"wat2wasm",
 		"--enable-multi-memory",
+		"--no-check",
 		watPath,
 		"-o",
 		wasmPath,
