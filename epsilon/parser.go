@@ -458,6 +458,9 @@ func (p *Parser) parseGlobalType() (GlobalType, error) {
 	if err != nil {
 		return GlobalType{}, err
 	}
+	if isMutable != 0 && isMutable != 1 {
+		return GlobalType{}, fmt.Errorf("invalid global type mutability")
+	}
 	return GlobalType{ValueType: valueType, IsMutable: isMutable == 1}, nil
 }
 
