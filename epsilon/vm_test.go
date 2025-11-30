@@ -22,13 +22,10 @@ import (
 	"epsilon/wabt"
 )
 
-func initVm(wat string) (*VM, *ModuleInstance, error) {
-	return initVmWithImports(wat, map[string]map[string]any{})
-}
-
-func initVmWithImports(
+func initVM(
 	wat string,
 	imports map[string]map[string]any,
+	features *ExperimentalFeatures,
 ) (*VM, *ModuleInstance, error) {
 	wasm, err := wabt.Wat2Wasm(wat)
 	if err != nil {
@@ -40,7 +37,13 @@ func initVmWithImports(
 		return nil, nil, err
 	}
 
-	vm := NewVM()
+	var vm *VM
+	if features != nil {
+		vm = NewVMWithFeatures(*features)
+	} else {
+		vm = NewVM()
+	}
+
 	moduleInstance, err := vm.Instantiate(module, imports)
 	if err != nil {
 		return nil, nil, err
@@ -55,7 +58,7 @@ func TestExecuteExportedFunctionSum(t *testing.T) {
 			local.get 1
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -78,7 +81,7 @@ func TestExecuteExportedFunctionDiff(t *testing.T) {
 			local.get 1
 			i32.sub)
   )`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -106,7 +109,7 @@ func TestExecuteCall(t *testing.T) {
 			call $swap
 			i32.sub)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -136,7 +139,7 @@ func TestExecuteIf(t *testing.T) {
 		)
 		(export "min" (func $min))
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -183,7 +186,7 @@ func TestExecuteNestedIf(t *testing.T) {
 		)
 		(export "nested_if" (func $nested_if))
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -216,7 +219,7 @@ func TestExecuteRecursive(t *testing.T) {
 				i32.mul
 			end)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -245,7 +248,7 @@ func TestExecuteBrFromIf(t *testing.T) {
 				i32.const 200
 			end)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -281,7 +284,7 @@ func TestExecuteBrFromNestedIf(t *testing.T) {
 			i32.const 300
 		end)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -308,7 +311,7 @@ func TestExecuteBlock(t *testing.T) {
 			i32.const 5
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -336,7 +339,7 @@ func TestExecuteBrBlock(t *testing.T) {
 			i32.const 5
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -364,7 +367,7 @@ func TestExecuteBrFromNestedBlock(t *testing.T) {
 				i32.add
 			end)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -411,7 +414,7 @@ func TestExecuteLoop(t *testing.T) {
 
 			local.get $sum)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -436,7 +439,7 @@ func TestExecuteBrIf(t *testing.T) {
 			drop
 			i32.const 0)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -471,7 +474,7 @@ func TestExecuteBrIfPreservesStack(t *testing.T) {
 			i32.const 1
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -504,7 +507,7 @@ func TestExecuteBrTable(t *testing.T) {
 				i32.add
 			end)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -557,7 +560,7 @@ func TestExecuteReturn(t *testing.T) {
 			return
 			i32.const 20)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -597,7 +600,7 @@ func TestExecuteCallIndirect(t *testing.T) {
 
 		(export "dispatch" (func $dispatch))
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -632,7 +635,7 @@ func TestExecuteSelect(t *testing.T) {
 			select
 		)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -669,7 +672,7 @@ func TestExecuteLocalTee(t *testing.T) {
 			i32.mul
 		)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -709,7 +712,7 @@ func TestExecuteLoadStore(t *testing.T) {
 
 		(export "test" (func $test))
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -733,7 +736,7 @@ func TestExecuteLoadOutOfBoundsTraps(t *testing.T) {
 			i32.load offset=1)
 		(export "test" (func $test))
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -765,7 +768,7 @@ func TestFunctionImport(t *testing.T) {
 			},
 		},
 	}
-	vm, moduleInstance, err := initVmWithImports(wat, imports)
+	vm, moduleInstance, err := initVM(wat, imports, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -794,7 +797,7 @@ func TestGlobalGet(t *testing.T) {
 			"global": int32(42),
 		},
 	}
-	vm, moduleInstance, err := initVmWithImports(wat, imports)
+	vm, moduleInstance, err := initVM(wat, imports, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -819,7 +822,7 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
 
-	_, moduleInstance, err := initVm(wat)
+	_, moduleInstance, err := initVM(wat, nil, &ExperimentalFeatures{MultipleMemories: true})
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -864,7 +867,11 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 			i32.load8_u $mem1
 		)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(
+		wat,
+		nil,
+		&ExperimentalFeatures{MultipleMemories: true},
+	)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -902,7 +909,11 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 		)
 	)`
 
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(
+		wat,
+		nil,
+		&ExperimentalFeatures{MultipleMemories: true},
+	)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -936,7 +947,11 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 			i32.load $mem2
 		)
 	)`
-	vm, moduleInstance, err := initVm(wat)
+	vm, moduleInstance, err := initVM(
+		wat,
+		nil,
+		&ExperimentalFeatures{MultipleMemories: true},
+	)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}

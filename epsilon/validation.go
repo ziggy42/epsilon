@@ -32,6 +32,7 @@ var (
 	ErrDuplicateExport                  = errors.New("duplicate export")
 	ErrInvalidStartFunction             = errors.New("invalid start function")
 	ErrUndeclaredFunctionReference      = errors.New("undeclared function reference")
+	ErrMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
 )
 
 type bottomType struct{}
@@ -72,15 +73,17 @@ type validator struct {
 	elemTypes           []ReferenceType
 	dataCount           int
 	referencedFunctions map[uint32]bool
+	features            ExperimentalFeatures
 }
 
-func NewValidator() *validator {
+func NewValidator(features ExperimentalFeatures) *validator {
 	return &validator{
 		valueStack:          make([]ValueType, 0),
 		controlStack:        make([]controlFrame, 0),
 		locals:              make([]ValueType, 0),
 		returnType:          make([]ValueType, 0),
 		referencedFunctions: make(map[uint32]bool),
+		features:            features,
 	}
 }
 
@@ -132,6 +135,10 @@ func (v *validator) validateModule(module *Module) error {
 			return err
 		}
 		v.memTypes = append(v.memTypes, memoryType)
+	}
+
+	if !v.features.MultipleMemories && len(v.memTypes) > 1 {
+		return ErrMultipleMemoriesNotEnabled
 	}
 	for _, globalVariable := range module.GlobalVariables {
 		globalType := globalVariable.GlobalType
