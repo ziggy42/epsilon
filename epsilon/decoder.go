@@ -22,12 +22,18 @@ import (
 	"math"
 )
 
-var ErrUnexpectedEOF = errors.New("unexpected end of byte stream")
+var (
+	ErrUnexpectedEOF            = errors.New("unexpected end of byte stream")
+	ErrIntRepresentationTooLong = errors.New("integer representation too long")
+	ErrIntegerTooLarge          = errors.New("integer too large")
+	ErrMalformedMemopFlags      = errors.New("malformed memop flags")
+)
 
 const (
 	continuationBit = 0x80
 	payloadMask     = 0x7F
 	signBit         = 0x40
+	sixthBitMask    = uint64(1 << 6)
 )
 
 // This buffer exists for perfomance reasons: it makes sure only a single
@@ -277,7 +283,7 @@ func (d *Decoder) readOpcode() (Opcode, error) {
 	// Multi-byte opcode (prefixed with 0xFC or 0xFD).
 	val, err := d.readUint32()
 	if err != nil {
-		return 0, fmt.Errorf("reading multi-byte opcode index: %w", err)
+		return 0, err
 	}
 
 	var compositeOpcode uint32
@@ -340,12 +346,10 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 		return 0, 0, 0, err
 	}
 
-	sixthBitMask := uint64(1 << 6)
-
 	// The alignment exponent must be < 32.
 	// We also have to remove bit 6, used for multi memory.
-	if (align & ^(sixthBitMask)) >= 32 {
-		return 0, 0, 0, fmt.Errorf("malformed memop flags")
+	if (align & ^sixthBitMask) >= 32 {
+		return 0, 0, 0, ErrMalformedMemopFlags
 	}
 
 	memoryIndex := uint64(0)
@@ -376,7 +380,7 @@ func (d *Decoder) readBlockType() (uint64, error) {
 	const minS33 = -1 << 32
 	const maxS33 = (1 << 32) - 1
 	if val < minS33 || val > maxS33 {
-		return 0, fmt.Errorf("block type too large")
+		return 0, ErrIntegerTooLarge
 	}
 	return blockType, nil
 }
@@ -396,7 +400,7 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 		}
 		bytesRead++
 		if bytesRead > maxBytes {
-			return 0, fmt.Errorf("integer representation too long")
+			return 0, ErrIntRepresentationTooLong
 		}
 
 		// Each byte read contains 7 bits of "integer" and 1 bit to signal if the
@@ -409,14 +413,10 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 		if bytesRead == 10 {
 			sign := b & 1
 			remainingBits := (b & 0x7E) >> 1
-			if sign == 0 {
-				if remainingBits != 0 {
-					return 0, fmt.Errorf("integer too large")
-				}
-			} else {
-				if remainingBits != 0x3F {
-					return 0, fmt.Errorf("integer too large")
-				}
+			if sign == 0 && remainingBits != 0 {
+				return 0, ErrIntegerTooLarge
+			} else if sign == 1 && remainingBits != 0x3F {
+				return 0, ErrIntegerTooLarge
 			}
 		}
 
@@ -445,7 +445,7 @@ func (d *Decoder) readUint32() (uint64, error) {
 		return 0, err
 	}
 	if val > math.MaxUint32 {
-		return 0, fmt.Errorf("integer too large")
+		return 0, ErrIntegerTooLarge
 	}
 	return val, nil
 }
@@ -456,7 +456,7 @@ func (d *Decoder) readInt32() (uint64, error) {
 		return 0, err
 	}
 	if int64(val) < math.MinInt32 || int64(val) > math.MaxInt32 {
-		return 0, fmt.Errorf("integer too large")
+		return 0, ErrIntegerTooLarge
 	}
 	return val, nil
 }
@@ -469,7 +469,7 @@ func (d *Decoder) readUint8() (uint64, error) {
 		return 0, err
 	}
 	if val > math.MaxUint8 {
-		return 0, fmt.Errorf("integer too large")
+		return 0, ErrIntegerTooLarge
 	}
 	return val, nil
 }
@@ -487,7 +487,7 @@ func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
 		}
 		bytesRead++
 		if bytesRead > maxBytes {
-			return 0, fmt.Errorf("integer representation too long")
+			return 0, ErrIntRepresentationTooLong
 		}
 
 		group := uint64(b & payloadMask)
