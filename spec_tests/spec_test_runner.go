@@ -110,8 +110,8 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 			r.handleRegister(cmd)
 		case "assert_exhaustion":
 			r.handleAssertExhaustion(cmd)
-		// case "assert_invalid":
-		// 	r.handleAssertInvalid(cmd)
+		case "assert_invalid":
+			r.handleAssertInvalid(cmd)
 		case "assert_malformed":
 			// TODO(pivetta): We have to actual handle these.
 			r.t.Logf("Line %d: skipping command type: %s", cmd.Line, cmd.Type)

@@ -532,17 +532,22 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateSimdStoreLane(instruction, 4)
 	case V128Store64Lane:
 		return v.validateSimdStoreLane(instruction, 8)
-	case I8x16ExtractLaneS, I8x16ExtractLaneU, I16x8ExtractLaneS,
-		I16x8ExtractLaneU, I32x4ExtractLane, V128AnyTrue, I8x16AllTrue,
+	case I8x16ExtractLaneS, I8x16ExtractLaneU:
+		return v.validateSimdLaneOp(instruction, 16, I32, false)
+	case I16x8ExtractLaneS, I16x8ExtractLaneU:
+		return v.validateSimdLaneOp(instruction, 8, I32, false)
+	case I32x4ExtractLane:
+		return v.validateSimdLaneOp(instruction, 4, I32, false)
+	case I64x2ExtractLane:
+		return v.validateSimdLaneOp(instruction, 2, I64, false)
+	case F32x4ExtractLane:
+		return v.validateSimdLaneOp(instruction, 4, F32, false)
+	case F64x2ExtractLane:
+		return v.validateSimdLaneOp(instruction, 2, F64, false)
+	case V128AnyTrue, I8x16AllTrue,
 		I8x16Bitmask, I16x8AllTrue, I16x8Bitmask, I32x4AllTrue, I32x4Bitmask,
 		I64x2AllTrue, I64x2Bitmask:
 		return v.validateUnaryOp(V128, I32)
-	case I64x2ExtractLane:
-		return v.validateUnaryOp(V128, I64)
-	case F32x4ExtractLane:
-		return v.validateUnaryOp(V128, F32)
-	case F64x2ExtractLane:
-		return v.validateUnaryOp(V128, F64)
 	case V128Not, I8x16Abs, I8x16Neg, I8x16Popcnt, I16x8Abs, I16x8Neg,
 		I16x8ExtaddPairwiseI8x16S, I16x8ExtaddPairwiseI8x16U, I32x4Abs, I32x4Neg,
 		I32x4ExtaddPairwiseI16x8S, I32x4ExtaddPairwiseI16x8U, I64x2Abs, I64x2Neg,
@@ -589,16 +594,21 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateUnaryOp(F32, V128)
 	case F64x2Splat:
 		return v.validateUnaryOp(F64, V128)
-	case I8x16ReplaceLane, I16x8ReplaceLane, I32x4ReplaceLane, I8x16Shl,
-		I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU, I32x4Shl, I32x4ShrS,
-		I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
-		return v.validateVectorScalar(I32)
+	case I8x16ReplaceLane:
+		return v.validateSimdLaneOp(instruction, 16, I32, true)
+	case I16x8ReplaceLane:
+		return v.validateSimdLaneOp(instruction, 8, I32, true)
+	case I32x4ReplaceLane:
+		return v.validateSimdLaneOp(instruction, 4, I32, true)
 	case I64x2ReplaceLane:
-		return v.validateVectorScalar(I64)
+		return v.validateSimdLaneOp(instruction, 2, I64, true)
 	case F32x4ReplaceLane:
-		return v.validateVectorScalar(F32)
+		return v.validateSimdLaneOp(instruction, 4, F32, true)
 	case F64x2ReplaceLane:
-		return v.validateVectorScalar(F64)
+		return v.validateSimdLaneOp(instruction, 2, F64, true)
+	case I8x16Shl, I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU,
+		I32x4Shl, I32x4ShrS, I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
+		return v.validateVectorScalar(I32)
 	case MemoryInit:
 		return v.validateMemoryInit(instruction)
 	case MemoryCopy:
@@ -1051,6 +1061,22 @@ func (v *validator) validateTableGet(instruction Instruction) error {
 	return v.validateUnaryOp(I32, v.tableTypes[tableIndex].ReferenceType)
 }
 
+func (v *validator) validateSimdLaneOp(
+	instruction Instruction,
+	rangeVal uint64,
+	scalarType ValueType,
+	isReplace bool,
+) error {
+	laneIndex := instruction.Immediates[0]
+	if laneIndex >= rangeVal {
+		return ErrSimdLaneIndexOutOfBounds
+	}
+	if isReplace {
+		return v.validateVectorScalar(scalarType)
+	}
+	return v.validateUnaryOp(V128, scalarType)
+}
+
 func (v *validator) validateTableSet(instruction Instruction) error {
 	tableIndex := uint32(instruction.Immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
@@ -1406,6 +1432,10 @@ func validateLimits(limits Limits, maximumRange uint64) error {
 	}
 
 	if *limits.Max > maximumRange {
+		return ErrInvalidLimits
+	}
+
+	if limits.Min > *limits.Max {
 		return ErrInvalidLimits
 	}
 
