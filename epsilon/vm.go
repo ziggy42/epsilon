@@ -283,15 +283,15 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case If:
 		err = vm.handleIf(instruction)
 	case Else:
-		err = vm.handleElse()
+		vm.handleElse()
 	case End:
-		err = vm.handleEnd()
+		vm.handleEnd()
 	case Br:
-		err = vm.handleBr(instruction)
+		vm.handleBr(instruction)
 	case BrIf:
-		err = vm.handleBrIf(instruction)
+		vm.handleBrIf(instruction)
 	case BrTable:
-		err = vm.handleBrTable(instruction)
+		vm.handleBrTable(instruction)
 	case Return:
 		err = errReturn
 	case Call:
@@ -1238,64 +1238,52 @@ func (vm *VM) handleIf(instruction Instruction) error {
 	return nil
 }
 
-func (vm *VM) handleElse() error {
+func (vm *VM) handleElse() {
 	callFrame := vm.currentCallFrame()
 	// When we encounter an 'else' instruction, it means we have just finished
 	// executing the 'then' block of an 'if' statement. We need to jump to the
 	// 'end' of the 'if' block, skipping the 'else' block.
-	ifFrame, err := vm.popControlFrame()
-	if err != nil {
-		return err
-	}
-
+	ifFrame := vm.popControlFrame()
 	callFrame.Decoder.Pc = ifFrame.ContinuationPc
-	return nil
 }
 
-func (vm *VM) handleEnd() error {
-	frame, err := vm.popControlFrame()
-	if err != nil {
-		return err
-	}
+func (vm *VM) handleEnd() {
+	frame := vm.popControlFrame()
 	vm.unwindStack(frame.StackHeight, frame.OutputCount)
-	return nil
 }
 
-func (vm *VM) handleBr(instruction Instruction) error {
+func (vm *VM) handleBr(instruction Instruction) {
 	labelIndex := uint32(instruction.Immediates[0])
-	return vm.brToLabel(labelIndex)
+	vm.brToLabel(labelIndex)
 }
 
-func (vm *VM) handleBrIf(instruction Instruction) error {
+func (vm *VM) handleBrIf(instruction Instruction) {
 	labelIndex := uint32(instruction.Immediates[0])
 	val := vm.stack.PopInt32()
 	if val == 0 {
-		return nil
+		return
 	}
-	return vm.brToLabel(labelIndex)
+	vm.brToLabel(labelIndex)
 }
 
-func (vm *VM) handleBrTable(instruction Instruction) error {
+func (vm *VM) handleBrTable(instruction Instruction) {
 	immediates := instruction.Immediates
 	table := immediates[:len(immediates)-1]
 	defaultTarget := uint32(immediates[len(immediates)-1])
 	index := vm.stack.PopInt32()
 	if index >= 0 && int(index) < len(table) {
-		return vm.brToLabel(uint32(table[index]))
+		vm.brToLabel(uint32(table[index]))
 	} else {
-		return vm.brToLabel(defaultTarget)
+		vm.brToLabel(defaultTarget)
 	}
 }
 
-func (vm *VM) brToLabel(labelIndex uint32) error {
+func (vm *VM) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
 	var targetFrame *ControlFrame
-	var err error
 	for range int(labelIndex) + 1 {
-		if targetFrame, err = vm.popControlFrame(); err != nil {
-			return err
-		}
+		targetFrame = vm.popControlFrame()
 	}
 
 	var arity uint
@@ -1311,7 +1299,6 @@ func (vm *VM) brToLabel(labelIndex uint32) error {
 	}
 
 	callFrame.Decoder.Pc = targetFrame.ContinuationPc
-	return nil
 }
 
 func (vm *VM) handleCall(instruction Instruction) error {
@@ -1818,15 +1805,13 @@ func (vm *VM) pushControlFrame(frame *ControlFrame) {
 	callFrame.ControlStack = append(callFrame.ControlStack, frame)
 }
 
-func (vm *VM) popControlFrame() (*ControlFrame, error) {
+func (vm *VM) popControlFrame() *ControlFrame {
 	callFrame := vm.currentCallFrame()
-	if len(callFrame.ControlStack) == 0 {
-		return nil, errors.New("control stack is empty")
-	}
+	// Validation guarantees the control stack is never empty.
 	index := len(callFrame.ControlStack) - 1
 	frame := callFrame.ControlStack[index]
 	callFrame.ControlStack = callFrame.ControlStack[:index]
-	return frame, nil
+	return frame
 }
 
 func (vm *VM) initActiveElements(
