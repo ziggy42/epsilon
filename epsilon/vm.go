@@ -185,10 +185,7 @@ func (vm *VM) Instantiate(
 		}
 	}
 
-	exports, err := vm.resolveExports(module, moduleInstance)
-	if err != nil {
-		return nil, err
-	}
+	exports := vm.resolveExports(module, moduleInstance)
 	moduleInstance.Exports = exports
 	return moduleInstance, nil
 }
@@ -1472,10 +1469,7 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 		return table.Init(n, d, s, element.FuncIndexes)
 	case PassiveElementMode:
 		moduleInstance := vm.currentModuleInstance()
-		storeIndexes, err := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
-		if err != nil {
-			return err
-		}
+		storeIndexes := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
 		return table.Init(n, d, s, storeIndexes)
 	default:
 		return ErrTableOutOfBounds
@@ -1811,20 +1805,13 @@ func (vm *VM) initActiveElements(
 		offset := offsetAny.(int32)
 
 		storeTableIndex := moduleInstance.TableAddrs[element.TableIndex]
-		if storeTableIndex >= uint32(len(vm.store.tables)) {
-			return fmt.Errorf("unknown table")
-		}
-
 		table := vm.store.tables[storeTableIndex]
 		if offset > int32(table.Size()) {
 			return ErrTableOutOfBounds
 		}
 
 		if len(element.FuncIndexes) > 0 {
-			indexes, err := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
-			if err != nil {
-				return err
-			}
+			indexes := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
 			if err := table.InitFromSlice(offset, indexes); err != nil {
 				return err
 			}
@@ -1955,7 +1942,7 @@ func resolveImports(module *Module, imports map[string]map[string]any) (
 func (vm *VM) resolveExports(
 	module *Module,
 	instance *ModuleInstance,
-) ([]ExportInstance, error) {
+) []ExportInstance {
 	exports := []ExportInstance{}
 	for _, export := range module.Exports {
 		var value any
@@ -1972,12 +1959,10 @@ func (vm *VM) resolveExports(
 		case TableIndexType:
 			storeIndex := instance.TableAddrs[export.Index]
 			value = vm.store.tables[storeIndex]
-		default:
-			return nil, fmt.Errorf("unknown export index type %d", export.IndexType)
 		}
 		exports = append(exports, ExportInstance{Name: export.Name, Value: value})
 	}
-	return exports, nil
+	return exports
 }
 
 func (vm *VM) invokeHostFunction(fun *HostFunc) (res []any, err error) {
@@ -2024,15 +2009,12 @@ func (vm *VM) invokeInitExpression(
 func toStoreFuncIndexes(
 	moduleInstance *ModuleInstance,
 	localIndexes []int32,
-) ([]int32, error) {
+) []int32 {
 	storeIndices := make([]int32, len(localIndexes))
 	for i, localIndex := range localIndexes {
-		if localIndex >= int32(len(moduleInstance.FuncAddrs)) {
-			return nil, fmt.Errorf("invalid function index: %d", localIndex)
-		}
 		storeIndices[i] = int32(moduleInstance.FuncAddrs[localIndex])
 	}
-	return storeIndices, nil
+	return storeIndices
 }
 
 func (vm *VM) getFunction(localIndex uint32) FunctionInstance {
