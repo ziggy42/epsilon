@@ -60,9 +60,7 @@ func ResolveImports(
 				}
 				functions = append(functions, f)
 			default:
-				return nil, fmt.Errorf(
-					"%s.%s not a function", imp.ModuleName, imp.Name,
-				)
+				return nil, fmt.Errorf("%s.%s not a function", imp.ModuleName, imp.Name)
 			}
 		case GlobalType:
 			switch v := importedObj.(type) {
@@ -94,9 +92,7 @@ func ResolveImports(
 		case MemoryType:
 			memory, ok := importedObj.(*Memory)
 			if !ok {
-				return nil, fmt.Errorf(
-					"%s.%s not a memory", imp.ModuleName, imp.Name,
-				)
+				return nil, fmt.Errorf("%s.%s not a memory", imp.ModuleName, imp.Name)
 			}
 			providedLimits := Limits{
 				Min: uint32(memory.Size()),
@@ -111,9 +107,7 @@ func ResolveImports(
 		case TableType:
 			table, ok := importedObj.(*Table)
 			if !ok {
-				return nil, fmt.Errorf(
-					"%s.%s not a table", imp.ModuleName, imp.Name,
-				)
+				return nil, fmt.Errorf("%s.%s not a table", imp.ModuleName, imp.Name)
 			}
 			if table.Type.ReferenceType != t.ReferenceType {
 				return nil, fmt.Errorf(
