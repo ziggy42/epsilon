@@ -33,6 +33,7 @@ var (
 	ErrInvalidStartFunction             = errors.New("invalid start function")
 	ErrUndeclaredFunctionReference      = errors.New("undeclared function reference")
 	ErrMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
+	ErrDataCountNotSet                  = errors.New("data count not set")
 )
 
 type bottomType struct{}
@@ -71,7 +72,7 @@ type validator struct {
 	globalTypes         []GlobalType
 	importedTypes       []GlobalType // Only includes imported globals.
 	elemTypes           []ReferenceType
-	dataCount           int
+	dataCount           *uint64
 	referencedFunctions map[uint32]bool
 	features            ExperimentalFeatures
 }
@@ -172,7 +173,7 @@ func (v *validator) validateModule(module *Module) error {
 		v.elemTypes[i] = elem.Kind
 	}
 
-	v.dataCount = len(module.DataSegments)
+	v.dataCount = module.DataCount
 	for _, data := range module.DataSegments {
 		if err := v.validateDataSegment(&data); err != nil {
 			return err
@@ -1008,9 +1009,13 @@ func (v *validator) validateMemoryFill() error {
 }
 
 func (v *validator) validateMemoryInit(instruction Instruction) error {
+	if v.dataCount == nil {
+		return ErrDataCountNotSet
+	}
+
 	dataIndex := uint32(instruction.Immediates[0])
 	memoryIndex := uint32(instruction.Immediates[1])
-	if dataIndex >= uint32(v.dataCount) {
+	if dataIndex >= uint32(*v.dataCount) {
 		return ErrDataIndexOutOfBounds
 	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1234,8 +1239,12 @@ func (v *validator) validateElemDrop(instruction Instruction) error {
 }
 
 func (v *validator) validateDataDrop(instruction Instruction) error {
+	if v.dataCount == nil {
+		return ErrDataCountNotSet
+	}
+
 	dataIndex := uint32(instruction.Immediates[0])
-	if dataIndex >= uint32(v.dataCount) {
+	if dataIndex >= uint32(*v.dataCount) {
 		return ErrDataIndexOutOfBounds
 	}
 	return nil

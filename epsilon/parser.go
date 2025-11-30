@@ -192,6 +192,7 @@ func (p *Parser) Parse() (*Module, error) {
 		ElementSegments: elementSegments,
 		GlobalVariables: globals,
 		DataSegments:    dataSegments,
+		DataCount:       dataCount,
 	}, nil
 }
 

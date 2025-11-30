@@ -243,4 +243,5 @@ type Module struct {
 	ElementSegments []ElementSegment
 	GlobalVariables []GlobalVariable
 	DataSegments    []DataSegment
+	DataCount       *uint64
 }

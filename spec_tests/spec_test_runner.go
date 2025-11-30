@@ -112,8 +112,8 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 			r.handleAssertExhaustion(cmd)
 		case "assert_invalid":
 			r.handleAssertInvalid(cmd)
-			// case "assert_malformed":
-			// 	r.handleAssertMalformed(cmd)
+		case "assert_malformed":
+			r.handleAssertMalformed(cmd)
 		}
 	}
 }
