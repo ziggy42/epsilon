@@ -147,8 +147,8 @@ type Export struct {
 
 // See https://webassembly.github.io/spec/core/binary/types.html#limits
 type Limits struct {
-	Min uint64
-	Max *uint64
+	Min uint32
+	Max *uint32
 }
 
 type TableType struct {

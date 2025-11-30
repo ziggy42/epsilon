@@ -20,7 +20,7 @@ const (
 	// pageSize defines the size of a WebAssembly page in bytes (64KiB).
 	pageSize = 65536
 	// maxPages defines the maximum number of pages allowed.
-	maxPages = uint64(1 << 15)
+	maxPages = uint32(1 << 15)
 )
 
 var ErrMemoryOutOfBounds = errors.New("out of bounds memory access")
@@ -28,8 +28,8 @@ var ErrMemoryOutOfBounds = errors.New("out of bounds memory access")
 // Memory represents a linear memory instance.
 // https://webassembly.github.io/spec/core/exec/runtime.html#memory-instances
 type Memory struct {
-	limitMin uint64
-	limitMax uint64
+	limitMin uint32
+	limitMax uint32
 	data     []byte
 }
 
@@ -51,7 +51,7 @@ func NewMemory(memType MemoryType) *Memory {
 // It returns the original size in pages if successful, otherwise -1.
 func (m *Memory) Grow(pages int32) int32 {
 	currentSize := m.Size()
-	if uint64(pages)+uint64(currentSize) > m.limitMax {
+	if uint32(pages)+uint32(currentSize) > m.limitMax {
 		return -1
 	}
 	// Append a new zero-initialized slice of the required size.

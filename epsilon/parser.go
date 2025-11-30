@@ -669,17 +669,17 @@ func (p *Parser) parseLimits() (Limits, error) {
 	}
 	switch b {
 	case 0:
-		min, err := p.parseUleb128()
+		min, err := p.parseIndex()
 		if err != nil {
 			return Limits{}, err
 		}
 		return Limits{Min: min}, nil
 	case 1:
-		min, err := p.parseUleb128()
+		min, err := p.parseIndex()
 		if err != nil {
 			return Limits{}, err
 		}
-		max, err := p.parseUleb128()
+		max, err := p.parseIndex()
 		if err != nil {
 			return Limits{}, err
 		}
@@ -714,7 +714,7 @@ func (p *Parser) parseIndex() (uint32, error) {
 		return 0, err
 	}
 	if val > math.MaxUint32 {
-		return 0, fmt.Errorf("integer too large")
+		return 0, fmt.Errorf("integer overflow")
 	}
 	return uint32(val), nil
 }

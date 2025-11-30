@@ -59,7 +59,7 @@ func (t *Table) Grow(n int32, val any) int32 {
 	}
 	previousSize := t.Size()
 	if t.Type.Limits.Max != nil {
-		if uint64(previousSize)+uint64(n) > *t.Type.Limits.Max {
+		if uint32(previousSize)+uint32(n) > *t.Type.Limits.Max {
 			return -1
 		}
 	}

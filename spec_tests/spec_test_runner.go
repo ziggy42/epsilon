@@ -38,7 +38,7 @@ type SpecTestRunner struct {
 }
 
 func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
-	importMemoryLimitMax := uint64(2)
+	importMemoryLimitMax := uint32(2)
 	limits := epsilon.Limits{Min: 1, Max: &importMemoryLimitMax}
 	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: limits})
 	table := epsilon.NewTable(epsilon.TableType{Limits: epsilon.Limits{Min: 10}})

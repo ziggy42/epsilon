@@ -133,7 +133,7 @@ func (v *validator) validateModule(module *Module) error {
 	}
 
 	for _, memoryType := range module.Memories {
-		if err := validateLimits(memoryType.Limits, uint64(1)<<16); err != nil {
+		if err := validateLimits(memoryType.Limits, uint32(1)<<16); err != nil {
 			return err
 		}
 		v.memTypes = append(v.memTypes, memoryType)
@@ -1484,7 +1484,7 @@ func toValueType(code uint64) ValueType {
 	}
 }
 
-func validateLimits(limits Limits, maximumRange uint64) error {
+func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
 		return ErrInvalidLimits
 	}
