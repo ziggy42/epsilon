@@ -41,7 +41,11 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
 	importMemoryLimitMax := uint32(2)
 	limits := epsilon.Limits{Min: 1, Max: &importMemoryLimitMax}
 	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: limits})
-	table := epsilon.NewTable(epsilon.TableType{Limits: epsilon.Limits{Min: 10}})
+	tableLimitMax := uint32(20)
+	table := epsilon.NewTable(epsilon.TableType{
+		Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
+		ReferenceType: epsilon.FuncRefType,
+	})
 	spectestImports := map[string]any{
 		"global_i32": int32(666),
 		"global_i64": int64(666),
@@ -114,6 +118,10 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 			r.handleAssertInvalid(cmd)
 		case "assert_malformed":
 			r.handleAssertMalformed(cmd)
+		case "assert_unlinkable":
+			r.handleAssertUnlinkable(cmd)
+		default:
+			r.fatalf(cmd.Line, "unknown command type: %s", cmd.Type)
 		}
 	}
 }
@@ -281,6 +289,24 @@ func (r *SpecTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	_, err = r.vm.Instantiate(module, imports)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
+	}
+}
+
+func (r *SpecTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
+	wasmBytes, ok := r.wasmDict[cmd.Filename]
+	if !ok {
+		r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
+	}
+
+	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
+	if err != nil {
+		r.fatalf(cmd.Line, "failed to parse module %s: %v", cmd.Filename, err)
+	}
+
+	imports := r.buildImports()
+	_, err = r.vm.Instantiate(module, imports)
+	if err == nil {
+		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
 	}
 }
 

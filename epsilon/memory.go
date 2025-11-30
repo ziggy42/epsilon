@@ -28,22 +28,15 @@ var ErrMemoryOutOfBounds = errors.New("out of bounds memory access")
 // Memory represents a linear memory instance.
 // https://webassembly.github.io/spec/core/exec/runtime.html#memory-instances
 type Memory struct {
-	limitMin uint32
-	limitMax uint32
-	data     []byte
+	Limits Limits
+	data   []byte
 }
 
 // NewMemory creates a new Memory instance from a MemoryType.
 func NewMemory(memType MemoryType) *Memory {
-	max := maxPages
-	if memType.Limits.Max != nil {
-		max = *memType.Limits.Max
-	}
-
 	return &Memory{
-		limitMin: memType.Limits.Min,
-		limitMax: max,
-		data:     make([]byte, memType.Limits.Min*pageSize),
+		Limits: memType.Limits,
+		data:   make([]byte, memType.Limits.Min*pageSize),
 	}
 }
 
@@ -51,7 +44,12 @@ func NewMemory(memType MemoryType) *Memory {
 // It returns the original size in pages if successful, otherwise -1.
 func (m *Memory) Grow(pages int32) int32 {
 	currentSize := m.Size()
-	if uint32(pages)+uint32(currentSize) > m.limitMax {
+	max := maxPages
+	if m.Limits.Max != nil {
+		max = *m.Limits.Max
+	}
+
+	if uint32(pages)+uint32(currentSize) > max {
 		return -1
 	}
 	// Append a new zero-initialized slice of the required size.

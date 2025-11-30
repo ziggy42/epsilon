@@ -97,6 +97,7 @@ type Store struct {
 type Global struct {
 	Value   any
 	Mutable bool
+	Type    ValueType
 }
 
 func NewStore() *Store {

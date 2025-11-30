@@ -86,12 +86,12 @@ func (vm *VM) Instantiate(
 	}
 	moduleInstance := &ModuleInstance{Types: module.Types}
 
-	functions, tables, memories, globals, err := resolveImports(module, imports)
+	resolvedImports, err := ResolveImports(module, imports)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, functionInstance := range functions {
+	for _, functionInstance := range resolvedImports.Functions {
 		storeIndex := uint32(len(vm.store.funcs))
 		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
@@ -105,7 +105,7 @@ func (vm *VM) Instantiate(
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
 
-	for _, table := range tables {
+	for _, table := range resolvedImports.Tables {
 		storeIndex := uint32(len(vm.store.tables))
 		moduleInstance.TableAddrs = append(moduleInstance.TableAddrs, storeIndex)
 		vm.store.tables = append(vm.store.tables, table)
@@ -118,7 +118,7 @@ func (vm *VM) Instantiate(
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
-	for _, memory := range memories {
+	for _, memory := range resolvedImports.Memories {
 		storeIndex := uint32(len(vm.store.memories))
 		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
 		vm.store.memories = append(vm.store.memories, memory)
@@ -131,7 +131,7 @@ func (vm *VM) Instantiate(
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
-	for _, global := range globals {
+	for _, global := range resolvedImports.Globals {
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, global)
@@ -152,6 +152,7 @@ func (vm *VM) Instantiate(
 		vm.store.globals = append(vm.store.globals, &Global{
 			Value:   val,
 			Mutable: global.GlobalType.IsMutable,
+			Type:    global.GlobalType.ValueType,
 		})
 	}
 
@@ -1863,80 +1864,6 @@ func (vm *VM) initActiveDatas(
 	}
 
 	return nil
-}
-
-func resolveImports(module *Module, imports map[string]map[string]any) (
-	[]FunctionInstance,
-	[]*Table,
-	[]*Memory,
-	[]*Global,
-	error) {
-	functions := []FunctionInstance{}
-	tables := []*Table{}
-	memories := []*Memory{}
-	globals := []*Global{}
-	for _, imp := range module.Imports {
-		importedModule, ok := imports[imp.ModuleName]
-		if !ok {
-			return nil, nil, nil, nil, fmt.Errorf("missing module %s", imp.ModuleName)
-		}
-
-		importedObj, ok := importedModule[imp.Name]
-		if !ok {
-			return nil, nil, nil, nil, fmt.Errorf(
-				"%s not in module %s", imp.Name, imp.ModuleName,
-			)
-		}
-
-		switch t := imp.Type.(type) {
-		case FunctionTypeIndex:
-			switch f := importedObj.(type) {
-			case func(...any) []any:
-				hostFunction := &HostFunc{Type: module.Types[t], HostCode: f}
-				functions = append(functions, hostFunction)
-			case FunctionInstance:
-				if !f.GetType().Equal(&module.Types[t]) {
-					return nil, nil, nil, nil, fmt.Errorf(
-						"type mismatch for import %s.%s", imp.ModuleName, imp.Name,
-					)
-				}
-				functions = append(functions, f)
-			default:
-				return nil, nil, nil, nil, fmt.Errorf(
-					"%s.%s not a function", imp.ModuleName, imp.Name,
-				)
-			}
-		case GlobalType:
-			switch v := importedObj.(type) {
-			case int, int32, int64, float32, float64:
-				global := &Global{Value: v, Mutable: t.IsMutable}
-				globals = append(globals, global)
-			case *Global:
-				globals = append(globals, v)
-			default:
-				return nil, nil, nil, nil, fmt.Errorf(
-					"%s.%s not a valid global", imp.ModuleName, imp.Name,
-				)
-			}
-		case MemoryType:
-			memory, ok := importedObj.(*Memory)
-			if !ok {
-				return nil, nil, nil, nil, fmt.Errorf(
-					"%s.%s not a memory", imp.ModuleName, imp.Name,
-				)
-			}
-			memories = append(memories, memory)
-		case TableType:
-			table, ok := importedObj.(*Table)
-			if !ok {
-				return nil, nil, nil, nil, fmt.Errorf(
-					"%s.%s not a table", imp.ModuleName, imp.Name,
-				)
-			}
-			tables = append(tables, table)
-		}
-	}
-	return functions, tables, memories, globals, nil
 }
 
 func (vm *VM) resolveExports(
