@@ -97,8 +97,8 @@ func (p *Parser) Parse() (*Module, error) {
 		}
 		switch sectionId {
 		case CustomSectionId:
-			if p.parseCustomSection(payloadLen) != nil {
-				return nil, fmt.Errorf("failed to parse custom section")
+			if err := p.parseCustomSection(payloadLen); err != nil {
+				return nil, err
 			}
 		case TypeSectionId:
 			types, err = parseVector(p, p.parseFunctionType)
@@ -744,6 +744,9 @@ func (p *Parser) parseUint32() (uint32, error) {
 	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
+	}
+	if val > math.MaxUint32 {
+		return 0, fmt.Errorf("integer too large")
 	}
 	return uint32(val), nil
 }
