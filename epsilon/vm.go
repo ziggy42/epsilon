@@ -1363,9 +1363,7 @@ func (vm *VM) handleLocalSet(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
 	valueType := getLocalValueType(frame.Function, localIndex)
-	val := vm.stack.PopValueType(valueType)
-
-	frame.Locals[localIndex] = val
+	frame.Locals[localIndex] = vm.stack.PopValueType(valueType)
 }
 
 func (vm *VM) handleLocalTee(instruction Instruction) {
@@ -1373,7 +1371,6 @@ func (vm *VM) handleLocalTee(instruction Instruction) {
 	localIndex := int32(instruction.Immediates[0])
 	valueType := getLocalValueType(frame.Function, localIndex)
 	val := vm.stack.PopValueType(valueType)
-
 	frame.Locals[localIndex] = val
 	vm.stack.Push(val)
 }
@@ -1387,8 +1384,7 @@ func (vm *VM) handleGlobalGet(instruction Instruction) {
 func (vm *VM) handleGlobalSet(instruction Instruction) {
 	localIndex := uint32(instruction.Immediates[0])
 	global := vm.getGlobal(localIndex)
-	val := vm.stack.Pop()
-	global.Value = val
+	global.Value = vm.stack.Pop()
 }
 
 func (vm *VM) handleTableGet(instruction Instruction) error {
