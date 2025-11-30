@@ -130,6 +130,7 @@ func (v *validator) validateModule(module *Module) error {
 		}
 		v.tableTypes = append(v.tableTypes, table)
 	}
+
 	for _, memoryType := range module.Memories {
 		if err := validateLimits(memoryType.Limits, uint64(1)<<16); err != nil {
 			return err
@@ -140,6 +141,7 @@ func (v *validator) validateModule(module *Module) error {
 	if !v.features.MultipleMemories && len(v.memTypes) > 1 {
 		return ErrMultipleMemoriesNotEnabled
 	}
+
 	for _, globalVariable := range module.GlobalVariables {
 		if err := v.validateGlobal(&globalVariable); err != nil {
 			return err
