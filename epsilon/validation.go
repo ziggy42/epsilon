@@ -309,7 +309,13 @@ func (v *validator) validateFunction(function *Function) error {
 	// We don't call validateEnd() here because that would push endTypes onto
 	// the stack, which is only needed for nested blocks.
 	_, err := v.popControlFrame()
-	return err
+	if err != nil {
+		return err
+	}
+	if len(v.controlStack) != 0 {
+		return errors.New("unclosed control frames")
+	}
+	return nil
 }
 
 func (v *validator) validateConstExpression(

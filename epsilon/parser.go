@@ -80,6 +80,10 @@ func (p *Parser) Parse() (*Module, error) {
 	var dataSegments []DataSegment
 	var dataCount *uint64
 
+	// We initialize lastSection to CustomSectionId since custom sections
+	// can be in any order.
+	lastSection := CustomSectionId
+
 	for {
 		sectionIdByte, err := p.reader.ReadByte()
 		if err == io.EOF {
@@ -91,6 +95,13 @@ func (p *Parser) Parse() (*Module, error) {
 		}
 
 		sectionId := SectionId(sectionIdByte)
+		if err := validateSectionOrder(lastSection, sectionId); err != nil {
+			return nil, err
+		}
+		if sectionId != CustomSectionId {
+			lastSection = sectionId
+		}
+
 		payloadLen, err := p.parseUint32()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read payload length: %w", err)
@@ -241,9 +252,9 @@ func (p *Parser) parseCustomSection(payloadLen uint32) error {
 }
 
 func (p *Parser) parseFunction() (Function, error) {
-	size, err := p.parseUint64()
+	size, err := p.parseUint32()
 	if err != nil {
-		return Function{}, err
+		return Function{}, fmt.Errorf("failed to read function size: %w", err)
 	}
 
 	originalReader := p.reader
@@ -799,4 +810,36 @@ func uint64SliceToInt32(slice []uint64) []int32 {
 		result[i] = int32(val)
 	}
 	return result
+}
+
+func validateSectionOrder(last SectionId, current SectionId) error {
+	if current == CustomSectionId {
+		// Custom sections can be in any order.
+		return nil
+	}
+
+	order := getSectionOrder(current)
+	if order == 0 {
+		return fmt.Errorf("malformed section id: %d", current)
+	}
+	if order <= getSectionOrder(last) {
+		return fmt.Errorf("unexpected content after last section")
+	}
+	return nil
+}
+
+func getSectionOrder(id SectionId) int {
+	switch id {
+	case DataCountSectionId:
+		return 10
+	case CodeSectionId:
+		return 11
+	case DataSectionId:
+		return 12
+	default:
+		if id > DataCountSectionId {
+			return 0
+		}
+		return int(id)
+	}
 }

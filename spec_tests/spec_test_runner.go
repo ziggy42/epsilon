@@ -257,7 +257,7 @@ func (r *SpecTestRunner) handleAssertMalformed(cmd wabt.Command) {
 		return
 	}
 
-	// Checks on the instructions are not done in the parser, but already during
+	// Checks on the instructions are not done in the parser, but later during
 	// validation. Therefore we also need to try to instantiate the module.
 	_, err = r.vm.Instantiate(module, r.buildImports())
 	if err == nil {
