@@ -320,7 +320,7 @@ func (p *Parser) parseImport() (Import, error) {
 	var importType ImportType
 	switch b {
 	case 0:
-		index, err := p.parseUint64()
+		index, err := p.parseUint32()
 		if err != nil {
 			return Import{}, err
 		}
@@ -355,11 +355,11 @@ func (p *Parser) parseExport() (Export, error) {
 	if err != nil {
 		return Export{}, err
 	}
-	index, err := p.parseUint64()
+	index, err := p.parseUint32()
 	if err != nil {
 		return Export{}, err
 	}
-	return Export{Name: name, IndexType: IndexType(b), Index: uint32(index)}, nil
+	return Export{Name: name, IndexType: IndexType(b), Index: index}, nil
 }
 
 func (p *Parser) parseDataSegment() (DataSegment, error) {
@@ -725,12 +725,9 @@ func (p *Parser) parseLimits() (Limits, error) {
 }
 
 func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
-	count, err := parser.parseUint64()
+	count, err := parser.parseUint32()
 	if err != nil {
 		return nil, err
-	}
-	if count > math.MaxInt32 {
-		return nil, fmt.Errorf("too many items in vector")
 	}
 	items := make([]T, count)
 	for i := 0; i < int(count); i++ {
@@ -782,7 +779,7 @@ func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
 }
 
 func (p *Parser) parseUtf8String() (string, error) {
-	length, err := p.parseUint64()
+	length, err := p.parseUint32()
 	if err != nil {
 		return "", err
 	}
