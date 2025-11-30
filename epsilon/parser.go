@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 )
 
 var ErrElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
@@ -231,6 +232,15 @@ func (p *Parser) parseFunction() (Function, error) {
 	if err != nil {
 		return Function{}, fmt.Errorf("failed to parse locals: %w", err)
 	}
+
+	totalLocalsCount := 0
+	for _, variables := range localsVariables {
+		totalLocalsCount += len(variables)
+	}
+	if totalLocalsCount > math.MaxInt32 {
+		return Function{}, fmt.Errorf("too many locals: %d", totalLocalsCount)
+	}
+
 	locals := []ValueType{}
 	for _, variables := range localsVariables {
 		locals = append(locals, variables...)
@@ -253,6 +263,10 @@ func (p *Parser) parseLocalVariables() ([]ValueType, error) {
 	if err != nil {
 		return nil, err
 	}
+	if count > math.MaxInt32 {
+		return nil, fmt.Errorf("too many local variables: %d", count)
+	}
+
 	valueType, err := p.parseValueType()
 	if err != nil {
 		return nil, err
@@ -676,6 +690,9 @@ func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	if count > math.MaxInt32 {
+		return nil, fmt.Errorf("too many items in vector")
+	}
 	items := make([]T, count)
 	for i := 0; i < int(count); i++ {
 		parsed, err := parse()
@@ -691,6 +708,9 @@ func (p *Parser) parseIndex() (uint32, error) {
 	val, err := p.parseUleb128()
 	if err != nil {
 		return 0, err
+	}
+	if val > math.MaxUint32 {
+		return 0, fmt.Errorf("integer too large")
 	}
 	return uint32(val), nil
 }

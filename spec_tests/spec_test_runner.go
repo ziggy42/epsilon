@@ -112,9 +112,8 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 			r.handleAssertExhaustion(cmd)
 		case "assert_invalid":
 			r.handleAssertInvalid(cmd)
-		case "assert_malformed":
-			// TODO(pivetta): We have to actual handle these.
-			r.t.Logf("Line %d: skipping command type: %s", cmd.Line, cmd.Type)
+			// case "assert_malformed":
+			// 	r.handleAssertMalformed(cmd)
 		}
 	}
 }
@@ -234,6 +233,31 @@ func (r *SpecTestRunner) handleAssertInvalid(cmd wabt.Command) {
 		r.fatalf(cmd.Line, "expected validation error, failed to parse instead")
 	}
 
+	_, err = r.vm.Instantiate(module, r.buildImports())
+	if err == nil {
+		r.fatalf(cmd.Line, "expected validation error, but got no error")
+	}
+}
+
+func (r *SpecTestRunner) handleAssertMalformed(cmd wabt.Command) {
+	if strings.HasSuffix(cmd.Filename, ".wat") {
+		// "assert_malformed" in text format cannot even be compiled to wasm,
+		// therefore there is no point in trying to run this test.
+		return
+	}
+
+	wasmBytes, ok := r.wasmDict[cmd.Filename]
+	if !ok {
+		r.fatalf(cmd.Line, "wasm file %s not found", cmd.Filename)
+	}
+
+	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
+	if err != nil {
+		return
+	}
+
+	// Checks on the instructions are not done in the parser, but already during
+	// validation. Therefore we also need to try to instantiate the module.
 	_, err = r.vm.Instantiate(module, r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")

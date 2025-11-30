@@ -61,7 +61,12 @@ func Wast2json(wastFile string) (*WastJSON, map[string][]byte, error) {
 	outputName := strings.TrimSuffix(filepath.Base(wastFile), ".wast")
 	outputJson := filepath.Join(tempDir, outputName+".json")
 
-	cmd := exec.Command("wast2json", wastFile, "--output="+outputJson)
+	cmd := exec.Command(
+		"wast2json",
+		wastFile,
+		"--no-check",
+		"--output="+outputJson,
+	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, nil, fmt.Errorf("wast2json failed: %s", output)

@@ -87,8 +87,6 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		TableFill,
 		RefNull,
 		RefFunc,
-		MemorySize,
-		MemoryGrow,
 		I8x16ExtractLaneS,
 		I8x16ExtractLaneU,
 		I16x8ExtractLaneS,
@@ -108,6 +106,13 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
+		return immediatesBuffer[:1], nil
+	case MemorySize, MemoryGrow:
+		immediate, err := d.readByte()
+		if err != nil {
+			return nil, err
+		}
+		immediatesBuffer[0] = uint64(immediate)
 		return immediatesBuffer[:1], nil
 	case BrTable:
 		vector, err := d.readImmediateVector()
@@ -328,10 +333,18 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 		return 0, 0, 0, err
 	}
 
+	sixthBitMask := uint64(1 << 6)
+
+	// The alignment exponent must be < 32.
+	// We also have to remove bit 6, used for multi memory.
+	if (align & ^(sixthBitMask)) >= 32 {
+		return 0, 0, 0, fmt.Errorf("malformed memop flags")
+	}
+
 	memoryIndex := uint64(0)
 	// If bit 6 is set, this instruction is using an explicit memory index.
 	// This is relevant in WASM 3.
-	if align&(1<<6) != 0 {
+	if align&sixthBitMask != 0 {
 		memoryIndex, err = d.readUleb128()
 		if err != nil {
 			return 0, 0, 0, err

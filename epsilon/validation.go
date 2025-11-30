@@ -409,9 +409,9 @@ func (v *validator) validate(instruction Instruction) error {
 	case LocalSet:
 		return v.validateLocalSet(instruction)
 	case MemorySize:
-		return v.validateMemorySize()
+		return v.validateMemorySize(instruction)
 	case MemoryGrow:
-		return v.validateMemoryGrow()
+		return v.validateMemoryGrow(instruction)
 	case I32Const:
 		return v.validateConst(I32)
 	case I64Const:
@@ -972,16 +972,26 @@ func (v *validator) validateMemArg(
 	return nil
 }
 
-func (v *validator) validateMemorySize() error {
-	if err := v.validateMemoryExists(0); err != nil {
+func (v *validator) validateMemorySize(instruction Instruction) error {
+	memoryIndex := uint32(instruction.Immediates[0])
+	if !v.features.MultipleMemories && memoryIndex != 0 {
+		return ErrMultipleMemoriesNotEnabled
+	}
+
+	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
 	}
 	v.pushValue(I32)
 	return nil
 }
 
-func (v *validator) validateMemoryGrow() error {
-	if err := v.validateMemoryExists(0); err != nil {
+func (v *validator) validateMemoryGrow(instruction Instruction) error {
+	memoryIndex := uint32(instruction.Immediates[0])
+	if !v.features.MultipleMemories && memoryIndex != 0 {
+		return ErrMultipleMemoriesNotEnabled
+	}
+
+	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
 	}
 	return v.validateUnaryOp(I32, I32)
