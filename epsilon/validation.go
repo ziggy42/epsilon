@@ -141,13 +141,10 @@ func (v *validator) validateModule(module *Module) error {
 		return ErrMultipleMemoriesNotEnabled
 	}
 	for _, globalVariable := range module.GlobalVariables {
-		globalType := globalVariable.GlobalType
-		initExpr := globalVariable.InitExpression
-		err := v.validateConstantExpression(initExpr, globalType.ValueType)
-		if err != nil {
+		if err := v.validateGlobal(&globalVariable); err != nil {
 			return err
 		}
-		v.globalTypes = append(v.globalTypes, globalType)
+		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
 	}
 
 	exportNamesSet := make(map[string]struct{}, len(module.Exports))
@@ -156,89 +153,27 @@ func (v *validator) validateModule(module *Module) error {
 			return ErrDuplicateExport
 		}
 		exportNamesSet[export.Name] = struct{}{}
-		switch export.IndexType {
-		case FunctionIndexType:
-			if err := v.validateFunctionTypeExists(export.Index); err != nil {
-				return err
-			}
-			v.referencedFunctions[export.Index] = true
-		case TableIndexType:
-			if err := v.validateTableExists(export.Index); err != nil {
-				return err
-			}
-		case MemoryIndexType:
-			if err := v.validateMemoryExists(export.Index); err != nil {
-				return err
-			}
-		case GlobalIndexType:
-			if err := v.validateGlobalExists(export.Index); err != nil {
-				return err
-			}
+		if err := v.validateExport(&export); err != nil {
+			return err
 		}
 	}
 
-	if module.StartIndex != nil {
-		if err := v.validateFunctionTypeExists(*module.StartIndex); err != nil {
-			return err
-		}
-
-		startFunctionType := v.funcTypes[*module.StartIndex]
-		if len(startFunctionType.ParamTypes) != 0 {
-			return ErrInvalidStartFunction
-		}
-
-		if len(startFunctionType.ResultTypes) != 0 {
-			return ErrInvalidStartFunction
-		}
+	if err := v.validateStartIndex(module.StartIndex); err != nil {
+		return err
 	}
 
 	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
 	for i, elem := range module.ElementSegments {
-		if elem.Mode == ActiveElementMode {
-			if err := v.validateTableExists(elem.TableIndex); err != nil {
-				return err
-			}
-
-			err := v.validateConstantExpression(elem.OffsetExpression, I32)
-			if err != nil {
-				return err
-			}
-
-			tableType := v.tableTypes[elem.TableIndex]
-			if tableType.ReferenceType != elem.Kind {
-				return ErrTypesDoNotMatch
-			}
+		if err := v.validateElementSegment(&elem); err != nil {
+			return err
 		}
-		for _, expr := range elem.FuncIndexesExpressions {
-			if err := v.validateConstantExpression(expr, elem.Kind); err != nil {
-				return err
-			}
-		}
-
-		for _, funcIndex := range elem.FuncIndexes {
-			v.referencedFunctions[uint32(funcIndex)] = true
-			if elem.Kind != FuncRefType {
-				return ErrTypesDoNotMatch
-			}
-			if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
-				return err
-			}
-		}
-
 		v.elemTypes[i] = elem.Kind
 	}
 
 	v.dataCount = len(module.DataSegments)
 	for _, data := range module.DataSegments {
-		if data.Mode == ActiveDataMode {
-			if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
-				return err
-			}
-
-			err := v.validateConstantExpression(data.OffsetExpression, I32)
-			if err != nil {
-				return err
-			}
+		if err := v.validateDataSegment(&data); err != nil {
+			return err
 		}
 	}
 
@@ -248,6 +183,101 @@ func (v *validator) validateModule(module *Module) error {
 		}
 	}
 
+	return nil
+}
+
+func (v *validator) validateGlobal(global *GlobalVariable) error {
+	globalType := global.GlobalType
+	initExpr := global.InitExpression
+	return v.validateConstExpression(initExpr, globalType.ValueType)
+}
+
+func (v *validator) validateExport(export *Export) error {
+	switch export.IndexType {
+	case FunctionIndexType:
+		if err := v.validateFunctionTypeExists(export.Index); err != nil {
+			return err
+		}
+		v.referencedFunctions[export.Index] = true
+	case TableIndexType:
+		if err := v.validateTableExists(export.Index); err != nil {
+			return err
+		}
+	case MemoryIndexType:
+		if err := v.validateMemoryExists(export.Index); err != nil {
+			return err
+		}
+	case GlobalIndexType:
+		if err := v.validateGlobalExists(export.Index); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validator) validateStartIndex(index *uint32) error {
+	if index == nil {
+		return nil
+	}
+	if err := v.validateFunctionTypeExists(*index); err != nil {
+		return err
+	}
+
+	startFunctionType := v.funcTypes[*index]
+	if len(startFunctionType.ParamTypes) != 0 {
+		return ErrInvalidStartFunction
+	}
+	if len(startFunctionType.ResultTypes) != 0 {
+		return ErrInvalidStartFunction
+	}
+
+	return nil
+}
+
+func (v *validator) validateElementSegment(elem *ElementSegment) error {
+	if elem.Mode == ActiveElementMode {
+		if err := v.validateTableExists(elem.TableIndex); err != nil {
+			return err
+		}
+
+		expression := elem.OffsetExpression
+		if err := v.validateConstExpression(expression, I32); err != nil {
+			return err
+		}
+
+		if v.tableTypes[elem.TableIndex].ReferenceType != elem.Kind {
+			return ErrTypesDoNotMatch
+		}
+	}
+
+	for _, expr := range elem.FuncIndexesExpressions {
+		if err := v.validateConstExpression(expr, elem.Kind); err != nil {
+			return err
+		}
+	}
+
+	for _, funcIndex := range elem.FuncIndexes {
+		v.referencedFunctions[uint32(funcIndex)] = true
+		if elem.Kind != FuncRefType {
+			return ErrTypesDoNotMatch
+		}
+		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *validator) validateDataSegment(data *DataSegment) error {
+	if data.Mode != ActiveDataMode {
+		return nil
+	}
+	if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
+		return err
+	}
+	if err := v.validateConstExpression(data.OffsetExpression, I32); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -279,7 +309,7 @@ func (v *validator) validateFunction(function *Function) error {
 	return err
 }
 
-func (v *validator) validateConstantExpression(
+func (v *validator) validateConstExpression(
 	data []byte,
 	expectedReturnType ValueType,
 ) error {
@@ -389,7 +419,8 @@ func (v *validator) validate(instruction Instruction) error {
 	case F64Const:
 		return v.validateConst(F64)
 	case I32Eq, I32Ne, I32LtS, I32LtU, I32GtS, I32GtU, I32LeS, I32LeU, I32GeS,
-		I32GeU:
+		I32GeU, I32Add, I32Sub, I32Mul, I32DivS, I32DivU, I32RemS, I32RemU, I32And,
+		I32Or, I32Xor, I32Shl, I32ShrS, I32ShrU, I32Rotl, I32Rotr:
 		return v.validateBinaryOp(I32, I32)
 	case I64Eq, I64Ne, I64LtS, I64LtU, I64GtS, I64GtU, I64LeS, I64LeU, I64GeS,
 		I64GeU:
@@ -398,9 +429,6 @@ func (v *validator) validate(instruction Instruction) error {
 		return v.validateBinaryOp(F32, I32)
 	case F64Eq, F64Ne, F64Lt, F64Gt, F64Le, F64Ge:
 		return v.validateBinaryOp(F64, I32)
-	case I32Add, I32Sub, I32Mul, I32DivS, I32DivU, I32RemS, I32RemU, I32And,
-		I32Or, I32Xor, I32Shl, I32ShrS, I32ShrU, I32Rotl, I32Rotr:
-		return v.validateBinaryOp(I32, I32)
 	case I64Add, I64Sub, I64Mul, I64DivS, I64DivU, I64RemS, I64RemU, I64And,
 		I64Or, I64Xor, I64Shl, I64ShrS, I64ShrU, I64Rotl, I64Rotr:
 		return v.validateBinaryOp(I64, I64)
@@ -845,29 +873,28 @@ func (v *validator) validateSelect(t ValueType) error {
 }
 
 func (v *validator) validateLocalTee(instruction Instruction) error {
-	localIndex := instruction.Immediates[0]
-	if localIndex >= uint64(len(v.locals)) {
-		return ErrLocalIndexOutOfBounds
+	localType, err := v.getLocalType(instruction.Immediates[0])
+	if err != nil {
+		return err
 	}
-	valueType := v.locals[localIndex]
-	return v.validateUnaryOp(valueType, valueType)
+	return v.validateUnaryOp(localType, localType)
 }
 
 func (v *validator) validateLocalGet(instruction Instruction) error {
-	localIndex := instruction.Immediates[0]
-	if localIndex >= uint64(len(v.locals)) {
-		return ErrLocalIndexOutOfBounds
+	localType, err := v.getLocalType(instruction.Immediates[0])
+	if err != nil {
+		return err
 	}
-	v.pushValue(v.locals[localIndex])
+	v.pushValue(localType)
 	return nil
 }
 
 func (v *validator) validateLocalSet(instruction Instruction) error {
-	localIndex := instruction.Immediates[0]
-	if localIndex >= uint64(len(v.locals)) {
-		return ErrLocalIndexOutOfBounds
+	localType, err := v.getLocalType(instruction.Immediates[0])
+	if err != nil {
+		return err
 	}
-	_, err := v.popExpectedValue(v.locals[localIndex])
+	_, err = v.popExpectedValue(localType)
 	return err
 }
 
@@ -1287,6 +1314,13 @@ func (v *validator) validateSimdStoreLane(
 		return err
 	}
 	return nil
+}
+
+func (v *validator) getLocalType(index uint64) (ValueType, error) {
+	if index >= uint64(len(v.locals)) {
+		return nil, ErrLocalIndexOutOfBounds
+	}
+	return v.locals[index], nil
 }
 
 func (v *validator) pushValue(value ValueType) {
