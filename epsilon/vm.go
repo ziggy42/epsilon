@@ -657,7 +657,7 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case MemoryInit:
 		err = vm.handleMemoryInit(instruction)
 	case DataDrop:
-		err = vm.handleDataDrop(instruction)
+		vm.handleDataDrop(instruction)
 	case MemoryCopy:
 		err = vm.handleMemoryCopy(instruction)
 	case MemoryFill:
@@ -665,7 +665,7 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableInit:
 		err = vm.handleTableInit(instruction)
 	case ElemDrop:
-		err = vm.handleElemDrop(instruction)
+		vm.handleElemDrop(instruction)
 	case TableCopy:
 		err = vm.handleTableCopy(instruction)
 	case TableGrow:
@@ -1451,10 +1451,9 @@ func (vm *VM) handleMemoryInit(instruction Instruction) error {
 	return memory.Init(uint32(n), uint32(s), uint32(d), data.Content)
 }
 
-func (vm *VM) handleDataDrop(instruction Instruction) error {
+func (vm *VM) handleDataDrop(instruction Instruction) {
 	dataSegment := vm.getData(uint32(instruction.Immediates[0]))
 	dataSegment.Content = nil
-	return nil
 }
 
 func (vm *VM) handleMemoryCopy(instruction Instruction) error {
@@ -1495,15 +1494,10 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 	}
 }
 
-func (vm *VM) handleElemDrop(instruction Instruction) error {
+func (vm *VM) handleElemDrop(instruction Instruction) {
 	element := vm.getElement(uint32(instruction.Immediates[0]))
-	if element.Mode == DeclarativeElementMode {
-		return nil
-	}
-
 	element.FuncIndexes = nil
 	element.FuncIndexesExpressions = nil
-	return nil
 }
 
 func (vm *VM) handleTableCopy(instruction Instruction) error {
