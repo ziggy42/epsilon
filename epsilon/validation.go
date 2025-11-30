@@ -31,6 +31,7 @@ var (
 	ErrInvalidLimits                    = errors.New("invalid limits")
 	ErrDuplicateExport                  = errors.New("duplicate export")
 	ErrInvalidStartFunction             = errors.New("invalid start function")
+	ErrUndeclaredFunctionReference      = errors.New("undeclared function reference")
 )
 
 type bottomType struct{}
@@ -58,26 +59,28 @@ type controlFrame struct {
 }
 
 type validator struct {
-	valueStack    []ValueType
-	controlStack  []controlFrame
-	locals        []ValueType
-	returnType    []ValueType
-	typeDefs      []FunctionType
-	funcTypes     []FunctionType
-	tableTypes    []TableType
-	memTypes      []MemoryType
-	globalTypes   []GlobalType
-	importedTypes []GlobalType // Only includes imported globals.
-	elemTypes     []ReferenceType
-	dataCount     int
+	valueStack          []ValueType
+	controlStack        []controlFrame
+	locals              []ValueType
+	returnType          []ValueType
+	typeDefs            []FunctionType
+	funcTypes           []FunctionType
+	tableTypes          []TableType
+	memTypes            []MemoryType
+	globalTypes         []GlobalType
+	importedTypes       []GlobalType // Only includes imported globals.
+	elemTypes           []ReferenceType
+	dataCount           int
+	referencedFunctions map[uint32]bool
 }
 
 func NewValidator() *validator {
 	return &validator{
-		valueStack:   make([]ValueType, 0),
-		controlStack: make([]controlFrame, 0),
-		locals:       make([]ValueType, 0),
-		returnType:   make([]ValueType, 0),
+		valueStack:          make([]ValueType, 0),
+		controlStack:        make([]controlFrame, 0),
+		locals:              make([]ValueType, 0),
+		returnType:          make([]ValueType, 0),
+		referencedFunctions: make(map[uint32]bool),
 	}
 }
 
@@ -151,6 +154,7 @@ func (v *validator) validateModule(module *Module) error {
 			if err := v.validateFunctionTypeExists(export.Index); err != nil {
 				return err
 			}
+			v.referencedFunctions[export.Index] = true
 		case TableIndexType:
 			if err := v.validateTableExists(export.Index); err != nil {
 				return err
@@ -205,6 +209,7 @@ func (v *validator) validateModule(module *Module) error {
 		}
 
 		for _, funcIndex := range elem.FuncIndexes {
+			v.referencedFunctions[uint32(funcIndex)] = true
 			if elem.Kind != FuncRefType {
 				return ErrTypesDoNotMatch
 			}
@@ -217,13 +222,6 @@ func (v *validator) validateModule(module *Module) error {
 	}
 
 	v.dataCount = len(module.DataSegments)
-
-	for _, function := range module.Funcs {
-		if err := v.validateFunction(&function); err != nil {
-			return err
-		}
-	}
-
 	for _, data := range module.DataSegments {
 		if data.Mode == ActiveDataMode {
 			if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
@@ -234,6 +232,12 @@ func (v *validator) validateModule(module *Module) error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	for _, function := range module.Funcs {
+		if err := v.validateFunction(&function); err != nil {
+			return err
 		}
 	}
 
@@ -288,6 +292,14 @@ func (v *validator) validateConstantExpression(
 
 		if !v.isConstantInstruction(instruction) {
 			return ErrInvalidConstantExpression
+		}
+
+		// The order of the statements is important here. The validation for RefFunc
+		// checks whether the function index is referenced. Therefore, we must add
+		// the function index to the referencedFunctions map before validating the
+		// instruction.
+		if instruction.Opcode == RefFunc {
+			v.referencedFunctions[uint32(instruction.Immediates[0])] = true
 		}
 
 		if err := v.validate(instruction); err != nil {
@@ -634,6 +646,20 @@ func (v *validator) validateEnd() error {
 	if err != nil {
 		return err
 	}
+
+	if frame.opcode == If {
+		// This is the end of an if without an else, therefore the end types
+		// should match the start types.
+		if len(frame.startTypes) != len(frame.endTypes) {
+			return ErrTypesDoNotMatch
+		}
+		for i := range frame.startTypes {
+			if frame.startTypes[i] != frame.endTypes[i] {
+				return ErrTypesDoNotMatch
+			}
+		}
+	}
+
 	v.pushValues(frame.endTypes)
 	return nil
 }
@@ -1009,6 +1035,9 @@ func (v *validator) validateRefFunc(instruction Instruction) error {
 	funcIndex := uint32(instruction.Immediates[0])
 	if err := v.validateFunctionTypeExists(funcIndex); err != nil {
 		return err
+	}
+	if !v.referencedFunctions[funcIndex] {
+		return ErrUndeclaredFunctionReference
 	}
 	v.pushValue(FuncRefType)
 	return nil
