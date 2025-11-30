@@ -14,13 +14,6 @@
 
 package epsilon
 
-import (
-	"errors"
-	"fmt"
-)
-
-var ErrEmptyStack = errors.New("value stack is empty")
-
 type ValueStack struct {
 	data []any
 }
@@ -29,74 +22,54 @@ func NewValueStack() *ValueStack {
 	return &ValueStack{data: make([]any, 512)}
 }
 
-func (s *ValueStack) Push(v any) error {
-	switch v.(type) {
-	case int32, int64, float32, float64, Null, V128Value:
-		s.data = append(s.data, v)
-		return nil
-	default:
-		return fmt.Errorf("unsupported type: %T", v)
-	}
+func (s *ValueStack) Push(v any) {
+	// We know, due to validation, this is always safe.
+	s.data = append(s.data, v)
 }
 
-func (s *ValueStack) PushAll(values []any) error {
+func (s *ValueStack) PushAll(values []any) {
 	for _, v := range values {
-		if err := s.Push(v); err != nil {
-			return err
-		}
+		s.Push(v)
 	}
-	return nil
 }
 
-func (s *ValueStack) Drop() error {
-	_, err := s.Pop()
-	return err
+func (s *ValueStack) Drop() {
+	s.Pop()
 }
 
-func (s *ValueStack) PopInt32() (int32, error) {
+func (s *ValueStack) PopInt32() int32 {
 	return popAs[int32](s)
 }
 
-func (s *ValueStack) Pop3Int32() (int32, int32, int32, error) {
-	a, err := popAs[int32](s)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	b, err := popAs[int32](s)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	c, err := popAs[int32](s)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	return a, b, c, nil
+func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
+	a := popAs[int32](s)
+	b := popAs[int32](s)
+	c := popAs[int32](s)
+	return a, b, c
 }
 
-func (s *ValueStack) PopInt64() (int64, error) {
+func (s *ValueStack) PopInt64() int64 {
 	return popAs[int64](s)
 }
 
-func (s *ValueStack) PopFloat32() (float32, error) {
+func (s *ValueStack) PopFloat32() float32 {
 	return popAs[float32](s)
 }
 
-func (s *ValueStack) PopFloat64() (float64, error) {
+func (s *ValueStack) PopFloat64() float64 {
 	return popAs[float64](s)
 }
 
-func (s *ValueStack) PopV128() (V128Value, error) {
+func (s *ValueStack) PopV128() V128Value {
 	return popAs[V128Value](s)
 }
 
-func (s *ValueStack) Pop() (any, error) {
-	if s.Size() == 0 {
-		return nil, ErrEmptyStack
-	}
+func (s *ValueStack) Pop() any {
+	// Due to validation, we know the stack is never empty if we call Pop.
 	index := len(s.data) - 1
 	element := s.data[index]
 	s.data = s.data[:index]
-	return element, nil
+	return element
 }
 
 func (s *ValueStack) PeekN(n uint) []any {
@@ -104,7 +77,7 @@ func (s *ValueStack) PeekN(n uint) []any {
 	return s.data[start:]
 }
 
-func (s *ValueStack) PopValueType(vt ValueType) (any, error) {
+func (s *ValueStack) PopValueType(vt ValueType) any {
 	switch vt {
 	case I32:
 		return s.PopInt32()
@@ -119,20 +92,17 @@ func (s *ValueStack) PopValueType(vt ValueType) (any, error) {
 	case ExternRefType, FuncRefType:
 		return s.Pop()
 	default:
-		return nil, fmt.Errorf("unsupported value type: %v", vt)
+		// Due to validation, we know this is never reached.
+		panic("unsupported value type")
 	}
 }
 
-func (s *ValueStack) PopValueTypes(valueTypes []ValueType) ([]any, error) {
+func (s *ValueStack) PopValueTypes(valueTypes []ValueType) []any {
 	results := make([]any, len(valueTypes))
-	var err error
 	for i := len(valueTypes) - 1; i >= 0; i-- {
-		results[i], err = s.PopValueType(valueTypes[i])
-		if err != nil {
-			return nil, err
-		}
+		results[i] = s.PopValueType(valueTypes[i])
 	}
-	return results, nil
+	return results
 }
 
 func (s *ValueStack) Size() uint {
@@ -143,16 +113,7 @@ func (s *ValueStack) Resize(newSize uint) {
 	s.data = s.data[:newSize]
 }
 
-func popAs[T any](s *ValueStack) (T, error) {
-	var zero T
-	val, err := s.Pop()
-	if err != nil {
-		return zero, err
-	}
-
-	typedVal, ok := val.(T)
-	if !ok {
-		return zero, fmt.Errorf("top element was %T, not %T", val, zero)
-	}
-	return typedVal, nil
+func popAs[T any](s *ValueStack) T {
+	val := s.Pop()
+	return val.(T)
 }
