@@ -369,13 +369,13 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case MemoryGrow:
 		vm.handleMemoryGrow(instruction)
 	case I32Const:
-		handleConst(vm, instruction, Uint64ToInt32)
+		vm.stack.Push(Uint64ToInt32(instruction.Immediates[0]))
 	case I64Const:
-		handleConst(vm, instruction, Uint64ToInt64)
+		vm.stack.Push(Uint64ToInt64(instruction.Immediates[0]))
 	case F32Const:
-		handleConst(vm, instruction, Uint64ToFloat32)
+		vm.stack.Push(Uint64ToFloat32(instruction.Immediates[0]))
 	case F64Const:
-		handleConst(vm, instruction, Uint64ToFloat64)
+		vm.stack.Push(Uint64ToFloat64(instruction.Immediates[0]))
 	case I32Eqz:
 		handleUnaryBool(vm, vm.stack.PopInt32, EqualZero)
 	case I32Eq:
@@ -1420,14 +1420,6 @@ func (vm *VM) handleMemoryGrow(instruction Instruction) {
 	vm.stack.Push(oldSize)
 }
 
-func handleConst[T WasmNumber](
-	vm *VM,
-	instruction Instruction,
-	getConst func(uint64) T,
-) {
-	vm.stack.Push(getConst(instruction.Immediates[0]))
-}
-
 func (vm *VM) handleRefFunc(instruction Instruction) {
 	funcIndex := uint32(instruction.Immediates[0])
 	storeIndex := vm.currentModuleInstance().FuncAddrs[funcIndex]
@@ -1575,8 +1567,7 @@ func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	pop func() T,
 	op func(a T) R,
 ) {
-	a := pop()
-	vm.stack.Push(op(a))
+	vm.stack.Push(op(pop()))
 }
 
 func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
@@ -1598,8 +1589,7 @@ func handleUnaryBool[T WasmNumber | V128Value](
 	pop func() T,
 	op func(a T) bool,
 ) {
-	a := pop()
-	vm.stack.Push(BoolToInt32(op(a)))
+	vm.stack.Push(BoolToInt32(op(pop())))
 }
 
 func (vm *VM) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
