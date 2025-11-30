@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"unicode/utf8"
 )
 
 var ErrElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
@@ -90,16 +91,14 @@ func (p *Parser) Parse() (*Module, error) {
 		}
 
 		sectionId := SectionId(sectionIdByte)
-		payloadLen, err := p.parseUleb128()
+		payloadLen, err := p.parseUint32()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read payload length: %w", err)
 		}
 		switch sectionId {
 		case CustomSectionId:
-			// CustomSection is just ignored.
-			_, err = io.CopyN(io.Discard, p.reader, int64(payloadLen))
-			if err != nil {
-				return nil, fmt.Errorf("failed to skip custom section: %w", err)
+			if p.parseCustomSection(payloadLen) != nil {
+				return nil, fmt.Errorf("failed to parse custom section")
 			}
 		case TypeSectionId:
 			types, err = parseVector(p, p.parseFunctionType)
@@ -112,7 +111,7 @@ func (p *Parser) Parse() (*Module, error) {
 				return nil, err
 			}
 		case FunctionSectionId:
-			functionTypeIndexes, err = parseVector(p, p.parseIndex)
+			functionTypeIndexes, err = parseVector(p, p.parseUint32)
 			if err != nil {
 				return nil, err
 			}
@@ -137,7 +136,7 @@ func (p *Parser) Parse() (*Module, error) {
 				return nil, err
 			}
 		case StartSectionId:
-			index, err := p.parseIndex()
+			index, err := p.parseUint32()
 			if err != nil {
 				return nil, err
 			}
@@ -158,7 +157,7 @@ func (p *Parser) Parse() (*Module, error) {
 				return nil, err
 			}
 		case DataCountSectionId:
-			count, err := p.parseUleb128()
+			count, err := p.parseUint64()
 			if err != nil {
 				return nil, err
 			}
@@ -216,8 +215,33 @@ func (p *Parser) parseHeader() error {
 	return nil
 }
 
+func (p *Parser) parseCustomSection(payloadLen uint32) error {
+	// Custom section is ignored, but we still parse it to return parsing errors
+	// if it's not valid.
+	nameLength, bytesRead, err := p.parseUleb128(5)
+	if err != nil {
+		return fmt.Errorf("failed to read custom section name length: %w", err)
+	}
+
+	nameBytes := make([]byte, nameLength)
+	if _, err := io.ReadFull(p.reader, nameBytes); err != nil {
+		return fmt.Errorf("failed to read custom section name: %w", err)
+	}
+	if !utf8.Valid(nameBytes) {
+		return fmt.Errorf("custom section name is not valid UTF-8")
+	}
+
+	// Discard the actual bytes of the section.
+	remainingBytes := payloadLen - uint32(nameLength) - uint32(bytesRead)
+	_, err = io.CopyN(io.Discard, p.reader, int64(remainingBytes))
+	if err != nil {
+		return fmt.Errorf("failed to skip custom section: %w", err)
+	}
+	return nil
+}
+
 func (p *Parser) parseFunction() (Function, error) {
-	size, err := p.parseUleb128()
+	size, err := p.parseUint64()
 	if err != nil {
 		return Function{}, err
 	}
@@ -260,7 +284,7 @@ func (p *Parser) parseFunction() (Function, error) {
 }
 
 func (p *Parser) parseLocalVariables() ([]ValueType, error) {
-	count, err := p.parseUleb128()
+	count, err := p.parseUint64()
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +320,7 @@ func (p *Parser) parseImport() (Import, error) {
 	var importType ImportType
 	switch b {
 	case 0:
-		index, err := p.parseUleb128()
+		index, err := p.parseUint64()
 		if err != nil {
 			return Import{}, err
 		}
@@ -331,7 +355,7 @@ func (p *Parser) parseExport() (Export, error) {
 	if err != nil {
 		return Export{}, err
 	}
-	index, err := p.parseUleb128()
+	index, err := p.parseUint64()
 	if err != nil {
 		return Export{}, err
 	}
@@ -339,43 +363,54 @@ func (p *Parser) parseExport() (Export, error) {
 }
 
 func (p *Parser) parseDataSegment() (DataSegment, error) {
-	dataMode, err := p.parseUleb128()
+	dataMode, err := p.parseUint32()
 	if err != nil {
 		return DataSegment{}, err
 	}
 
-	if dataMode&1 != 0 {
+	switch dataMode {
+	case 0:
+		offsetExpression, err := p.parseExpression()
+		if err != nil {
+			return DataSegment{}, err
+		}
+		content, err := parseVector(p, p.reader.ReadByte)
+		if err != nil {
+			return DataSegment{}, err
+		}
+		return DataSegment{
+			Mode:             ActiveDataMode,
+			Content:          content,
+			OffsetExpression: offsetExpression,
+		}, nil
+	case 1:
 		content, err := parseVector(p, p.reader.ReadByte)
 		if err != nil {
 			return DataSegment{}, err
 		}
 		return DataSegment{Mode: PassiveDataMode, Content: content}, nil
-	}
-
-	memoryIndex := uint64(0)
-	if dataMode != 0 {
-		memoryIndex, err = p.parseUleb128()
+	case 2:
+		memoryIndex, err := p.parseUint32()
 		if err != nil {
 			return DataSegment{}, err
 		}
+		offsetExpression, err := p.parseExpression()
+		if err != nil {
+			return DataSegment{}, err
+		}
+		content, err := parseVector(p, p.reader.ReadByte)
+		if err != nil {
+			return DataSegment{}, err
+		}
+		return DataSegment{
+			Mode:             ActiveDataMode,
+			Content:          content,
+			MemoryIndex:      memoryIndex,
+			OffsetExpression: offsetExpression,
+		}, nil
+	default:
+		return DataSegment{}, fmt.Errorf("invalid data mode: %d", dataMode)
 	}
-
-	offsetExpression, err := p.parseExpression()
-	if err != nil {
-		return DataSegment{}, err
-	}
-
-	content, err := parseVector(p, p.reader.ReadByte)
-	if err != nil {
-		return DataSegment{}, err
-	}
-
-	return DataSegment{
-		Mode:             ActiveDataMode,
-		MemoryIndex:      uint32(memoryIndex),
-		OffsetExpression: offsetExpression,
-		Content:          content,
-	}, nil
 }
 
 func (p *Parser) parseFunctionType() (FunctionType, error) {
@@ -465,7 +500,7 @@ func (p *Parser) parseGlobalType() (GlobalType, error) {
 }
 
 func (p *Parser) parseElementSegment() (ElementSegment, error) {
-	flags, err := p.parseUleb128()
+	flags, err := p.parseUint32()
 	if err != nil {
 		return ElementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
 	}
@@ -476,7 +511,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if err != nil {
 			return ElementSegment{}, err
 		}
-		indexes, err := parseVector(p, p.parseUleb128)
+		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -495,7 +530,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if elemkind != 0x00 {
 			return ElementSegment{}, ErrElementKindNotZero
 		}
-		indexes, err := parseVector(p, p.parseUleb128)
+		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -505,7 +540,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 			FuncIndexes: uint64SliceToInt32(indexes),
 		}, nil
 	case 2: // Active element with explicit table index and func indexes.
-		tableIdx, err := p.parseUleb128()
+		tableIdx, err := p.parseUint64()
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -520,7 +555,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if elemkind != 0x00 {
 			return ElementSegment{}, ErrElementKindNotZero
 		}
-		indexes, err := parseVector(p, p.parseUleb128)
+		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -539,7 +574,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 		if elemkind != 0x00 {
 			return ElementSegment{}, ErrElementKindNotZero
 		}
-		indexes, err := parseVector(p, p.parseUleb128)
+		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -580,7 +615,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 			FuncIndexesExpressions: exprs,
 		}, nil
 	case 6: // Active element with explicit table index and expressions.
-		tableIdx, err := p.parseUleb128()
+		tableIdx, err := p.parseUint64()
 		if err != nil {
 			return ElementSegment{}, err
 		}
@@ -669,17 +704,17 @@ func (p *Parser) parseLimits() (Limits, error) {
 	}
 	switch b {
 	case 0:
-		min, err := p.parseIndex()
+		min, err := p.parseUint32()
 		if err != nil {
 			return Limits{}, err
 		}
 		return Limits{Min: min}, nil
 	case 1:
-		min, err := p.parseIndex()
+		min, err := p.parseUint32()
 		if err != nil {
 			return Limits{}, err
 		}
-		max, err := p.parseIndex()
+		max, err := p.parseUint32()
 		if err != nil {
 			return Limits{}, err
 		}
@@ -690,7 +725,7 @@ func (p *Parser) parseLimits() (Limits, error) {
 }
 
 func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
-	count, err := parser.parseUleb128()
+	count, err := parser.parseUint64()
 	if err != nil {
 		return nil, err
 	}
@@ -708,25 +743,34 @@ func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
 	return items, nil
 }
 
-func (p *Parser) parseIndex() (uint32, error) {
-	val, err := p.parseUleb128()
+func (p *Parser) parseUint32() (uint32, error) {
+	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
-	}
-	if val > math.MaxUint32 {
-		return 0, fmt.Errorf("integer overflow")
 	}
 	return uint32(val), nil
 }
 
-func (p *Parser) parseUleb128() (uint64, error) {
+func (p *Parser) parseUint64() (uint64, error) {
+	val, _, err := p.parseUleb128(9)
+	return val, err
+}
+
+func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
+	bytesRead := 0
+
 	var value uint64
 	var shift uint
 	for {
 		b, err := p.reader.ReadByte()
 		if err != nil {
-			return 0, err
+			return 0, bytesRead, err
 		}
+		bytesRead++
+		if bytesRead > maxBytes {
+			return 0, bytesRead, fmt.Errorf("uleb128 value too large")
+		}
+
 		group := b & 0b01111111
 		value |= uint64(group) << shift
 		shift += 7
@@ -734,11 +778,11 @@ func (p *Parser) parseUleb128() (uint64, error) {
 			break
 		}
 	}
-	return value, nil
+	return value, bytesRead, nil
 }
 
 func (p *Parser) parseUtf8String() (string, error) {
-	length, err := p.parseUleb128()
+	length, err := p.parseUint64()
 	if err != nil {
 		return "", err
 	}

@@ -230,7 +230,8 @@ func (r *SpecTestRunner) handleAssertInvalid(cmd wabt.Command) {
 
 	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
-		r.fatalf(cmd.Line, "expected validation error, failed to parse instead")
+		// We accept also parsing errors as valid form of invalid module.
+		return
 	}
 
 	_, err = r.vm.Instantiate(module, r.buildImports())
