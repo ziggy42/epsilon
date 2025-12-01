@@ -18,7 +18,6 @@ import (
 	"encoding/binary"
 	"math"
 	"math/bits"
-	"slices"
 )
 
 // V128Value represents a 128-bit SIMD value.
@@ -119,39 +118,48 @@ func SimdV128Load32x2U(data []byte) V128Value {
 
 // SimdI8x16Shuffle performs a byte shuffle operation.
 func SimdI8x16Shuffle(v1, v2 V128Value, lanes [16]byte) V128Value {
-	bytes1 := v1.Bytes()
-	bytes2 := v2.Bytes()
-
-	var resultBytes [16]byte
-	for i, lane := range lanes {
-		if lane < 16 {
-			resultBytes[i] = bytes1[lane]
-		} else if lane < 32 {
-			resultBytes[i] = bytes2[lane-16]
-		} else {
-			resultBytes[i] = 0
+	sources := [4]uint64{v1.Low, v1.High, v2.Low, v2.High}
+	var low, high uint64
+	for i := range 8 {
+		lane := lanes[i]
+		if lane < 32 {
+			val := (sources[lane/8] >> ((lane & 7) * 8)) & 0xFF
+			low |= val << (uint(i) * 8)
 		}
 	}
 
-	return NewV128Value(resultBytes)
+	for i := range 8 {
+		lane := lanes[i+8]
+		if lane < 32 {
+			val := (sources[lane/8] >> ((lane & 7) * 8)) & 0xFF
+			high |= val << (uint(i) * 8)
+		}
+	}
+
+	return V128Value{Low: low, High: high}
 }
 
 // SimdI8x16Swizzle performs a byte swizzle operation.
 func SimdI8x16Swizzle(v1, v2 V128Value) V128Value {
-	bytes1 := v1.Bytes()
-	bytes2 := v2.Bytes()
-
-	var resultBytes [16]byte
-	for i := range 16 {
-		index := bytes2[i]
+	sources := [2]uint64{v1.Low, v1.High}
+	var low, high uint64
+	for i := range 8 {
+		index := (v2.Low >> (uint(i) * 8)) & 0xFF
 		if index < 16 {
-			resultBytes[i] = bytes1[index]
-		} else {
-			resultBytes[i] = 0 // Out of bounds indices result in 0.
+			val := (sources[index/8] >> ((index & 7) * 8)) & 0xFF
+			low |= val << (uint(i) * 8)
 		}
 	}
 
-	return NewV128Value(resultBytes)
+	for i := range 8 {
+		index := (v2.High >> (uint(i) * 8)) & 0xFF
+		if index < 16 {
+			val := (sources[index/8] >> ((index & 7) * 8)) & 0xFF
+			high |= val << (uint(i) * 8)
+		}
+	}
+
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI8x16Splat(val int32) V128Value {
@@ -796,87 +804,51 @@ func SimdV128Load64Zero(data []byte) V128Value {
 }
 
 func SetLane(v V128Value, laneIndex uint32, value []byte) V128Value {
-	result := V128Value{Low: v.Low, High: v.High}
-	switch len(value) {
-	case 1:
-		val := uint64(value[0])
-		shift := uint(laneIndex % 8 * 8)
-		mask := ^(uint64(0xFF) << shift)
-		if laneIndex < 8 {
-			result.Low &= mask
-			result.Low |= val << shift
-		} else {
-			result.High &= mask
-			result.High |= val << shift
-		}
-	case 2:
-		val := uint64(binary.LittleEndian.Uint16(value))
-		shift := uint(laneIndex % 4 * 16)
-		mask := ^(uint64(0xFFFF) << shift)
-		if laneIndex < 4 {
-			result.Low &= mask
-			result.Low |= val << shift
-		} else {
-			result.High &= mask
-			result.High |= val << shift
-		}
-	case 4:
-		val := uint64(binary.LittleEndian.Uint32(value))
-		shift := uint(laneIndex % 2 * 32)
-		mask := ^(uint64(0xFFFFFFFF) << shift)
-		if laneIndex < 2 {
-			result.Low &= mask
-			result.Low |= val << shift
-		} else {
-			result.High &= mask
-			result.High |= val << shift
-		}
+	width := uint(len(value) * 8)
+	var val uint64
+	switch width {
 	case 8:
-		if laneIndex == 0 {
-			result.Low = binary.LittleEndian.Uint64(value)
-		} else {
-			result.High = binary.LittleEndian.Uint64(value)
-		}
+		val = uint64(value[0])
+	case 16:
+		val = uint64(binary.LittleEndian.Uint16(value))
+	case 32:
+		val = uint64(binary.LittleEndian.Uint32(value))
+	case 64:
+		val = binary.LittleEndian.Uint64(value)
 	}
-	return result
+
+	target := &v.Low
+	shift := uint(laneIndex) * width
+	if shift >= 64 {
+		target = &v.High
+		shift -= 64
+	}
+
+	mask := ^((uint64(1)<<width - 1) << shift)
+	*target = (*target & mask) | (val << shift)
+	return v
 }
 
 func ExtractLane(value V128Value, laneSize, laneIndex uint32) []byte {
-	laneSizeBytes := laneSize / 8
-	bytes := make([]byte, laneSizeBytes)
-
-	if laneSize == 64 { // Handle the simple 64-bit case separately
-		var section uint64
-		if laneIndex == 0 {
-			section = value.Low
-		} else {
-			section = value.High
-		}
-		binary.LittleEndian.PutUint64(bytes, section)
-		return bytes
+	shift := laneIndex * laneSize
+	source := value.Low
+	if shift >= 64 {
+		source = value.High
+		shift -= 64
 	}
 
-	lanesPer64 := 64 / laneSize
-	var section uint64
-	var localIndex uint32
-	if laneIndex < lanesPer64 {
-		section = value.Low
-		localIndex = laneIndex
-	} else {
-		section = value.High
-		localIndex = laneIndex - lanesPer64
-	}
+	val := source >> shift
 
+	bytes := make([]byte, laneSize/8)
 	switch laneSize {
 	case 8:
-		val := section >> (localIndex * 8)
 		bytes[0] = byte(val)
 	case 16:
-		val := section >> (localIndex * 16)
 		binary.LittleEndian.PutUint16(bytes, uint16(val))
 	case 32:
-		val := section >> (localIndex * 32)
 		binary.LittleEndian.PutUint32(bytes, uint32(val))
+	case 64:
+		binary.LittleEndian.PutUint64(bytes, val)
 	}
 	return bytes
 }
@@ -953,8 +925,11 @@ func SimdI8x16NarrowI16x8U(v1, v2 V128Value) V128Value {
 
 // SimdI8x16AllTrue returns true if all 8-bit lanes of a V128Value are non-zero.
 func SimdI8x16AllTrue(v V128Value) bool {
-	buf := v.Bytes()
-	return !slices.Contains(buf[:], 0)
+	// https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
+	mask64bit := uint64(0x7F7F7F7F7F7F7F7F)
+	hasLowZero := ^((((v.Low & mask64bit) + mask64bit) | v.Low) | mask64bit)
+	hasHighZero := ^((((v.High & mask64bit) + mask64bit) | v.High) | mask64bit)
+	return hasLowZero == 0 && hasHighZero == 0
 }
 
 // SimdI8x16Bitmask returns a 16-bit integer wrapped in an int32 where each bit
@@ -1936,26 +1911,16 @@ func SimdF64x2Div(v1, v2 V128Value) V128Value {
 }
 
 func SimdF64x2ConvertLowI32x4S(v V128Value) V128Value {
-	inBytes := v.Bytes()
-
-	val1 := float64(int32(binary.LittleEndian.Uint32(inBytes[0:4])))
-	val2 := float64(int32(binary.LittleEndian.Uint32(inBytes[4:8])))
-
 	return V128Value{
-		Low:  math.Float64bits(val1),
-		High: math.Float64bits(val2),
+		Low:  math.Float64bits(float64(int32(v.Low))),
+		High: math.Float64bits(float64(int32(v.Low >> 32))),
 	}
 }
 
 func SimdF64x2ConvertLowI32x4U(v V128Value) V128Value {
-	inBytes := v.Bytes()
-
-	val1 := float64(binary.LittleEndian.Uint32(inBytes[0:4]))
-	val2 := float64(binary.LittleEndian.Uint32(inBytes[4:8]))
-
 	return V128Value{
-		Low:  math.Float64bits(val1),
-		High: math.Float64bits(val2),
+		Low:  math.Float64bits(float64(uint32(v.Low))),
+		High: math.Float64bits(float64(uint32(v.Low >> 32))),
 	}
 }
 
