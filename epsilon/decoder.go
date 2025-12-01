@@ -29,12 +29,7 @@ var (
 	ErrMalformedMemopFlags      = errors.New("malformed memop flags")
 )
 
-const (
-	continuationBit = 0x80
-	payloadMask     = 0x7F
-	signBit         = 0x40
-	sixthBitMask    = uint64(1 << 6)
-)
+const sixthBitMask = uint64(1 << 6)
 
 // This buffer exists for perfomance reasons: it makes sure only a single
 // allocation is done to parse the immediates across multiple Decode
@@ -203,7 +198,7 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 	case SelectT:
 		return d.readImmediateVector()
 	case I64Const:
-		immediate, err := d.readSleb128(10)
+		immediate, err := readSleb128(d.readByte, 10)
 		if err != nil {
 			return nil, err
 		}
@@ -356,13 +351,13 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 	// If bit 6 is set, this instruction is using an explicit memory index.
 	// This is relevant in WASM 3.
 	if align&sixthBitMask != 0 {
-		memoryIndex, err = d.readUint32()
+		memoryIndex, _, err = readUleb128(d.readByte, 10)
 		if err != nil {
 			return 0, 0, 0, err
 		}
 	}
 
-	offset, err := d.readUleb128(10)
+	offset, _, err := readUleb128(d.readByte, 10)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -371,7 +366,7 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 }
 
 func (d *Decoder) readBlockType() (uint64, error) {
-	blockType, err := d.readSleb128(5)
+	blockType, err := readSleb128(d.readByte, 5)
 	if err != nil {
 		return 0, err
 	}
@@ -385,62 +380,10 @@ func (d *Decoder) readBlockType() (uint64, error) {
 	return blockType, nil
 }
 
-// readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
-func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
-	var result int64
-	var shift uint
-	var b byte
-	var err error
-	bytesRead := 0
-
-	for {
-		b, err = d.readByte()
-		if err != nil {
-			return 0, ErrUnexpectedEOF // Reached end of stream mid-integer.
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, ErrIntRepresentationTooLong
-		}
-
-		// Each byte read contains 7 bits of "integer" and 1 bit to signal if the
-		// parsing should continue. When reading int64, we can read up to
-		// ceil(64/7) = 10 bytes. The last 10th byte will contain 1 continuation bit
-		// (the most significant bit), 6 bits we should not use and the final, least
-		// significant bit that we should interpret as the last 64th bit of the
-		// integer we are tying to parse, the sign bit. The remaining 6 bits should
-		// be all 0s for positive integers and all 1s for negative integers.
-		if bytesRead == 10 {
-			sign := b & 1
-			remainingBits := (b & 0x7E) >> 1
-			if sign == 0 && remainingBits != 0 {
-				return 0, ErrIntegerTooLarge
-			} else if sign == 1 && remainingBits != 0x3F {
-				return 0, ErrIntegerTooLarge
-			}
-		}
-
-		result |= int64(b&payloadMask) << shift
-
-		// Check the continuation bit (MSB). If it's 0, this is the last byte.
-		if (b & continuationBit) == 0 {
-			break
-		}
-
-		shift += 7
-	}
-
-	if (b & signBit) != 0 {
-		result |= -1 << (shift + 7)
-	}
-
-	return uint64(result), nil
-}
-
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
 func (d *Decoder) readUint32() (uint64, error) {
-	val, err := d.readUleb128(5)
+	val, _, err := readUleb128(d.readByte, 5)
 	if err != nil {
 		return 0, err
 	}
@@ -451,7 +394,7 @@ func (d *Decoder) readUint32() (uint64, error) {
 }
 
 func (d *Decoder) readInt32() (uint64, error) {
-	val, err := d.readSleb128(5)
+	val, err := readSleb128(d.readByte, 5)
 	if err != nil {
 		return 0, err
 	}
@@ -464,7 +407,7 @@ func (d *Decoder) readInt32() (uint64, error) {
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
 func (d *Decoder) readUint8() (uint64, error) {
-	val, err := d.readUleb128(5)
+	val, _, err := readUleb128(d.readByte, 5)
 	if err != nil {
 		return 0, err
 	}
@@ -472,34 +415,6 @@ func (d *Decoder) readUint8() (uint64, error) {
 		return 0, ErrIntegerTooLarge
 	}
 	return val, nil
-}
-
-// readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
-	var result uint64
-	var shift uint
-	bytesRead := 0
-
-	for {
-		b, err := d.readByte()
-		if err != nil {
-			return 0, ErrUnexpectedEOF // Reached end of stream mid-integer.
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, ErrIntRepresentationTooLong
-		}
-
-		group := uint64(b & payloadMask)
-		result |= group << shift
-
-		// If the continuation bit (MSB) is 0, we are done.
-		if (b & continuationBit) == 0 {
-			return result, nil
-		}
-
-		shift += 7
-	}
 }
 
 func (d *Decoder) readByte() (byte, error) {

@@ -229,7 +229,7 @@ func (p *Parser) parseHeader() error {
 func (p *Parser) parseCustomSection(payloadLen uint32) error {
 	// Custom section is ignored, but we still parse it to return parsing errors
 	// if it's not valid.
-	nameLength, bytesRead, err := p.parseUleb128(5)
+	nameLength, bytesRead, err := readUleb128(p.reader.ReadByte, 5)
 	if err != nil {
 		return fmt.Errorf("failed to read custom section name length: %w", err)
 	}
@@ -752,7 +752,7 @@ func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
 }
 
 func (p *Parser) parseUint32() (uint32, error) {
-	val, _, err := p.parseUleb128(5)
+	val, _, err := readUleb128(p.reader.ReadByte, 5)
 	if err != nil {
 		return 0, err
 	}
@@ -763,33 +763,8 @@ func (p *Parser) parseUint32() (uint32, error) {
 }
 
 func (p *Parser) parseUint64() (uint64, error) {
-	val, _, err := p.parseUleb128(9)
+	val, _, err := readUleb128(p.reader.ReadByte, 9)
 	return val, err
-}
-
-func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
-	bytesRead := 0
-
-	var value uint64
-	var shift uint
-	for {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			return 0, bytesRead, err
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, bytesRead, fmt.Errorf("uleb128 value too large")
-		}
-
-		group := b & 0b01111111
-		value |= uint64(group) << shift
-		shift += 7
-		if b&0b10000000 == 0 {
-			break
-		}
-	}
-	return value, bytesRead, nil
 }
 
 func (p *Parser) parseUtf8String() (string, error) {
