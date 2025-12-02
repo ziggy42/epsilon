@@ -81,13 +81,13 @@ func SimdV128Load8x8U(data []byte) V128Value {
 }
 
 func SimdV128Load16x4S(data []byte) V128Value {
-	v0 := int32(int16(binary.LittleEndian.Uint16(data[0:2])))
-	v1 := int32(int16(binary.LittleEndian.Uint16(data[2:4])))
-	low := uint64(uint32(v0)) | uint64(uint32(v1))<<32
+	v0 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[0:2]))))
+	v1 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[2:4]))))
+	low := v0 | v1<<32
 
-	v2 := int32(int16(binary.LittleEndian.Uint16(data[4:6])))
-	v3 := int32(int16(binary.LittleEndian.Uint16(data[6:8])))
-	high := uint64(uint32(v2)) | uint64(uint32(v3))<<32
+	v2 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[4:6]))))
+	v3 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[6:8]))))
+	high := v2 | v3<<32
 
 	return V128Value{Low: low, High: high}
 }
@@ -1249,59 +1249,59 @@ func SimdI64x2ExtmulHighI32x4U(v1, v2 V128Value) V128Value {
 }
 
 func SimdI16x8ExtaddPairwiseI8x16S(v V128Value) V128Value {
-	inBytes := v.Bytes()
+	l0 := uint64(uint16(int16(int8(v.Low)) + int16(int8(v.Low>>8))))
+	l1 := uint64(uint16(int16(int8(v.Low>>16)) + int16(int8(v.Low>>24))))
+	l2 := uint64(uint16(int16(int8(v.Low>>32)) + int16(int8(v.Low>>40))))
+	l3 := uint64(uint16(int16(int8(v.Low>>48)) + int16(int8(v.Low>>56))))
+	low := l0 | l1<<16 | l2<<32 | l3<<48
 
-	var resultBytes [16]byte
-	for i := range 8 {
-		val1 := int16(int8(inBytes[i*2]))
-		val2 := int16(int8(inBytes[i*2+1]))
-		res := val1 + val2
-		binary.LittleEndian.PutUint16(resultBytes[i*2:i*2+2], uint16(res))
-	}
+	h0 := uint64(uint16(int16(int8(v.High)) + int16(int8(v.High>>8))))
+	h1 := uint64(uint16(int16(int8(v.High>>16)) + int16(int8(v.High>>24))))
+	h2 := uint64(uint16(int16(int8(v.High>>32)) + int16(int8(v.High>>40))))
+	h3 := uint64(uint16(int16(int8(v.High>>48)) + int16(int8(v.High>>56))))
+	high := h0 | h1<<16 | h2<<32 | h3<<48
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI16x8ExtaddPairwiseI8x16U(v V128Value) V128Value {
-	inBytes := v.Bytes()
+	l0 := uint64(uint16(byte(v.Low)) + uint16(byte(v.Low>>8)))
+	l1 := uint64(uint16(byte(v.Low>>16)) + uint16(byte(v.Low>>24)))
+	l2 := uint64(uint16(byte(v.Low>>32)) + uint16(byte(v.Low>>40)))
+	l3 := uint64(uint16(byte(v.Low>>48)) + uint16(byte(v.Low>>56)))
+	low := l0 | l1<<16 | l2<<32 | l3<<48
 
-	var resultBytes [16]byte
-	for i := range 8 {
-		val1 := uint16(inBytes[i*2])
-		val2 := uint16(inBytes[i*2+1])
-		res := val1 + val2
-		binary.LittleEndian.PutUint16(resultBytes[i*2:i*2+2], res)
-	}
+	h0 := uint64(uint16(byte(v.High)) + uint16(byte(v.High>>8)))
+	h1 := uint64(uint16(byte(v.High>>16)) + uint16(byte(v.High>>24)))
+	h2 := uint64(uint16(byte(v.High>>32)) + uint16(byte(v.High>>40)))
+	h3 := uint64(uint16(byte(v.High>>48)) + uint16(byte(v.High>>56)))
+	high := h0 | h1<<16 | h2<<32 | h3<<48
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI32x4ExtaddPairwiseI16x8U(v V128Value) V128Value {
-	inBytes := v.Bytes()
+	l0 := uint64(uint32(uint16(v.Low)) + uint32(uint16(v.Low>>16)))
+	l1 := uint64(uint32(uint16(v.Low>>32)) + uint32(uint16(v.Low>>48)))
+	low := l0 | l1<<32
 
-	var resultBytes [16]byte
-	for i := range 4 {
-		val1 := uint32(binary.LittleEndian.Uint16(inBytes[i*4 : i*4+2]))
-		val2 := uint32(binary.LittleEndian.Uint16(inBytes[i*4+2 : i*4+4]))
-		res := val1 + val2
-		binary.LittleEndian.PutUint32(resultBytes[i*4:i*4+4], res)
-	}
+	h0 := uint64(uint32(uint16(v.High)) + uint32(uint16(v.High>>16)))
+	h1 := uint64(uint32(uint16(v.High>>32)) + uint32(uint16(v.High>>48)))
+	high := h0 | h1<<32
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI32x4ExtaddPairwiseI16x8S(v V128Value) V128Value {
-	inBytes := v.Bytes()
+	l0 := uint64(uint32(int32(int16(v.Low)) + int32(int16(v.Low>>16))))
+	l1 := uint64(uint32(int32(int16(v.Low>>32)) + int32(int16(v.Low>>48))))
+	low := l0 | l1<<32
 
-	var resultBytes [16]byte
-	for i := range 4 {
-		val1 := int32(int16(binary.LittleEndian.Uint16(inBytes[i*4 : i*4+2])))
-		val2 := int32(int16(binary.LittleEndian.Uint16(inBytes[i*4+2 : i*4+4])))
-		res := val1 + val2
-		binary.LittleEndian.PutUint32(resultBytes[i*4:i*4+4], uint32(res))
-	}
+	h0 := uint64(uint32(int32(int16(v.High)) + int32(int16(v.High>>16))))
+	h1 := uint64(uint32(int32(int16(v.High>>32)) + int32(int16(v.High>>48))))
+	high := h0 | h1<<32
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI32x4Abs(v V128Value) V128Value {
@@ -1377,22 +1377,19 @@ func SimdI32x4MaxU(v1, v2 V128Value) V128Value {
 }
 
 func SimdI32x4DotI16x8S(v1, v2 V128Value) V128Value {
-	v1Bytes := v1.Bytes()
-	v2Bytes := v2.Bytes()
+	l0 := int32(int16(v1.Low)) * int32(int16(v2.Low))
+	l1 := int32(int16(v1.Low>>16)) * int32(int16(v2.Low>>16))
+	l2 := int32(int16(v1.Low>>32)) * int32(int16(v2.Low>>32))
+	l3 := int32(int16(v1.Low>>48)) * int32(int16(v2.Low>>48))
+	low := uint64(uint32(l0+l1)) | uint64(uint32(l2+l3))<<32
 
-	var resultBytes [16]byte
-	for i := range 4 {
-		a1 := int32(int16(binary.LittleEndian.Uint16(v1Bytes[i*4 : i*4+2])))
-		b1 := int32(int16(binary.LittleEndian.Uint16(v2Bytes[i*4 : i*4+2])))
+	h0 := int32(int16(v1.High)) * int32(int16(v2.High))
+	h1 := int32(int16(v1.High>>16)) * int32(int16(v2.High>>16))
+	h2 := int32(int16(v1.High>>32)) * int32(int16(v2.High>>32))
+	h3 := int32(int16(v1.High>>48)) * int32(int16(v2.High>>48))
+	high := uint64(uint32(h0+h1)) | uint64(uint32(h2+h3))<<32
 
-		a2 := int32(int16(binary.LittleEndian.Uint16(v1Bytes[i*4+2 : i*4+4])))
-		b2 := int32(int16(binary.LittleEndian.Uint16(v2Bytes[i*4+2 : i*4+4])))
-
-		res := (a1 * b1) + (a2 * b2)
-		binary.LittleEndian.PutUint32(resultBytes[i*4:i*4+4], uint32(res))
-	}
-
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI64x2Abs(v V128Value) V128Value {
