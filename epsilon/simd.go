@@ -1213,51 +1213,51 @@ func SimdI16x8AvgrU(v1, v2 V128Value) V128Value {
 }
 
 func SimdI16x8ExtmulLowI8x16S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 1, 2, false, true)
+	return extmul(v1, v2, 1, false, true)
 }
 
 func SimdI16x8ExtmulHighI8x16S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 1, 2, true, true)
+	return extmul(v1, v2, 1, true, true)
 }
 
 func SimdI16x8ExtmulLowI8x16U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 1, 2, false, false)
+	return extmul(v1, v2, 1, false, false)
 }
 
 func SimdI16x8ExtmulHighI8x16U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 1, 2, true, false)
+	return extmul(v1, v2, 1, true, false)
 }
 
 func SimdI32x4ExtmulLowI16x8S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 2, 4, false, true)
+	return extmul(v1, v2, 2, false, true)
 }
 
 func SimdI32x4ExtmulHighI16x8S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 2, 4, true, true)
+	return extmul(v1, v2, 2, true, true)
 }
 
 func SimdI32x4ExtmulLowI16x8U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 2, 4, false, false)
+	return extmul(v1, v2, 2, false, false)
 }
 
 func SimdI32x4ExtmulHighI16x8U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 2, 4, true, false)
+	return extmul(v1, v2, 2, true, false)
 }
 
 func SimdI64x2ExtmulLowI32x4S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 4, 8, false, true)
+	return extmul(v1, v2, 4, false, true)
 }
 
 func SimdI64x2ExtmulHighI32x4S(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 4, 8, true, true)
+	return extmul(v1, v2, 4, true, true)
 }
 
 func SimdI64x2ExtmulLowI32x4U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 4, 8, false, false)
+	return extmul(v1, v2, 4, false, false)
 }
 
 func SimdI64x2ExtmulHighI32x4U(v1, v2 V128Value) V128Value {
-	return extmul(v1, v2, 4, 8, true, false)
+	return extmul(v1, v2, 4, true, false)
 }
 
 func SimdI16x8ExtaddPairwiseI8x16S(v V128Value) V128Value {
@@ -2137,67 +2137,62 @@ func extend(v V128Value, fromBytes, toBytes int, high, signed bool) V128Value {
 	return NewV128Value(resultBytes)
 }
 
-func extmul(
-	v1, v2 V128Value,
-	fromBytes, toBytes int,
-	high, signed bool,
-) V128Value {
-	v1Bytes := v1.Bytes()
-	v2Bytes := v2.Bytes()
-	var resultBytes [16]byte
-	start := 0
+func extmul(v1, v2 V128Value, fromBytes int, high, signed bool) V128Value {
+	var half1, half2 uint64
 	if high {
-		start = 8 // Start from the high half of the input vectors
+		half1, half2 = v1.High, v2.High
+	} else {
+		half1, half2 = v1.Low, v2.Low
 	}
 
+	var resLow, resHigh uint64
 	numLanes := 8 / fromBytes
-	for i := range numLanes {
-		inLane1 := v1Bytes[start+i*fromBytes : start+(i+1)*fromBytes]
-		inLane2 := v2Bytes[start+i*fromBytes : start+(i+1)*fromBytes]
-		outLane := resultBytes[i*toBytes : (i+1)*toBytes]
+	halfLanes := numLanes / 2
 
-		var product int64 // Use a large type for the product
-
+	getProduct := func(idx int) uint64 {
+		shift := uint(idx * fromBytes * 8)
 		if signed {
-			var val1, val2 int64
 			switch fromBytes {
 			case 1:
-				val1 = int64(int8(inLane1[0]))
-				val2 = int64(int8(inLane2[0]))
+				return uint64(int64(int8(half1>>shift)) * int64(int8(half2>>shift)))
 			case 2:
-				val1 = int64(int16(binary.LittleEndian.Uint16(inLane1)))
-				val2 = int64(int16(binary.LittleEndian.Uint16(inLane2)))
+				return uint64(int64(int16(half1>>shift)) * int64(int16(half2>>shift)))
 			case 4:
-				val1 = int64(int32(binary.LittleEndian.Uint32(inLane1)))
-				val2 = int64(int32(binary.LittleEndian.Uint32(inLane2)))
+				return uint64(int64(int32(half1>>shift)) * int64(int32(half2>>shift)))
 			}
-			product = val1 * val2
-		} else { // Unsigned
-			var val1, val2 uint64
-			switch fromBytes {
-			case 1:
-				val1 = uint64(inLane1[0])
-				val2 = uint64(inLane2[0])
-			case 2:
-				val1 = uint64(binary.LittleEndian.Uint16(inLane1))
-				val2 = uint64(binary.LittleEndian.Uint16(inLane2))
-			case 4:
-				val1 = uint64(binary.LittleEndian.Uint32(inLane1))
-				val2 = uint64(binary.LittleEndian.Uint32(inLane2))
-			}
-			product = int64(val1 * val2) // Store as int64 for the write switch
+		} else {
+			mask := uint64(1<<(fromBytes*8)) - 1
+			v1 := (half1 >> shift) & mask
+			v2 := (half2 >> shift) & mask
+			return v1 * v2
 		}
+		return 0
+	}
 
-		switch toBytes {
-		case 2:
-			binary.LittleEndian.PutUint16(outLane, uint16(product))
-		case 4:
-			binary.LittleEndian.PutUint32(outLane, uint32(product))
-		case 8:
-			binary.LittleEndian.PutUint64(outLane, uint64(product))
+	for i := range halfLanes {
+		prod := getProduct(i)
+		shift := uint(i * (fromBytes * 2) * 8)
+		if fromBytes == 4 {
+			resLow = prod
+		} else {
+			mask := uint64(1<<(fromBytes*2*8)) - 1
+			resLow |= (prod & mask) << shift
 		}
 	}
-	return NewV128Value(resultBytes)
+
+	for j := range halfLanes {
+		i := j + halfLanes
+		prod := getProduct(i)
+		shift := uint(j * (fromBytes * 2) * 8)
+		if fromBytes == 4 {
+			resHigh = prod
+		} else {
+			mask := uint64(1<<(fromBytes*2*8)) - 1
+			resHigh |= (prod & mask) << shift
+		}
+	}
+
+	return V128Value{Low: resLow, High: resHigh}
 }
 
 // narrow32x4To16x8 takes a single V128 (treated as 4x32-bit lanes), saturates
