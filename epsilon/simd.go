@@ -2292,17 +2292,19 @@ func saturateF64toUint32(f float64) uint32 {
 
 // allTrue checks if all lanes of a given size are non-zero.
 func allTrue(v V128Value, laneSizeBytes int) bool {
-	bytes := v.Bytes()
-	for i := 0; i < 16; i += laneSizeBytes {
-		switch laneSizeBytes {
-		case 2:
-			if binary.LittleEndian.Uint16(bytes[i:i+2]) == 0 {
-				return false
-			}
-		case 4:
-			if binary.LittleEndian.Uint32(bytes[i:i+4]) == 0 {
-				return false
-			}
+	laneBits := laneSizeBytes * 8
+	mask := uint64(1<<laneBits) - 1
+	halfLanes := 8 / laneSizeBytes
+
+	for i := range halfLanes {
+		if (v.Low>>(i*laneBits))&mask == 0 {
+			return false
+		}
+	}
+
+	for i := range halfLanes {
+		if (v.High>>(i*laneBits))&mask == 0 {
+			return false
 		}
 	}
 	return true
@@ -2311,13 +2313,19 @@ func allTrue(v V128Value, laneSizeBytes int) bool {
 // bitmask extracts the most significant bit from each lane.
 func bitmask(v V128Value, laneSizeBytes int) int32 {
 	var res int32
-	buf := v.Bytes()
-	numLanes := 16 / laneSizeBytes
-	for i := range numLanes {
-		// For little-endian, the MSB is in the last byte of the lane
-		msbByte := buf[(i+1)*laneSizeBytes-1]
-		if (msbByte & 0x80) != 0 {
-			res |= (1 << i)
+	laneBits := laneSizeBytes * 8
+	msbOffset := laneBits - 1
+	halfLanes := 8 / laneSizeBytes
+
+	for i := range halfLanes {
+		if (v.Low>>((i*laneBits)+msbOffset))&1 != 0 {
+			res |= 1 << i
+		}
+	}
+
+	for i := range halfLanes {
+		if (v.High>>((i*laneBits)+msbOffset))&1 != 0 {
+			res |= 1 << (i + halfLanes)
 		}
 	}
 	return res
