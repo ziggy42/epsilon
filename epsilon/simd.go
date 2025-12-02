@@ -543,11 +543,17 @@ func SimdI16x8Q15mulrSatS(v1, v2 V128Value) V128Value {
 }
 
 func SimdI16x8NarrowI32x4S(v1, v2 V128Value) V128Value {
-	return narrow(v1, v2, 4, true)
+	return V128Value{
+		Low:  narrow32x4To16x8(v1, saturateS32ToS16),
+		High: narrow32x4To16x8(v2, saturateS32ToS16),
+	}
 }
 
 func SimdI16x8NarrowI32x4U(v1, v2 V128Value) V128Value {
-	return narrow(v1, v2, 4, false)
+	return V128Value{
+		Low:  narrow32x4To16x8(v1, saturateS32ToU16),
+		High: narrow32x4To16x8(v2, saturateS32ToU16),
+	}
 }
 
 // SimdI32x4Eq performs an equality comparison on each 32-bit lane of two
@@ -916,11 +922,17 @@ func SimdI8x16Popcnt(v V128Value) V128Value {
 }
 
 func SimdI8x16NarrowI16x8S(v1, v2 V128Value) V128Value {
-	return narrow(v1, v2, 2, true)
+	return V128Value{
+		Low:  narrow16x8To8x16(v1, saturateS16ToS8),
+		High: narrow16x8To8x16(v2, saturateS16ToS8),
+	}
 }
 
 func SimdI8x16NarrowI16x8U(v1, v2 V128Value) V128Value {
-	return narrow(v1, v2, 2, false)
+	return V128Value{
+		Low:  narrow16x8To8x16(v1, saturateS16ToU8),
+		High: narrow16x8To8x16(v2, saturateS16ToU8),
+	}
 }
 
 // SimdI8x16AllTrue returns true if all 8-bit lanes of a V128Value are non-zero.
@@ -2188,80 +2200,73 @@ func extmul(
 	return NewV128Value(resultBytes)
 }
 
-// narrow is a generalized helper for all narrow operations.
-func narrow(v1, v2 V128Value, fromBytes int, signed bool) V128Value {
-	v1Bytes := v1.Bytes()
-	v2Bytes := v2.Bytes()
-	var resultBytes [16]byte
-	toBytes := fromBytes / 2
-	numLanesPerInput := 16 / fromBytes
-
-	// Low half of the result comes from v1
-	for i := range numLanesPerInput {
-		inLane := v1Bytes[i*fromBytes : (i+1)*fromBytes]
-		outLane := resultBytes[i*toBytes : (i+1)*toBytes]
-		saturateAndPut(inLane, outLane, signed)
-	}
-
-	// High half of the result comes from v2
-	offset := 8 / toBytes
-	for i := range numLanesPerInput {
-		inLane := v2Bytes[i*fromBytes : (i+1)*fromBytes]
-		outLane := resultBytes[(offset+i)*toBytes : (offset+i+1)*toBytes]
-		saturateAndPut(inLane, outLane, signed)
-	}
-
-	return NewV128Value(resultBytes)
+// narrow32x4To16x8 takes a single V128 (treated as 4x32-bit lanes), saturates
+// them, and packs them into a uint64 (4x16-bit lanes).
+func narrow32x4To16x8(v V128Value, saturate func(int32) uint64) uint64 {
+	r0 := saturate(int32(v.Low))
+	r1 := saturate(int32(v.Low >> 32))
+	r2 := saturate(int32(v.High))
+	r3 := saturate(int32(v.High >> 32))
+	return r0 | (r1 << 16) | (r2 << 32) | (r3 << 48)
 }
 
-// saturateAndPut is a helper for narrow that handles saturation logic.
-func saturateAndPut(inLane, outLane []byte, signed bool) {
-	fromBytes := len(inLane)
-	var val int64
+// narrow16x8To8x16 takes a single V128 (treated as 8x16-bit lanes), saturates
+// them, and packs them into a uint64 (8x8-bit lanes).
+func narrow16x8To8x16(v V128Value, saturate func(int16) uint64) uint64 {
+	r0 := saturate(int16(v.Low))
+	r1 := saturate(int16(v.Low >> 16))
+	r2 := saturate(int16(v.Low >> 32))
+	r3 := saturate(int16(v.Low >> 48))
+	r4 := saturate(int16(v.High))
+	r5 := saturate(int16(v.High >> 16))
+	r6 := saturate(int16(v.High >> 32))
+	r7 := saturate(int16(v.High >> 48))
+	return r0 | (r1 << 8) | (r2 << 16) | (r3 << 24) | (r4 << 32) | (r5 << 40) |
+		(r6 << 48) | (r7 << 56)
+}
 
-	// Read value from input lane
-	if fromBytes == 4 { // I32x4 to I16x8
-		val = int64(int32(binary.LittleEndian.Uint32(inLane)))
-	} else { // I16x8 to I8x16
-		val = int64(int16(binary.LittleEndian.Uint16(inLane)))
+// saturateS32ToS16: Signed 32-bit -> Signed 16-bit
+func saturateS32ToS16(v int32) uint64 {
+	if v < math.MinInt16 {
+		return 0x8000
 	}
-
-	if signed {
-		var minVal, maxVal int64
-		if fromBytes == 4 {
-			minVal, maxVal = math.MinInt16, math.MaxInt16
-		} else {
-			minVal, maxVal = math.MinInt8, math.MaxInt8
-		}
-
-		val = min(max(val, minVal), maxVal)
-
-		if fromBytes == 4 {
-			binary.LittleEndian.PutUint16(outLane, uint16(int16(val)))
-		} else {
-			outLane[0] = byte(int8(val))
-		}
-	} else { // Unsigned
-		var max uint64
-		if fromBytes == 4 {
-			max = math.MaxUint16
-		} else {
-			max = math.MaxUint8
-		}
-
-		if val < 0 {
-			val = 0
-		}
-		if uint64(val) > max {
-			val = int64(max)
-		}
-
-		if fromBytes == 4 {
-			binary.LittleEndian.PutUint16(outLane, uint16(val))
-		} else {
-			outLane[0] = byte(val)
-		}
+	if v > math.MaxInt16 {
+		return 0x7FFF
 	}
+	return uint64(uint16(int16(v)))
+}
+
+// saturateS32ToU16: Signed 32-bit -> Unsigned 16-bit
+func saturateS32ToU16(v int32) uint64 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxUint16 {
+		return math.MaxUint16
+	}
+	return uint64(uint16(v))
+}
+
+// saturateS16ToS8: Signed 16-bit -> Signed 8-bit
+func saturateS16ToS8(v int16) uint64 {
+	if v < math.MinInt8 {
+		return 0x80
+	}
+	if v > math.MaxInt8 {
+		return 0x7F
+	}
+	return uint64(uint8(int8(v)))
+}
+
+// saturateS16ToU8: Signed 16-bit -> Unsigned 8-bit
+func saturateS16ToU8(v int16) uint64 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxUint8 {
+		return math.MaxUint8
+	}
+	return uint64(uint8(v))
 }
 
 func saturateF64toInt32(f float64) int32 {
