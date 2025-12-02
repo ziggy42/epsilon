@@ -2091,50 +2091,58 @@ func unaryOpF64x2(v V128Value, op func(float64) float64) V128Value {
 }
 
 func extend(v V128Value, fromBytes, toBytes int, high, signed bool) V128Value {
-	inBytes := v.Bytes()
-	var resultBytes [16]byte
-	start := 0
+	var src uint64
 	if high {
-		start = 8 // Start from the high half of the input vector.
+		src = v.High
+	} else {
+		src = v.Low
 	}
 
+	var resLow, resHigh uint64
 	numLanes := 8 / fromBytes
-	for i := range numLanes {
-		inLane := inBytes[start+i*fromBytes : start+(i+1)*fromBytes]
-		outLane := resultBytes[i*toBytes : (i+1)*toBytes]
+	halfLanes := numLanes / 2
 
-		var val int64
-		switch fromBytes {
-		case 1:
-			if signed {
-				val = int64(int8(inLane[0]))
-			} else {
-				val = int64(inLane[0])
+	getLane := func(idx int) uint64 {
+		shift := uint(idx * fromBytes * 8)
+		if signed {
+			switch fromBytes {
+			case 1:
+				return uint64(int64(int8(src >> shift)))
+			case 2:
+				return uint64(int64(int16(src >> shift)))
+			case 4:
+				return uint64(int64(int32(src >> shift)))
 			}
-		case 2:
-			if signed {
-				val = int64(int16(binary.LittleEndian.Uint16(inLane)))
-			} else {
-				val = int64(binary.LittleEndian.Uint16(inLane))
-			}
-		case 4:
-			if signed {
-				val = int64(int32(binary.LittleEndian.Uint32(inLane)))
-			} else {
-				val = int64(binary.LittleEndian.Uint32(inLane))
-			}
+		} else {
+			mask := uint64(1<<(fromBytes*8)) - 1
+			return (src >> shift) & mask
 		}
+		return 0
+	}
 
-		switch toBytes {
-		case 2:
-			binary.LittleEndian.PutUint16(outLane, uint16(val))
-		case 4:
-			binary.LittleEndian.PutUint32(outLane, uint32(val))
-		case 8:
-			binary.LittleEndian.PutUint64(outLane, uint64(val))
+	for i := range halfLanes {
+		val := getLane(i)
+		shift := uint(i * toBytes * 8)
+		if toBytes == 8 {
+			resLow = val
+		} else {
+			mask := uint64(1<<(toBytes*8)) - 1
+			resLow |= (val & mask) << shift
 		}
 	}
-	return NewV128Value(resultBytes)
+
+	for i := range halfLanes {
+		val := getLane(i + halfLanes)
+		shift := uint(i * toBytes * 8)
+		if toBytes == 8 {
+			resHigh = val
+		} else {
+			mask := uint64(1<<(toBytes*8)) - 1
+			resHigh |= (val & mask) << shift
+		}
+	}
+
+	return V128Value{Low: resLow, High: resHigh}
 }
 
 func extmul(v1, v2 V128Value, fromBytes int, high, signed bool) V128Value {
