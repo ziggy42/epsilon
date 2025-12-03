@@ -1934,113 +1934,132 @@ func SimdF64x2ConvertLowI32x4U(v V128Value) V128Value {
 }
 
 func unaryOpI8x16(v V128Value, op func(byte) byte) V128Value {
-	buf := v.Bytes()
-	for i := range buf {
-		buf[i] = op(buf[i])
+	var low, high uint64
+	for i := range 8 {
+		shift := i * 8
+		r := op(byte(v.Low >> shift))
+		low |= uint64(r) << shift
 	}
-	return NewV128Value(buf)
+	for i := range 8 {
+		shift := i * 8
+		r := op(byte(v.High >> shift))
+		high |= uint64(r) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func unaryOpI16x8(v V128Value, op func(uint16) uint16) V128Value {
-	buf := v.Bytes()
-	for i := 0; i < 16; i += 2 {
-		val := binary.LittleEndian.Uint16(buf[i : i+2])
-		val = op(val)
-		binary.LittleEndian.PutUint16(buf[i:i+2], val)
+	var low, high uint64
+	for i := range 4 {
+		shift := i * 16
+		r := op(uint16(v.Low >> shift))
+		low |= uint64(r) << shift
 	}
-	return NewV128Value(buf)
+	for i := range 4 {
+		shift := i * 16
+		r := op(uint16(v.High >> shift))
+		high |= uint64(r) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func unaryOpI32x4(v V128Value, op func(uint32) uint32) V128Value {
-	buf := v.Bytes()
-	for i := 0; i < 16; i += 4 {
-		val := binary.LittleEndian.Uint32(buf[i : i+4])
-		val = op(val)
-		binary.LittleEndian.PutUint32(buf[i:i+4], val)
-	}
-	return NewV128Value(buf)
+	r0 := uint64(op(uint32(v.Low)))
+	r1 := uint64(op(uint32(v.Low >> 32)))
+	low := r0 | (r1 << 32)
+
+	r2 := uint64(op(uint32(v.High)))
+	r3 := uint64(op(uint32(v.High >> 32)))
+	high := r2 | (r3 << 32)
+
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpI32x4(v1, v2 V128Value, op func(int32, int32) int32) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
+	r0 := uint64(uint32(op(int32(v1.Low), int32(v2.Low))))
+	r1 := uint64(uint32(op(int32(v1.Low>>32), int32(v2.Low>>32))))
+	low := r0 | (r1 << 32)
 
-	for i := 0; i < 16; i += 4 {
-		val1 := binary.LittleEndian.Uint32(buf1[i : i+4])
-		val2 := binary.LittleEndian.Uint32(buf2[i : i+4])
-		result := op(int32(val1), int32(val2))
-		binary.LittleEndian.PutUint32(buf1[i:i+4], uint32(result))
-	}
+	r2 := uint64(uint32(op(int32(v1.High), int32(v2.High))))
+	r3 := uint64(uint32(op(int32(v1.High>>32), int32(v2.High>>32))))
+	high := r2 | (r3 << 32)
 
-	return NewV128Value(buf1)
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpUI32x4(
 	v1, v2 V128Value,
 	op func(uint32, uint32) uint32,
 ) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
+	r0 := uint64(op(uint32(v1.Low), uint32(v2.Low)))
+	r1 := uint64(op(uint32(v1.Low>>32), uint32(v2.Low>>32)))
+	low := r0 | (r1 << 32)
 
-	for i := 0; i < 16; i += 4 {
-		val1 := binary.LittleEndian.Uint32(buf1[i : i+4])
-		val2 := binary.LittleEndian.Uint32(buf2[i : i+4])
-		result := op(val1, val2)
-		binary.LittleEndian.PutUint32(buf1[i:i+4], result)
-	}
+	r2 := uint64(op(uint32(v1.High), uint32(v2.High)))
+	r3 := uint64(op(uint32(v1.High>>32), uint32(v2.High>>32)))
+	high := r2 | (r3 << 32)
 
-	return NewV128Value(buf1)
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpI8x16(v1, v2 V128Value, op func(int8, int8) int8) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
-
-	for i := range 16 {
-		result := op(int8(buf1[i]), int8(buf2[i]))
-		buf1[i] = byte(result)
+	var low, high uint64
+	for i := range 8 {
+		shift := i * 8
+		r := op(int8(v1.Low>>shift), int8(v2.Low>>shift))
+		low |= uint64(uint8(r)) << shift
 	}
-
-	return NewV128Value(buf1)
+	for i := range 8 {
+		shift := i * 8
+		r := op(int8(v1.High>>shift), int8(v2.High>>shift))
+		high |= uint64(uint8(r)) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpUI8x16(v1, v2 V128Value, op func(byte, byte) byte) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
-
-	for i := range 16 {
-		buf1[i] = op(buf1[i], buf2[i])
+	var low, high uint64
+	for i := range 8 {
+		shift := i * 8
+		r := op(byte(v1.Low>>shift), byte(v2.Low>>shift))
+		low |= uint64(r) << shift
 	}
-
-	return NewV128Value(buf1)
+	for i := range 8 {
+		shift := i * 8
+		r := op(byte(v1.High>>shift), byte(v2.High>>shift))
+		high |= uint64(r) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpI16x8(v1, v2 V128Value, op func(int16, int16) int16) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
-
-	for i := 0; i < 16; i += 2 {
-		val1 := binary.LittleEndian.Uint16(buf1[i : i+2])
-		val2 := binary.LittleEndian.Uint16(buf2[i : i+2])
-		result := op(int16(val1), int16(val2))
-		binary.LittleEndian.PutUint16(buf1[i:i+2], uint16(result))
+	var low, high uint64
+	for i := range 4 {
+		shift := i * 16
+		r := op(int16(v1.Low>>shift), int16(v2.Low>>shift))
+		low |= uint64(uint16(r)) << shift
 	}
-
-	return NewV128Value(buf1)
+	for i := range 4 {
+		shift := i * 16
+		r := op(int16(v1.High>>shift), int16(v2.High>>shift))
+		high |= uint64(uint16(r)) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpUI16x8(v1, v2 V128Value, op func(uint16, uint16) uint16) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
-
-	for i := 0; i < 16; i += 2 {
-		val1 := binary.LittleEndian.Uint16(buf1[i : i+2])
-		val2 := binary.LittleEndian.Uint16(buf2[i : i+2])
-		result := op(val1, val2)
-		binary.LittleEndian.PutUint16(buf1[i:i+2], result)
+	var low, high uint64
+	for i := range 4 {
+		shift := i * 16
+		r := op(uint16(v1.Low>>shift), uint16(v2.Low>>shift))
+		low |= uint64(r) << shift
 	}
-
-	return NewV128Value(buf1)
+	for i := range 4 {
+		shift := i * 16
+		r := op(uint16(v1.High>>shift), uint16(v2.High>>shift))
+		high |= uint64(r) << shift
+	}
+	return V128Value{Low: low, High: high}
 }
 
 func binaryOpF64x2(
@@ -2049,7 +2068,6 @@ func binaryOpF64x2(
 ) V128Value {
 	resLow := op(math.Float64frombits(v1.Low), math.Float64frombits(v2.Low))
 	resHigh := op(math.Float64frombits(v1.High), math.Float64frombits(v2.High))
-
 	return V128Value{
 		Low:  math.Float64bits(resLow),
 		High: math.Float64bits(resHigh),
@@ -2060,27 +2078,41 @@ func binaryOpF32x4(
 	v1, v2 V128Value,
 	op func(float32, float32) float32,
 ) V128Value {
-	buf1 := v1.Bytes()
-	buf2 := v2.Bytes()
+	f1_0 := math.Float32frombits(uint32(v1.Low))
+	f1_1 := math.Float32frombits(uint32(v1.Low >> 32))
+	f2_0 := math.Float32frombits(uint32(v2.Low))
+	f2_1 := math.Float32frombits(uint32(v2.Low >> 32))
 
-	for i := 0; i < 16; i += 4 {
-		val1 := math.Float32frombits(binary.LittleEndian.Uint32(buf1[i : i+4]))
-		val2 := math.Float32frombits(binary.LittleEndian.Uint32(buf2[i : i+4]))
-		result := op(val1, val2)
-		binary.LittleEndian.PutUint32(buf1[i:i+4], math.Float32bits(result))
-	}
+	r0 := uint64(math.Float32bits(op(f1_0, f2_0)))
+	r1 := uint64(math.Float32bits(op(f1_1, f2_1)))
+	low := r0 | (r1 << 32)
 
-	return NewV128Value(buf1)
+	f1_2 := math.Float32frombits(uint32(v1.High))
+	f1_3 := math.Float32frombits(uint32(v1.High >> 32))
+	f2_2 := math.Float32frombits(uint32(v2.High))
+	f2_3 := math.Float32frombits(uint32(v2.High >> 32))
+
+	r2 := uint64(math.Float32bits(op(f1_2, f2_2)))
+	r3 := uint64(math.Float32bits(op(f1_3, f2_3)))
+	high := r2 | (r3 << 32)
+
+	return V128Value{Low: low, High: high}
 }
 
 func unaryOpF32x4(v V128Value, op func(float32) float32) V128Value {
-	buf := v.Bytes()
-	for i := 0; i < 16; i += 4 {
-		val := math.Float32frombits(binary.LittleEndian.Uint32(buf[i : i+4]))
-		val = op(val)
-		binary.LittleEndian.PutUint32(buf[i:i+4], math.Float32bits(val))
-	}
-	return NewV128Value(buf)
+	f0 := math.Float32frombits(uint32(v.Low))
+	f1 := math.Float32frombits(uint32(v.Low >> 32))
+	r0 := math.Float32bits(op(f0))
+	r1 := math.Float32bits(op(f1))
+	low := uint64(r0) | (uint64(r1) << 32)
+
+	f2 := math.Float32frombits(uint32(v.High))
+	f3 := math.Float32frombits(uint32(v.High >> 32))
+	r2 := math.Float32bits(op(f2))
+	r3 := math.Float32bits(op(f3))
+	high := uint64(r2) | (uint64(r3) << 32)
+
+	return V128Value{Low: low, High: high}
 }
 
 func unaryOpF64x2(v V128Value, op func(float64) float64) V128Value {
