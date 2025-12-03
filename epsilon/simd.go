@@ -36,16 +36,11 @@ func NewV128Value(bytes [16]byte) V128Value {
 	}
 }
 
-func (v V128Value) Bytes() [16]byte {
+func GetBytes(v V128Value) []byte {
 	var buf [16]byte
 	binary.LittleEndian.PutUint64(buf[0:8], v.Low)
 	binary.LittleEndian.PutUint64(buf[8:16], v.High)
-	return buf
-}
-
-func GetBytes(v V128Value) []byte {
-	bytes := v.Bytes()
-	return bytes[:]
+	return buf[:]
 }
 
 func SimdV128Load8x8S(data []byte) V128Value {
@@ -1784,57 +1779,27 @@ func SimdF64x2Pmax(v1, v2 V128Value) V128Value {
 }
 
 func SimdI32x4TruncSatF32x4S(v V128Value) V128Value {
-	inBuf := v.Bytes()
+	i0 := saturateF32toInt32(math.Float32frombits(uint32(v.Low)))
+	i1 := saturateF32toInt32(math.Float32frombits(uint32(v.Low >> 32)))
+	low := uint64(uint32(i0)) | (uint64(uint32(i1)) << 32)
 
-	var resultBytes [16]byte
-	for i := 0; i < 16; i += 4 {
-		f32bits := binary.LittleEndian.Uint32(inBuf[i : i+4])
-		f32val := math.Float32frombits(f32bits)
-		var i32val int32
+	i2 := saturateF32toInt32(math.Float32frombits(uint32(v.High)))
+	i3 := saturateF32toInt32(math.Float32frombits(uint32(v.High >> 32)))
+	high := uint64(uint32(i2)) | (uint64(uint32(i3)) << 32)
 
-		switch {
-		case math.IsNaN(float64(f32val)):
-			i32val = 0
-		case f32val > math.MaxInt32:
-			i32val = math.MaxInt32
-		case f32val < math.MinInt32:
-			i32val = math.MinInt32
-		default:
-			i32val = int32(f32val)
-		}
-
-		binary.LittleEndian.PutUint32(resultBytes[i:i+4], uint32(i32val))
-	}
-
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI32x4TruncSatF32x4U(v V128Value) V128Value {
-	inBuf := v.Bytes()
+	u0 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.Low))))
+	u1 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.Low >> 32))))
+	low := u0 | (u1 << 32)
 
-	var resultBytes [16]byte
-	for i := 0; i < 16; i += 4 {
-		f32bits := binary.LittleEndian.Uint32(inBuf[i : i+4])
-		f32val := math.Float32frombits(f32bits)
-		var u32val uint32
+	u2 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.High))))
+	u3 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.High >> 32))))
+	high := u2 | (u3 << 32)
 
-		f64val := float64(f32val)
-
-		switch {
-		case math.IsNaN(f64val):
-			u32val = 0
-		case f64val > float64(math.MaxUint32):
-			u32val = math.MaxUint32
-		case f64val < 0:
-			u32val = 0
-		default:
-			u32val = uint32(f64val)
-		}
-
-		binary.LittleEndian.PutUint32(resultBytes[i:i+4], u32val)
-	}
-
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdI32x4TruncSatF64x2SZero(v V128Value) V128Value {
@@ -1864,29 +1829,27 @@ func SimdI32x4TruncSatF64x2UZero(v V128Value) V128Value {
 }
 
 func SimdF32x4ConvertI32x4S(v V128Value) V128Value {
-	buf := v.Bytes()
+	f0 := float32(int32(v.Low))
+	f1 := float32(int32(v.Low >> 32))
+	low := uint64(math.Float32bits(f0)) | (uint64(math.Float32bits(f1)) << 32)
 
-	var resultBytes [16]byte
-	for i := 0; i < 16; i += 4 {
-		i32Val := int32(binary.LittleEndian.Uint32(buf[i : i+4]))
-		f32Val := float32(i32Val)
-		binary.LittleEndian.PutUint32(resultBytes[i:i+4], math.Float32bits(f32Val))
-	}
+	f2 := float32(int32(v.High))
+	f3 := float32(int32(v.High >> 32))
+	high := uint64(math.Float32bits(f2)) | (uint64(math.Float32bits(f3)) << 32)
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdF32x4ConvertI32x4U(v V128Value) V128Value {
-	inBuf := v.Bytes()
+	f0 := float32(uint32(v.Low))
+	f1 := float32(uint32(v.Low >> 32))
+	low := uint64(math.Float32bits(f0)) | (uint64(math.Float32bits(f1)) << 32)
 
-	var resultBytes [16]byte
-	for i := 0; i < 16; i += 4 {
-		u32val := binary.LittleEndian.Uint32(inBuf[i : i+4])
-		f32val := float32(u32val)
-		binary.LittleEndian.PutUint32(resultBytes[i:i+4], math.Float32bits(f32val))
-	}
+	f2 := float32(uint32(v.High))
+	f3 := float32(uint32(v.High >> 32))
+	high := uint64(math.Float32bits(f2)) | (uint64(math.Float32bits(f3)) << 32)
 
-	return NewV128Value(resultBytes)
+	return V128Value{Low: low, High: high}
 }
 
 func SimdF64x2Abs(v V128Value) V128Value {
@@ -2328,6 +2291,33 @@ func saturateF64toUint32(f float64) uint32 {
 	default:
 		return uint32(f)
 	}
+}
+
+func saturateF32toInt32(f float32) int32 {
+	if math.IsNaN(float64(f)) {
+		return 0
+	}
+	if f > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if f < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(f)
+}
+
+func saturateF32toUint32(f float32) uint32 {
+	f64 := float64(f)
+	if math.IsNaN(f64) {
+		return 0
+	}
+	if f64 > float64(math.MaxUint32) {
+		return math.MaxUint32
+	}
+	if f64 < 0 {
+		return 0
+	}
+	return uint32(f64)
 }
 
 // allTrue checks if all lanes of a given size are non-zero.
