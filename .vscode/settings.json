@@ -1,6 +1,7 @@
 {
-    "editor.tabSize": 2,
-    "editor.rulers": [
-        80
-    ]
+  "editor.tabSize": 2,
+  "editor.wordWrapColumn": 80,
+  "editor.rulers": [
+    80
+  ]
 }
