@@ -21,10 +21,6 @@ import (
 )
 
 func NewV128ValueFromSlice(bytes []byte) V128Value {
-	return NewV128Value([16]byte(bytes))
-}
-
-func NewV128Value(bytes [16]byte) V128Value {
 	return V128Value{
 		Low:  binary.LittleEndian.Uint64(bytes[0:8]),
 		High: binary.LittleEndian.Uint64(bytes[8:16]),
@@ -1798,29 +1794,21 @@ func SimdI32x4TruncSatF32x4U(v V128Value) V128Value {
 }
 
 func SimdI32x4TruncSatF64x2SZero(v V128Value) V128Value {
-	f64_1 := math.Float64frombits(v.Low)
-	f64_2 := math.Float64frombits(v.High)
-
-	i32_1 := saturateF64toInt32(f64_1)
-	i32_2 := saturateF64toInt32(f64_2)
-
-	var resultBytes [16]byte
-	binary.LittleEndian.PutUint32(resultBytes[0:4], uint32(i32_1))
-	binary.LittleEndian.PutUint32(resultBytes[4:8], uint32(i32_2))
-	return NewV128Value(resultBytes)
+	lowLowHalf := saturateF64toInt32(math.Float64frombits(v.Low))
+	lowHighHalf := saturateF64toInt32(math.Float64frombits(v.High))
+	return V128Value{
+		Low:  uint64(uint32(lowLowHalf)) | (uint64(uint32(lowHighHalf)) << 32),
+		High: 0,
+	}
 }
 
 func SimdI32x4TruncSatF64x2UZero(v V128Value) V128Value {
-	f64_1 := math.Float64frombits(v.Low)
-	f64_2 := math.Float64frombits(v.High)
-
-	u32_1 := saturateF64toUint32(f64_1)
-	u32_2 := saturateF64toUint32(f64_2)
-
-	var resultBytes [16]byte
-	binary.LittleEndian.PutUint32(resultBytes[0:4], u32_1)
-	binary.LittleEndian.PutUint32(resultBytes[4:8], u32_2)
-	return NewV128Value(resultBytes)
+	lowLowHalf := saturateF64toUint32(math.Float64frombits(v.Low))
+	lowHighHalf := saturateF64toUint32(math.Float64frombits(v.High))
+	return V128Value{
+		Low:  uint64(lowLowHalf) | (uint64(lowHighHalf) << 32),
+		High: 0,
+	}
 }
 
 func SimdF32x4ConvertI32x4S(v V128Value) V128Value {
