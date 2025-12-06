@@ -16,7 +16,7 @@ package epsilon
 
 import (
 	"bytes"
-	"epsilon/wabt"
+	"epsilon/internal/wabt"
 	"reflect"
 	"testing"
 )

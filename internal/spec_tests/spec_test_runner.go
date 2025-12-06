@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"epsilon/epsilon"
-	"epsilon/wabt"
+	"epsilon/internal/wabt"
 )
 
 // specTestRunner manages the state and execution of a single spec test file.

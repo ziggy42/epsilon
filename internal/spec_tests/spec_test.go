@@ -15,7 +15,7 @@
 package spec_tests
 
 import (
-	"epsilon/wabt"
+	"epsilon/internal/wabt"
 	"os"
 	"path/filepath"
 	"strings"
