@@ -14,6 +14,10 @@
 
 package epsilon
 
+import "errors"
+
+var ErrTableOutOfBounds = errors.New("out of bounds table access")
+
 // Table represents a WebAssembly table instance.
 type Table struct {
 	Type     TableType

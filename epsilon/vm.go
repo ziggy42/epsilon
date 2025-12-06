@@ -21,7 +21,6 @@ import (
 
 var (
 	ErrUnreachable        = errors.New("unreachable")
-	ErrTableOutOfBounds   = errors.New("out of bounds table access")
 	ErrCallStackExhausted = errors.New("call stack exhausted")
 	// Special error to signal a return instruction was hit.
 	errReturn = errors.New("return instruction")
