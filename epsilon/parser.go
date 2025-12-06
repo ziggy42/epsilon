@@ -713,18 +713,14 @@ func (p *Parser) parseLimits() (Limits, error) {
 	if err != nil {
 		return Limits{}, err
 	}
+	min, err := p.parseUint32()
+	if err != nil {
+		return Limits{}, err
+	}
 	switch b {
 	case 0:
-		min, err := p.parseUint32()
-		if err != nil {
-			return Limits{}, err
-		}
 		return Limits{Min: min}, nil
 	case 1:
-		min, err := p.parseUint32()
-		if err != nil {
-			return Limits{}, err
-		}
 		max, err := p.parseUint32()
 		if err != nil {
 			return Limits{}, err

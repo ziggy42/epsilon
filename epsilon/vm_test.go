@@ -31,8 +31,7 @@ func initVM(
 	if err != nil {
 		return nil, nil, err
 	}
-	parser := NewParser(bytes.NewReader(wasm))
-	module, err := parser.Parse()
+	module, err := NewParser(bytes.NewReader(wasm)).Parse()
 	if err != nil {
 		return nil, nil, err
 	}
