@@ -75,13 +75,13 @@ go test ./epsilon/...
 The official WASM specification tests are included as a submodule:
 
 ```bash
-go test ./spec_tests/...
+go test ./internal/spec_tests/...
 ```
 
 ### Benchmarks
 
 ```bash
-go test -bench . ./benchmarks
+go test -bench . ./internal/benchmarks
 ```
 
 ## Contributing

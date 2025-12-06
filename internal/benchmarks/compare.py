@@ -60,7 +60,7 @@ def _branch_exists(branch: str) -> bool:
 def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
   """Run benchmarks and parse results."""
   result = subprocess.run(
-      ["go", "test", "-bench=.", "-benchmem", "./benchmarks"],
+      ["go", "test", "-bench=.", "-benchmem", "./internal/benchmarks"],
       cwd=cwd,
       capture_output=True,
       text=True
