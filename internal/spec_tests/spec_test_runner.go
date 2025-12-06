@@ -27,8 +27,8 @@ import (
 	"epsilon/wabt"
 )
 
-// SpecTestRunner manages the state and execution of a single spec test file.
-type SpecTestRunner struct {
+// specTestRunner manages the state and execution of a single spec test file.
+type specTestRunner struct {
 	t                  *testing.T
 	wasmDict           map[string][]byte
 	vm                 *epsilon.VM
@@ -37,7 +37,7 @@ type SpecTestRunner struct {
 	spectestImports    map[string]any
 }
 
-func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
+func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
 	limits := epsilon.Limits{Min: 1, Max: &importMemoryLimitMax}
 	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: limits})
@@ -87,7 +87,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
 		},
 	}
 
-	return &SpecTestRunner{
+	return &specTestRunner{
 		t:                 t,
 		wasmDict:          wasmDict,
 		vm:                epsilon.NewVM(),
@@ -96,7 +96,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *SpecTestRunner {
 	}
 }
 
-func (r *SpecTestRunner) run(commands []wabt.Command) {
+func (r *specTestRunner) run(commands []wabt.Command) {
 	for _, cmd := range commands {
 		r.t.Logf("Line %d: executing command type: %s", cmd.Line, cmd.Type)
 		switch cmd.Type {
@@ -126,7 +126,7 @@ func (r *SpecTestRunner) run(commands []wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertExhaustion(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertExhaustion(cmd wabt.Command) {
 	_, err := r.handleAction(cmd.Action)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected call stack exhaustion, but got no error")
@@ -137,14 +137,14 @@ func (r *SpecTestRunner) handleAssertExhaustion(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleRegister(cmd wabt.Command) {
+func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 	if r.lastModuleInstance == nil {
 		r.fatalf(cmd.Line, "no module to register")
 	}
 	r.moduleInstanceMap[cmd.As] = r.lastModuleInstance
 }
 
-func (r *SpecTestRunner) buildImports() map[string]map[string]any {
+func (r *specTestRunner) buildImports() map[string]map[string]any {
 	imports := map[string]map[string]any{
 		"spectest": r.spectestImports,
 	}
@@ -160,7 +160,7 @@ func (r *SpecTestRunner) buildImports() map[string]map[string]any {
 	return imports
 }
 
-func (r *SpecTestRunner) handleModule(cmd wabt.Command) {
+func (r *specTestRunner) handleModule(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
 	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
@@ -178,7 +178,7 @@ func (r *SpecTestRunner) handleModule(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertReturn(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
 	actual, err := r.handleAction(cmd.Action)
 	if err != nil {
 		r.fatalf(cmd.Line, "action failed unexpectedly: %v", err)
@@ -198,7 +198,7 @@ func (r *SpecTestRunner) handleAssertReturn(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertTrap(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
 		wasmBytes := r.wasmDict[cmd.Filename]
@@ -220,7 +220,7 @@ func (r *SpecTestRunner) handleAssertTrap(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertInvalid(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
 	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
@@ -234,7 +234,7 @@ func (r *SpecTestRunner) handleAssertInvalid(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertMalformed(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 	if strings.HasSuffix(cmd.Filename, ".wat") {
 		// "assert_malformed" in text format cannot even be compiled to wasm,
 		// therefore there is no point in trying to run this test.
@@ -255,7 +255,7 @@ func (r *SpecTestRunner) handleAssertMalformed(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
 	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
@@ -269,7 +269,7 @@ func (r *SpecTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
 	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
 	if err != nil {
@@ -282,7 +282,7 @@ func (r *SpecTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
 	}
 }
 
-func (r *SpecTestRunner) handleAction(action *wabt.Action) ([]any, error) {
+func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
 	moduleInstance := r.getModuleInstance(action.Module)
 	switch action.Type {
 	case "invoke":
@@ -303,7 +303,7 @@ func (r *SpecTestRunner) handleAction(action *wabt.Action) ([]any, error) {
 	}
 }
 
-func (r *SpecTestRunner) assertValuesEqual(
+func (r *specTestRunner) assertValuesEqual(
 	line int,
 	expectedVal wabt.Value,
 	actual any,
@@ -374,7 +374,7 @@ func floatsEqual[T float32 | float64](expected, actual T) bool {
 	return expected == actual
 }
 
-func (r *SpecTestRunner) getModuleInstance(
+func (r *specTestRunner) getModuleInstance(
 	module string,
 ) *epsilon.ModuleInstance {
 	if module == "" {
@@ -390,7 +390,7 @@ func (r *SpecTestRunner) getModuleInstance(
 	return instance
 }
 
-func (r *SpecTestRunner) fatalf(line int, format string, args ...any) {
+func (r *specTestRunner) fatalf(line int, format string, args ...any) {
 	r.t.Helper()
 	r.t.Fatalf("line %d: %s", line, fmt.Sprintf(format, args...))
 }
