@@ -20,3 +20,6 @@ go.work
 # Custom
 prompt.txt
 cpu.prof
+
+# Antigravity
+.agent
