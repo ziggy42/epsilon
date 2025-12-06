@@ -10,7 +10,7 @@ with no runtime dependencies.
 ### Running the REPL
 
 ```bash
-go run main.go
+go run ./cmd/epsilon
 ```
 
 ### Commands
@@ -19,41 +19,39 @@ go run main.go
 | Command | Description |
 |---------|-------------|
 | `LOAD [<module-name>] <path-to-file \| url>` | Load a WASM module from a file / URL |
-| `USE <module-name>` | Switch to a loaded module |
 
 #### Execution
 | Command | Description |
 |---------|-------------|
-| `INVOKE <function-name> [args...]` | Invoke an exported function |
-| `GET <global-name>` | Get the value of an exported global |
+| `INVOKE [<module>.]<function-name> [args...]` | Invoke an exported function |
+| `GET [<module>.]<global-name>` | Get the value of an exported global |
 
 #### Inspection
 | Command | Description |
 |---------|-------------|
-| `MEM <offset> <length>` | Inspect a range of memory in the active module |
-| `/list` | List loaded modules and their exports |
+| `MEM [<module>] <offset> <length>` | Inspect a range of memory |
+| `LIST` | List loaded modules and their exports |
 
 #### REPL Control
 | Command | Description |
 |---------|-------------|
-| `/help` | Show available commands |
-| `/clear` | Clear the screen and reset the VM state |
-| `/quit` | Exit the REPL |
+| `HELP` | Show available commands |
+| `CLEAR` | Clear the screen and reset the VM state |
+| `QUIT` | Exit the REPL |
 
 ### Example Session
 
 ```
-$ go run main.go
+$ go run ./cmd/epsilon
 >> LOAD https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm
 'default' instantiated.
 >> INVOKE add 1 2
 3
 >> LOAD table https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/wasm-table.wasm
 'table' instantiated.
->> USE table
->> INVOKE callByIndex 0
+>> INVOKE table.callByIndex 0
 42
->> INVOKE callByIndex 1
+>> INVOKE table.callByIndex 1
 13
 >>
 ```
