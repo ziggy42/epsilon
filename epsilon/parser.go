@@ -370,7 +370,7 @@ func (p *Parser) parseExport() (Export, error) {
 	if err != nil {
 		return Export{}, err
 	}
-	return Export{Name: name, IndexType: IndexType(b), Index: index}, nil
+	return Export{Name: name, IndexType: ExportIndexKind(b), Index: index}, nil
 }
 
 func (p *Parser) parseDataSegment() (DataSegment, error) {

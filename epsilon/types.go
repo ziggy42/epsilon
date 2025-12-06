@@ -1,0 +1,118 @@
+// Copyright 2025 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package epsilon
+
+import "slices"
+
+// ValueType classifies the individual values that WebAssembly code can compute
+// with and the values that a variable accepts. They are either NumberType,
+// VectorType, or ReferenceType.
+type ValueType interface {
+	isValueType()
+}
+
+// NumberType classifies numeric values.
+// See https://webassembly.github.io/spec/core/syntax/types.html#number-types.
+type NumberType int
+
+const (
+	I32 NumberType = 0x7f
+	I64 NumberType = 0x7e
+	F32 NumberType = 0x7d
+	F64 NumberType = 0x7c
+)
+
+func (NumberType) isValueType() {}
+
+// VectorType classifies vectors of numeric values processed by vector
+// instructions.
+// See https://webassembly.github.io/spec/core/syntax/types.html#vector-types.
+type VectorType int
+
+const (
+	V128 VectorType = 0x7b
+)
+
+func (VectorType) isValueType() {}
+
+// ReferenceType classifies first-class references to objects in the runtime
+// store.
+// https://webassembly.github.io/spec/core/syntax/types.html#reference-types.
+type ReferenceType int
+
+const (
+	FuncRefType   ReferenceType = 0x70
+	ExternRefType ReferenceType = 0x6f
+)
+
+func (ReferenceType) isValueType() {}
+
+// V128Value represents a 128-bit SIMD value.
+type V128Value struct {
+	Low, High uint64
+}
+
+// Limits define min/max constraints for tables and memories.
+// See https://webassembly.github.io/spec/core/binary/types.html#limits
+type Limits struct {
+	Min uint32
+	Max *uint32
+}
+
+// FunctionType classifies the signature of functions, mapping a vector of
+// parameters to a vector of results.
+// See https://webassembly.github.io/spec/core/syntax/types.html#function-types.
+type FunctionType struct {
+	ParamTypes  []ValueType
+	ResultTypes []ValueType
+}
+
+func (ft *FunctionType) Equal(other *FunctionType) bool {
+	if ft == other {
+		return true
+	}
+	if ft == nil || other == nil {
+		return false
+	}
+	return slices.Equal(ft.ParamTypes, other.ParamTypes) &&
+		slices.Equal(ft.ResultTypes, other.ResultTypes)
+}
+
+// Null is a lightweight way to represent a Wasm null reference.
+type Null struct{}
+
+// NullVal is a convenient, reusable instance of the Null type.
+var NullVal = Null{}
+
+// DefaultValueForType returns the default value for a given ValueType.
+func DefaultValueForType(vt ValueType) any {
+	switch vt {
+	case I32:
+		return int32(0)
+	case I64:
+		return int64(0)
+	case F32:
+		return float32(0)
+	case F64:
+		return float64(0)
+	case V128:
+		return V128Value{}
+	case FuncRefType, ExternRefType:
+		return NullVal
+	default:
+		// Should ideally not be reached with a valid module.
+		return nil
+	}
+}

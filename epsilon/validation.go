@@ -211,20 +211,20 @@ func (v *validator) validateGlobal(global *GlobalVariable) error {
 
 func (v *validator) validateExport(export *Export) error {
 	switch export.IndexType {
-	case FunctionIndexType:
+	case FunctionExportKind:
 		if err := v.validateFunctionTypeExists(export.Index); err != nil {
 			return err
 		}
 		v.referencedFunctions[export.Index] = true
-	case TableIndexType:
+	case TableExportKind:
 		if err := v.validateTableExists(export.Index); err != nil {
 			return err
 		}
-	case MemoryIndexType:
+	case MemoryExportKind:
 		if err := v.validateMemoryExists(export.Index); err != nil {
 			return err
 		}
-	case GlobalIndexType:
+	case GlobalExportKind:
 		if err := v.validateGlobalExists(export.Index); err != nil {
 			return err
 		}

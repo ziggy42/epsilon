@@ -64,7 +64,7 @@ func TestParseExportedFunction(t *testing.T) {
 		Exports: []Export{
 			{
 				Name:      "sum",
-				IndexType: FunctionIndexType,
+				IndexType: FunctionExportKind,
 				Index:     0,
 			},
 		},

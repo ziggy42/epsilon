@@ -102,7 +102,7 @@ func resolveFunctionImport(
 	}
 
 	if f, ok := obj.(func(...any) []any); ok {
-		return &HostFunc{Type: functionType, HostCode: f}, nil
+		return &HostFunction{Type: functionType, HostCode: f}, nil
 	}
 
 	return nil, fmt.Errorf("%s.%s not a function", imp.ModuleName, imp.Name)

@@ -32,11 +32,11 @@ type CallFrame struct {
 	Decoder      *Decoder
 	ControlStack []*ControlFrame
 	Locals       []any
-	Function     *WasmFunc
+	Function     *WasmFunction
 }
 
 func NewCallFrame(
-	function *WasmFunc,
+	function *WasmFunction,
 	locals []any,
 	controlFrame ControlFrame,
 ) *CallFrame {
@@ -99,7 +99,7 @@ func (vm *VM) Instantiate(
 	for _, function := range module.Funcs {
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.Types[function.TypeIndex]
-		wasmFunc := NewWasmFunc(funType, moduleInstance, function)
+		wasmFunc := NewWasmFunction(funType, moduleInstance, function)
 		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
@@ -191,7 +191,7 @@ func (vm *VM) Instantiate(
 }
 
 func (vm *VM) Get(module *ModuleInstance, name string) (any, error) {
-	export, err := getExport(module, name, GlobalIndexType)
+	export, err := getExport(module, name, GlobalExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +203,7 @@ func (vm *VM) Invoke(
 	name string,
 	args ...any,
 ) ([]any, error) {
-	export, err := getExport(module, name, FunctionIndexType)
+	export, err := getExport(module, name, FunctionExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -214,16 +214,16 @@ func (vm *VM) Invoke(
 
 func (vm *VM) invoke(function FunctionInstance) ([]any, error) {
 	switch f := function.(type) {
-	case *WasmFunc:
+	case *WasmFunction:
 		return vm.invokeWasmFunction(f)
-	case *HostFunc:
+	case *HostFunction:
 		return vm.invokeHostFunction(f)
 	default:
 		return nil, fmt.Errorf("unknown function type")
 	}
 }
 
-func (vm *VM) invokeWasmFunction(function *WasmFunc) ([]any, error) {
+func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	if vm.callStackDepth >= maxCallStackDepth {
 		return nil, ErrCallStackExhausted
 	}
@@ -1718,7 +1718,7 @@ func (vm *VM) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	return 0, 1 // value type.
 }
 
-func getLocalValueType(function *WasmFunc, localIndex int32) ValueType {
+func getLocalValueType(function *WasmFunction, localIndex int32) ValueType {
 	if int(localIndex) < len(function.Type.ParamTypes) {
 		return function.Type.ParamTypes[localIndex]
 	}
@@ -1729,7 +1729,7 @@ func getLocalValueType(function *WasmFunc, localIndex int32) ValueType {
 func getExport(
 	module *ModuleInstance,
 	name string,
-	indexType IndexType,
+	indexType ExportIndexKind,
 ) (any, error) {
 	for _, export := range module.Exports {
 		if export.Name != name {
@@ -1737,13 +1737,13 @@ func getExport(
 		}
 
 		switch indexType {
-		case FunctionIndexType:
+		case FunctionExportKind:
 			function, ok := export.Value.(FunctionInstance)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a function", name)
 			}
 			return function, nil
-		case GlobalIndexType:
+		case GlobalExportKind:
 			global, ok := export.Value.(*Global)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a global", name)
@@ -1856,16 +1856,16 @@ func (vm *VM) resolveExports(
 	for _, export := range module.Exports {
 		var value any
 		switch export.IndexType {
-		case FunctionIndexType:
+		case FunctionExportKind:
 			storeIndex := instance.FuncAddrs[export.Index]
 			value = vm.store.funcs[storeIndex]
-		case GlobalIndexType:
+		case GlobalExportKind:
 			storeIndex := instance.GlobalAddrs[export.Index]
 			value = vm.store.globals[storeIndex]
-		case MemoryIndexType:
+		case MemoryExportKind:
 			storeIndex := instance.MemAddrs[export.Index]
 			value = vm.store.memories[storeIndex]
-		case TableIndexType:
+		case TableExportKind:
 			storeIndex := instance.TableAddrs[export.Index]
 			value = vm.store.tables[storeIndex]
 		}
@@ -1874,7 +1874,7 @@ func (vm *VM) resolveExports(
 	return exports
 }
 
-func (vm *VM) invokeHostFunction(fun *HostFunc) (res []any, err error) {
+func (vm *VM) invokeHostFunction(fun *HostFunction) (res []any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var panicErr error
@@ -1900,7 +1900,7 @@ func (vm *VM) invokeInitExpression(
 ) (any, error) {
 	// We create a fake function to execute the expression.
 	// The expression is expected to return a single value.
-	function := WasmFunc{
+	function := WasmFunction{
 		Type: FunctionType{
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},

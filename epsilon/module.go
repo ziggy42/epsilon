@@ -14,103 +14,19 @@
 
 package epsilon
 
-import "slices"
-
-// ValueType classifies the individual values that WebAssembly code can compute
-// with and the values that a variable accepts. They are either NumberType,
-// VectorType, or ReferenceType.
-type ValueType interface {
-	isValueType()
-}
-
-// NumberType classifies numeric values.
-// See https://webassembly.github.io/spec/core/syntax/types.html#number-types.
-type NumberType int
-
-const (
-	I32 NumberType = 0x7f
-	I64 NumberType = 0x7e
-	F32 NumberType = 0x7d
-	F64 NumberType = 0x7c
-)
-
-func (NumberType) isValueType() {}
-
-// VectorType classifies vectors of numeric values processed by vector
-// instructions.
-// See https://webassembly.github.io/spec/core/syntax/types.html#vector-types.
-type VectorType int
-
-const (
-	V128 VectorType = 0x7b
-)
-
-func (VectorType) isValueType() {}
-
-func DefaultValueForType(vt ValueType) any {
-	switch vt {
-	case I32:
-		return int32(0)
-	case I64:
-		return int64(0)
-	case F32:
-		return float32(0)
-	case F64:
-		return float64(0)
-	case V128:
-		return V128Value{}
-	case FuncRefType, ExternRefType:
-		return NullVal
-	default:
-		// Should ideally not be reached with a valid module.
-		return nil
-	}
-}
-
-// ReferenceType classifies first-class references to objects in the runtime
-// store.
-// https://webassembly.github.io/spec/core/syntax/types.html#reference-types.
-type ReferenceType int
-
-const (
-	FuncRefType   ReferenceType = 0x70
-	ExternRefType ReferenceType = 0x6f
-)
-
-func (ReferenceType) isValueType() {}
-
-// FunctionType classifies the signature of functions, mapping a vector of
-// parameters to a vector of results.
-// See https://webassembly.github.io/spec/core/syntax/types.html#function-types.
-type FunctionType struct {
-	ParamTypes  []ValueType
-	ResultTypes []ValueType
-}
-
-func (ft *FunctionType) Equal(other *FunctionType) bool {
-	if ft == other {
-		return true
-	}
-	if ft == nil || other == nil {
-		return false
-	}
-	return slices.Equal(ft.ParamTypes, other.ParamTypes) &&
-		slices.Equal(ft.ResultTypes, other.ResultTypes)
-}
-
 type Function struct {
 	TypeIndex uint32
 	Locals    []ValueType
 	Body      []byte
 }
 
-type IndexType int
+type ExportIndexKind int
 
 const (
-	FunctionIndexType IndexType = 0x0
-	TableIndexType    IndexType = 0x1
-	MemoryIndexType   IndexType = 0x2
-	GlobalIndexType   IndexType = 0x3
+	FunctionExportKind ExportIndexKind = 0x0
+	TableExportKind    ExportIndexKind = 0x1
+	MemoryExportKind   ExportIndexKind = 0x2
+	GlobalExportKind   ExportIndexKind = 0x3
 )
 
 // Import represents a WASM import.
@@ -141,14 +57,8 @@ func (GlobalType) isImportType()        {}
 // See https://webassembly.github.io/spec/core/syntax/modules.html#exports.
 type Export struct {
 	Name      string
-	IndexType IndexType
+	IndexType ExportIndexKind
 	Index     uint32
-}
-
-// See https://webassembly.github.io/spec/core/binary/types.html#limits
-type Limits struct {
-	Min uint32
-	Max *uint32
 }
 
 type TableType struct {

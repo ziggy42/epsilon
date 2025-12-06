@@ -14,12 +14,6 @@
 
 package epsilon
 
-// Null is a lightweight way to represent a Wasm null reference.
-type Null struct{}
-
-// NullVal is a convenient, reusable instance of the Null type.
-var NullVal = Null{}
-
 // ExportInstance represents the runtime representation of an export.
 type ExportInstance struct {
 	Name  string
@@ -42,26 +36,26 @@ type FunctionInstance interface {
 	GetType() *FunctionType
 }
 
-// WasmFunc is the runtime representation of a function defined in WebAssembly.
-type WasmFunc struct {
+// WasmFunction is the runtime representation of a function defined in WASM.
+type WasmFunction struct {
 	Type   FunctionType
 	Module *ModuleInstance
 	Code   Function
 	// We cache the continuation pc for each block-like opcde we encounter so we
 	// can compute it only once. The key is the pc of the first instruction inside
 	// the block.
-	// These caches are stored in a WasmFunc and not in e.g. a CallFrame so that
-	// multiple invocation of the same WasmFunc share the same caches.
+	// These caches are stored in a WasmFunction and not in e.g. a CallFrame so
+	// that multiple invocation of the same WasmFunction share the same caches.
 	JumpCache     map[uint]uint
 	JumpElseCache map[uint]uint
 }
 
-func NewWasmFunc(
+func NewWasmFunction(
 	funType FunctionType,
 	module *ModuleInstance,
 	function Function,
-) *WasmFunc {
-	return &WasmFunc{
+) *WasmFunction {
+	return &WasmFunction{
 		Type:          funType,
 		Module:        module,
 		Code:          function,
@@ -70,15 +64,15 @@ func NewWasmFunc(
 	}
 }
 
-func (wf *WasmFunc) GetType() *FunctionType { return &wf.Type }
+func (wf *WasmFunction) GetType() *FunctionType { return &wf.Type }
 
-// HostFunc represents a function defined by the host environment.
-type HostFunc struct {
+// HostFunction represents a function defined by the host environment.
+type HostFunction struct {
 	Type     FunctionType
 	HostCode func(...any) []any
 }
 
-func (hf *HostFunc) GetType() *FunctionType { return &hf.Type }
+func (hf *HostFunction) GetType() *FunctionType { return &hf.Type }
 
 // Store represents all global state that can be manipulated by WebAssembly
 // programs. It consists of the runtime representation of all instances of

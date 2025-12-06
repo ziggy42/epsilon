@@ -20,11 +20,6 @@ import (
 	"math/bits"
 )
 
-// V128Value represents a 128-bit SIMD value.
-type V128Value struct {
-	Low, High uint64
-}
-
 func NewV128ValueFromSlice(bytes []byte) V128Value {
 	return NewV128Value([16]byte(bytes))
 }
