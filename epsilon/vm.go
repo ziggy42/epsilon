@@ -233,7 +233,7 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.PopValueTypes(function.Type.ParamTypes)
+	locals := vm.stack.PopN(len(function.Type.ParamTypes))
 	for _, local := range function.Code.Locals {
 		locals = append(locals, DefaultValueForType(local))
 	}
@@ -265,7 +265,7 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	}
 
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	values := vm.stack.PopValueTypes(callFrame.Function.Type.ResultTypes)
+	values := vm.stack.PopN(len(callFrame.Function.Type.ResultTypes))
 	return values, nil
 }
 
@@ -1896,7 +1896,7 @@ func (vm *VM) invokeHostFunction(fun *HostFunction) (res []any, err error) {
 		}
 	}()
 
-	args := vm.stack.PopValueTypes(fun.GetType().ParamTypes)
+	args := vm.stack.PopN(len(fun.GetType().ParamTypes))
 	res = fun.HostCode(args...)
 	return res, nil
 }
