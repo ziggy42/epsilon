@@ -54,16 +54,16 @@ type bottomType struct{}
 
 func (bottomType) isValueType() {}
 
-var Bottom ValueType = bottomType{}
+var bottom ValueType = bottomType{}
 
 func isNumber(vt ValueType) bool {
 	_, ok := vt.(NumberType)
-	return ok || vt == Bottom
+	return ok || vt == bottom
 }
 
 func isVector(vt ValueType) bool {
 	_, ok := vt.(VectorType)
-	return ok || vt == Bottom
+	return ok || vt == bottom
 }
 
 type validationControlFrame struct {
@@ -91,7 +91,7 @@ type validator struct {
 	features            ExperimentalFeatures
 }
 
-func NewValidator(features ExperimentalFeatures) *validator {
+func newValidator(features ExperimentalFeatures) *validator {
 	return &validator{
 		valueStack:          make([]ValueType, 0),
 		controlStack:        make([]validationControlFrame, 0),
@@ -422,7 +422,7 @@ func (v *validator) validate(instruction Instruction) error {
 	case Drop:
 		return v.validateDrop()
 	case Select:
-		return v.validateSelect(Bottom)
+		return v.validateSelect(bottom)
 	case SelectT:
 		return v.validateSelect(toValueType(instruction.Immediates[0]))
 	case LocalGet:
@@ -876,17 +876,17 @@ func (v *validator) validateSelect(t ValueType) error {
 		return err
 	}
 
-	if t == Bottom {
+	if t == bottom {
 		if !((isNumber(type1) && isNumber(type2)) ||
 			(isVector(type1) && isVector(type2))) {
 			return errTypesDoNotMatch
 		}
-		if type1 != type2 && type1 != Bottom && type2 != Bottom {
+		if type1 != type2 && type1 != bottom && type2 != bottom {
 			return errTypesDoNotMatch
 		}
 	}
 
-	if type1 == Bottom {
+	if type1 == bottom {
 		v.pushValue(type2)
 	} else {
 		v.pushValue(type1)
@@ -1383,7 +1383,7 @@ func (v *validator) popValue() (ValueType, error) {
 	if len(v.valueStack) == currentFrame.height && currentFrame.unreachable {
 		// Special case, can occur after an unconditional branch when the stack is
 		// typed polymorphically.
-		return Bottom, nil
+		return bottom, nil
 	}
 
 	if len(v.valueStack) == currentFrame.height {
@@ -1400,7 +1400,7 @@ func (v *validator) popExpectedValue(expected ValueType) (ValueType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if val != expected && val != Bottom && expected != Bottom {
+	if val != expected && val != bottom && expected != bottom {
 		return nil, errTypesDoNotMatch
 	}
 	return val, nil
@@ -1500,7 +1500,7 @@ func toValueType(code uint64) ValueType {
 	case uint64(ExternRefType):
 		return ExternRefType
 	default:
-		return Bottom
+		return bottom
 	}
 }
 

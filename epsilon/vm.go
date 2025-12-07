@@ -66,7 +66,7 @@ func (vm *VM) Instantiate(
 	module *Module,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	validator := NewValidator(vm.features)
+	validator := newValidator(vm.features)
 	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
