@@ -40,9 +40,12 @@ func (s *ValueStack) PopInt32() int32 {
 }
 
 func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
-	a := popAs[int32](s)
-	b := popAs[int32](s)
-	c := popAs[int32](s)
+	data := s.data
+	n := len(data)
+	c := data[n-3].(int32)
+	b := data[n-2].(int32)
+	a := data[n-1].(int32)
+	s.data = data[:n-3]
 	return a, b, c
 }
 
