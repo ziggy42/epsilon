@@ -54,9 +54,11 @@ func (r *Runtime) InstantiateModuleWithImports(
 	return r.vm.instantiate(module, imports)
 }
 
-// InstantiateModuleFromBytes is a convenience method to instantiate
-// a WASM module from a byte slice.
-func (r *Runtime) InstantiateModuleFromBytes(data []byte) (*ModuleInstance, error) {
+// InstantiateModuleFromBytes is a convenience method to instantiate a WASM
+// module from a byte slice.
+func (r *Runtime) InstantiateModuleFromBytes(
+	data []byte,
+) (*ModuleInstance, error) {
 	return r.InstantiateModule(bytes.NewReader(data))
 }
 

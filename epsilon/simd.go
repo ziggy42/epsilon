@@ -1979,7 +1979,10 @@ func binaryOpI16x8(v1, v2 V128Value, op func(int16, int16) int16) V128Value {
 	return V128Value{Low: low, High: high}
 }
 
-func binaryOpUI16x8(v1, v2 V128Value, op func(uint16, uint16) uint16) V128Value {
+func binaryOpUI16x8(
+	v1, v2 V128Value,
+	op func(uint16, uint16) uint16,
+) V128Value {
 	var low, high uint64
 	for i := range 4 {
 		shift := i * 16

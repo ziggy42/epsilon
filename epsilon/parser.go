@@ -25,7 +25,10 @@ import (
 	"unicode/utf8"
 )
 
-var errElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
+var (
+	errElementKindNotZero                = errors.New("element kind for passive element segment must be 0x00")
+	errIncompatibleNumberOfFunctionTypes = errors.New("incompatible number of function types")
+)
 
 const (
 	wasmMagicNumber      = "\x00asm"
@@ -190,7 +193,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	}
 
 	if len(functionTypeIndexes) != len(functions) {
-		return &moduleDefinition{}, fmt.Errorf("incompatible number of func indexes/bodies")
+		return nil, errIncompatibleNumberOfFunctionTypes
 	}
 
 	for i := range functions {
@@ -357,7 +360,11 @@ func (p *parser) parseImport() (moduleImport, error) {
 	default:
 		return moduleImport{}, fmt.Errorf("failed to parse import description")
 	}
-	return moduleImport{moduleName: moduleName, name: name, importType: importType}, nil
+	return moduleImport{
+		moduleName: moduleName,
+		name:       name,
+		importType: importType,
+	}, nil
 }
 
 func (p *parser) parseExport() (export, error) {

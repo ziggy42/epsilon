@@ -818,8 +818,8 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem0) (i32.const 0) "hello")
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
-
-	_, moduleInstance, err := initVM(wat, nil, &ExperimentalFeatures{MultipleMemories: true})
+	features := &ExperimentalFeatures{MultipleMemories: true}
+	_, moduleInstance, err := initVM(wat, nil, features)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}

@@ -294,7 +294,7 @@ func (d *decoder) readOpcode() (opcode, error) {
 	default:
 		// This case should ideally not be reached if opcodeByte is guaranteed to be
 		// < 0xFC or 0xFD. However, as a safeguard, we can return an error.
-		return 0, fmt.Errorf("unrecognized multi-byte opcode prefix: 0x%X", opcodeByte)
+		return 0, fmt.Errorf("unrecognized opcode prefix: 0x%X", opcodeByte)
 	}
 
 	return opcode(compositeOpcode), nil
