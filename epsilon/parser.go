@@ -294,7 +294,7 @@ func (p *parser) parseFunction() (function, error) {
 		return function{}, fmt.Errorf("failed to read function body: %w", err)
 	}
 
-	if len(body) == 0 || body[len(body)-1] != byte(End) {
+	if len(body) == 0 || body[len(body)-1] != byte(end) {
 		return function{}, fmt.Errorf("function body must end with End opcode")
 	}
 
@@ -694,7 +694,7 @@ func (p *parser) parseExpression() ([]byte, error) {
 		// Try to decode instructions.
 		for decoder.hasMore() {
 			// If the next byte is the end opcode, we are done.
-			if Opcode(code[decoder.pc]) == End {
+			if opcode(code[decoder.pc]) == end {
 				// The expression is the content of the buffer *before* the End opcode.
 				return code[:decoder.pc], nil
 			}

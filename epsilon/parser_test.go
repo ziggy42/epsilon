@@ -59,7 +59,7 @@ func TestParseExportedFunction(t *testing.T) {
 			{
 				typeIndex: 0,
 				locals:    []ValueType{},
-				body:      []byte{byte(LocalGet), 0, byte(LocalGet), 1, byte(I32Add)},
+				body:      []byte{byte(localGet), 0, byte(localGet), 1, byte(i32Add)},
 			},
 		},
 		exports: []export{
@@ -152,7 +152,7 @@ func TestParseActiveElement(t *testing.T) {
 		t.Fatalf("expected table index 0, got %d", element.tableIndex)
 	}
 
-	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
+	expectedOffsetExpression := []byte{byte(i32Const), 0x0}
 	if !bytes.Equal(element.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset %v, got %v",
@@ -209,7 +209,7 @@ func TestParseGlobalVariable(t *testing.T) {
 		)
 	}
 
-	expectedInitExpression := []byte{byte(I32Const), 42}
+	expectedInitExpression := []byte{byte(i32Const), 42}
 	if !bytes.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
@@ -244,7 +244,7 @@ func TestParseImmutableGlobalVariable(t *testing.T) {
 		)
 	}
 
-	expectedInitExpression := []byte{byte(I32Const), 63}
+	expectedInitExpression := []byte{byte(i32Const), 63}
 	if !bytes.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
@@ -272,8 +272,8 @@ func TestParseImportFunction(t *testing.T) {
 	if imp.name != "log" {
 		t.Errorf("expected name \"log\", got %s", imp.name)
 	}
-	if imp.importType != functionTypeIndex(0) {
-		t.Errorf("expected import type FunctionTypeIndex(0), got %v", imp.importType)
+	if _, ok := imp.importType.(functionTypeIndex); !ok {
+		t.Errorf("expected import type FunctionTypeIndex, got %T", imp.importType)
 	}
 }
 
@@ -390,7 +390,7 @@ func TestParseActiveDataSegment(t *testing.T) {
 	if data.memoryIndex != 0 {
 		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
-	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
+	expectedOffsetExpression := []byte{byte(i32Const), 0x0}
 	if !bytes.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
@@ -422,7 +422,7 @@ func TestParseActiveDataSegmentWithMemoryIndex(t *testing.T) {
 	if data.memoryIndex != 0 {
 		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
-	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
+	expectedOffsetExpression := []byte{byte(i32Const), 0x0}
 	if !bytes.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
