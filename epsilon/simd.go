@@ -20,13 +20,6 @@ import (
 	"math/bits"
 )
 
-func GetBytes(v V128Value) []byte {
-	var buf [16]byte
-	binary.LittleEndian.PutUint64(buf[0:8], v.Low)
-	binary.LittleEndian.PutUint64(buf[8:16], v.High)
-	return buf[:]
-}
-
 func SimdV128Load8x8S(data []byte) V128Value {
 	p0 := uint64(uint16(int8(data[0])))
 	p1 := uint64(uint16(int8(data[1])))
