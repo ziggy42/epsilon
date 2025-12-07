@@ -319,33 +319,33 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableSet:
 		err = vm.handleTableSet(instruction)
 	case I32Load:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint32, U32ToI32)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, uint32ToInt32)
 	case I64Load:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint64, U64ToI64)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint64, uint64ToInt64)
 	case F32Load:
 		err = handleLoad(vm, instruction, (*Memory).LoadUint32, math.Float32frombits)
 	case F64Load:
 		err = handleLoad(vm, instruction, (*Memory).LoadUint64, math.Float64frombits)
 	case I32Load8S:
-		err = handleLoad(vm, instruction, (*Memory).LoadByte, SignExtend8To32)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, signExtend8To32)
 	case I32Load8U:
-		err = handleLoad(vm, instruction, (*Memory).LoadByte, ZeroExtend8To32)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, zeroExtend8To32)
 	case I32Load16S:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint16, SignExtend16To32)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, signExtend16To32)
 	case I32Load16U:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint16, ZeroExtend16To32)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, zeroExtend16To32)
 	case I64Load8S:
-		err = handleLoad(vm, instruction, (*Memory).LoadByte, SignExtend8To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, signExtend8To64)
 	case I64Load8U:
-		err = handleLoad(vm, instruction, (*Memory).LoadByte, ZeroExtend8To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, zeroExtend8To64)
 	case I64Load16S:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint16, SignExtend16To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, signExtend16To64)
 	case I64Load16U:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint16, ZeroExtend16To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, zeroExtend16To64)
 	case I64Load32S:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint32, SignExtend32To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, signExtend32To64)
 	case I64Load32U:
-		err = handleLoad(vm, instruction, (*Memory).LoadUint32, ZeroExtend32To64)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, zeroExtend32To64)
 	case I32Store:
 		err = handleStore(vm, instruction, uint32(vm.stack.PopInt32()), (*Memory).StoreUint32)
 	case I64Store:
@@ -675,7 +675,7 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableFill:
 		err = vm.handleTableFill(instruction)
 	case V128Load:
-		err = handleLoad(vm, instruction, (*Memory).LoadV128, IdentityV128)
+		err = handleLoad(vm, instruction, (*Memory).LoadV128, identityV128)
 	case V128Load8x8S:
 		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load8x8S, 8)
 	case V128Load8x8U:
@@ -1428,7 +1428,7 @@ func (vm *VM) handleRefFunc(instruction Instruction) {
 func (vm *VM) handleRefIsNull() {
 	top := vm.stack.Pop()
 	_, topIsNull := top.(Null)
-	vm.stack.Push(BoolToInt32(topIsNull))
+	vm.stack.Push(boolToInt32(topIsNull))
 }
 
 func (vm *VM) handleMemoryInit(instruction Instruction) error {
@@ -1555,7 +1555,7 @@ func handleBinaryBool[T WasmNumber](
 ) {
 	b := pop()
 	a := pop()
-	vm.stack.Push(BoolToInt32(op(a, b)))
+	vm.stack.Push(boolToInt32(op(a, b)))
 }
 
 func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
@@ -1585,7 +1585,7 @@ func handleUnaryBool[T WasmNumber | V128Value](
 	pop func() T,
 	op func(a T) bool,
 ) {
-	vm.stack.Push(BoolToInt32(op(pop())))
+	vm.stack.Push(boolToInt32(op(pop())))
 }
 
 func (vm *VM) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
