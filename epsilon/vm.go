@@ -46,7 +46,7 @@ type callFrame struct {
 	decoder      *decoder
 	controlStack []*controlFrame
 	locals       []any
-	function     *WasmFunction
+	function     *wasmFunction
 }
 
 // controlFrame represents a block of code that can be branched to.
@@ -80,7 +80,7 @@ func (vm *vm) instantiate(
 		return nil, err
 	}
 	moduleInstance := &ModuleInstance{
-		Types: module.types,
+		types: module.types,
 		vm:    vm,
 	}
 
@@ -91,47 +91,47 @@ func (vm *vm) instantiate(
 
 	for _, functionInstance := range resolvedImports.functions {
 		storeIndex := uint32(len(vm.store.funcs))
-		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
+		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
 	}
 
 	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.types[function.typeIndex]
-		wasmFunc := NewWasmFunction(funType, moduleInstance, function)
-		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
+		wasmFunc := newWasmFunction(funType, moduleInstance, function)
+		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
 
 	for _, table := range resolvedImports.tables {
 		storeIndex := uint32(len(vm.store.tables))
-		moduleInstance.TableAddrs = append(moduleInstance.TableAddrs, storeIndex)
+		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
 	for _, tableType := range module.tables {
 		storeIndex := uint32(len(vm.store.tables))
 		table := NewTable(tableType)
-		moduleInstance.TableAddrs = append(moduleInstance.TableAddrs, storeIndex)
+		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
 	for _, memory := range resolvedImports.memories {
 		storeIndex := uint32(len(vm.store.memories))
-		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
+		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
 	for _, memoryType := range module.memories {
 		storeIndex := uint32(len(vm.store.memories))
 		memory := NewMemory(memoryType)
-		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
+		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
 	for _, global := range resolvedImports.globals {
 		storeIndex := uint32(len(vm.store.globals))
-		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
+		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
@@ -146,7 +146,7 @@ func (vm *vm) instantiate(
 		}
 
 		storeIndex := uint32(len(vm.store.globals))
-		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
+		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, &Global{
 			Value:   val,
 			Mutable: global.globalType.IsMutable,
@@ -158,13 +158,13 @@ func (vm *vm) instantiate(
 	// should probably have some runtime representation for them.
 	for _, elem := range module.elementSegments {
 		storeIndex := uint32(len(vm.store.elements))
-		moduleInstance.ElemAddrs = append(moduleInstance.ElemAddrs, storeIndex)
+		moduleInstance.dlemAddrs = append(moduleInstance.dlemAddrs, storeIndex)
 		vm.store.elements = append(vm.store.elements, elem)
 	}
 
 	for _, data := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
-		moduleInstance.DataAddrs = append(moduleInstance.DataAddrs, storeIndex)
+		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
 		vm.store.datas = append(vm.store.datas, data)
 	}
 
@@ -177,7 +177,7 @@ func (vm *vm) instantiate(
 	}
 
 	if module.startIndex != nil {
-		storeFunctionIndex := moduleInstance.FuncAddrs[*module.startIndex]
+		storeFunctionIndex := moduleInstance.funcAddrs[*module.startIndex]
 		function := vm.store.funcs[storeFunctionIndex]
 		if _, err := vm.invokeFunction(function); err != nil {
 			return nil, err
@@ -205,16 +205,16 @@ func (vm *vm) invoke(
 
 func (vm *vm) invokeFunction(function FunctionInstance) ([]any, error) {
 	switch f := function.(type) {
-	case *WasmFunction:
+	case *wasmFunction:
 		return vm.invokeWasmFunction(f)
-	case *HostFunction:
+	case *hostFunction:
 		return vm.invokeHostFunction(f)
 	default:
 		return nil, fmt.Errorf("unknown function type")
 	}
 }
 
-func (vm *vm) invokeWasmFunction(function *WasmFunction) ([]any, error) {
+func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	if vm.callStackDepth >= maxCallStackDepth {
 		return nil, errCallStackExhausted
 	}
@@ -1306,7 +1306,7 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 	typeIndex := uint32(instruction.immediates[0])
 	tableIndex := uint32(instruction.immediates[1])
 
-	expectedType := vm.currentModuleInstance().Types[typeIndex]
+	expectedType := vm.currentModuleInstance().types[typeIndex]
 	table := vm.getTable(tableIndex)
 
 	elementIndex := vm.stack.popInt32()
@@ -1412,7 +1412,7 @@ func (vm *vm) handleMemoryGrow(instruction instruction) {
 
 func (vm *vm) handleRefFunc(instruction instruction) {
 	funcIndex := uint32(instruction.immediates[0])
-	storeIndex := vm.currentModuleInstance().FuncAddrs[funcIndex]
+	storeIndex := vm.currentModuleInstance().funcAddrs[funcIndex]
 	vm.stack.push(int32(storeIndex))
 }
 
@@ -1707,7 +1707,7 @@ func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	}
 
 	if blockType >= 0 { // type index.
-		funcType := vm.currentModuleInstance().Types[blockType]
+		funcType := vm.currentModuleInstance().types[blockType]
 		return uint(len(funcType.ParamTypes)), uint(len(funcType.ResultTypes))
 	}
 
@@ -1787,7 +1787,7 @@ func (vm *vm) initActiveElements(
 		}
 		offset := offsetAny.(int32)
 
-		storeTableIndex := moduleInstance.TableAddrs[element.tableIndex]
+		storeTableIndex := moduleInstance.tableAddrs[element.tableIndex]
 		table := vm.store.tables[storeTableIndex]
 		if offset > int32(table.Size()) {
 			return errTableOutOfBounds
@@ -1838,7 +1838,7 @@ func (vm *vm) initActiveDatas(
 			return err
 		}
 		offset := offsetAny.(int32)
-		storeMemoryIndex := moduleInstance.MemAddrs[segment.memoryIndex]
+		storeMemoryIndex := moduleInstance.memAddrs[segment.memoryIndex]
 		memory := vm.store.memories[storeMemoryIndex]
 		if err := memory.Set(uint32(offset), 0, segment.content); err != nil {
 			return err
@@ -1857,16 +1857,16 @@ func (vm *vm) resolveExports(
 		var value any
 		switch export.indexType {
 		case functionExportKind:
-			storeIndex := instance.FuncAddrs[export.index]
+			storeIndex := instance.funcAddrs[export.index]
 			value = vm.store.funcs[storeIndex]
 		case globalExportKind:
-			storeIndex := instance.GlobalAddrs[export.index]
+			storeIndex := instance.globalAddrs[export.index]
 			value = vm.store.globals[storeIndex]
 		case memoryExportKind:
-			storeIndex := instance.MemAddrs[export.index]
+			storeIndex := instance.memAddrs[export.index]
 			value = vm.store.memories[storeIndex]
 		case tableExportKind:
-			storeIndex := instance.TableAddrs[export.index]
+			storeIndex := instance.tableAddrs[export.index]
 			value = vm.store.tables[storeIndex]
 		}
 		exports = append(exports, ExportInstance{Name: export.name, Value: value})
@@ -1874,7 +1874,7 @@ func (vm *vm) resolveExports(
 	return exports
 }
 
-func (vm *vm) invokeHostFunction(fun *HostFunction) (res []any, err error) {
+func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var panicErr error
@@ -1900,7 +1900,7 @@ func (vm *vm) invokeInitExpression(
 ) (any, error) {
 	// We create a fake function to execute the expression.
 	// The expression is expected to return a single value.
-	function := WasmFunction{
+	function := wasmFunction{
 		Type: FunctionType{
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},
@@ -1921,7 +1921,7 @@ func toStoreFuncIndexes(
 ) []int32 {
 	storeIndices := make([]int32, len(localIndexes))
 	for i, localIndex := range localIndexes {
-		storeIndices[i] = int32(moduleInstance.FuncAddrs[localIndex])
+		storeIndices[i] = int32(moduleInstance.funcAddrs[localIndex])
 	}
 	return storeIndices
 }
@@ -1947,31 +1947,31 @@ func defaultValue(vt ValueType) any {
 }
 
 func (vm *vm) getFunction(localIndex uint32) FunctionInstance {
-	functionIndex := vm.currentModuleInstance().FuncAddrs[localIndex]
+	functionIndex := vm.currentModuleInstance().funcAddrs[localIndex]
 	return vm.store.funcs[functionIndex]
 }
 
 func (vm *vm) getTable(localIndex uint32) *Table {
-	tableIndex := vm.currentModuleInstance().TableAddrs[localIndex]
+	tableIndex := vm.currentModuleInstance().tableAddrs[localIndex]
 	return vm.store.tables[tableIndex]
 }
 
 func (vm *vm) getMemory(localIndex uint32) *Memory {
-	memoryIndex := vm.currentModuleInstance().MemAddrs[localIndex]
+	memoryIndex := vm.currentModuleInstance().memAddrs[localIndex]
 	return vm.store.memories[memoryIndex]
 }
 
 func (vm *vm) getGlobal(localIndex uint32) *Global {
-	globalIndex := vm.currentModuleInstance().GlobalAddrs[localIndex]
+	globalIndex := vm.currentModuleInstance().globalAddrs[localIndex]
 	return vm.store.globals[globalIndex]
 }
 
 func (vm *vm) getElement(localIndex uint32) *elementSegment {
-	elementIndex := vm.currentModuleInstance().ElemAddrs[localIndex]
+	elementIndex := vm.currentModuleInstance().dlemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 
 func (vm *vm) getData(localIndex uint32) *dataSegment {
-	dataIndex := vm.currentModuleInstance().DataAddrs[localIndex]
+	dataIndex := vm.currentModuleInstance().dataAddrs[localIndex]
 	return &vm.store.datas[dataIndex]
 }

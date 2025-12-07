@@ -22,14 +22,14 @@ type ExportInstance struct {
 
 // ModuleInstance is the runtime representation of a module.
 type ModuleInstance struct {
-	Types       []FunctionType
-	FuncAddrs   []uint32
-	TableAddrs  []uint32
-	MemAddrs    []uint32
-	GlobalAddrs []uint32
-	ElemAddrs   []uint32
-	DataAddrs   []uint32
 	Exports     []ExportInstance
+	types       []FunctionType
+	funcAddrs   []uint32
+	tableAddrs  []uint32
+	memAddrs    []uint32
+	globalAddrs []uint32
+	dlemAddrs   []uint32
+	dataAddrs   []uint32
 	vm          *vm // Internal reference to resolve exports
 }
 
@@ -81,8 +81,8 @@ type FunctionInstance interface {
 	GetType() *FunctionType
 }
 
-// WasmFunction is the runtime representation of a function defined in WASM.
-type WasmFunction struct {
+// wasmFunction is the runtime representation of a function defined in WASM.
+type wasmFunction struct {
 	Type   FunctionType
 	Module *ModuleInstance
 	Code   function
@@ -95,12 +95,12 @@ type WasmFunction struct {
 	jumpElseCache map[uint]uint
 }
 
-func NewWasmFunction(
+func newWasmFunction(
 	funType FunctionType,
 	module *ModuleInstance,
 	function function,
-) *WasmFunction {
-	return &WasmFunction{
+) *wasmFunction {
+	return &wasmFunction{
 		Type:          funType,
 		Module:        module,
 		Code:          function,
@@ -109,15 +109,15 @@ func NewWasmFunction(
 	}
 }
 
-func (wf *WasmFunction) GetType() *FunctionType { return &wf.Type }
+func (wf *wasmFunction) GetType() *FunctionType { return &wf.Type }
 
-// HostFunction represents a function defined by the host environment.
-type HostFunction struct {
+// hostFunction represents a function defined by the host environment.
+type hostFunction struct {
 	Type     FunctionType
 	HostCode func(...any) []any
 }
 
-func (hf *HostFunction) GetType() *FunctionType { return &hf.Type }
+func (hf *hostFunction) GetType() *FunctionType { return &hf.Type }
 
 // Global is a global variable.
 type Global struct {
