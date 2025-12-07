@@ -1,127 +1,111 @@
 # ε Epsilon
 
-**Epsilon** is a pure-Go library for executing WebAssembly code with **zero dependencies**.
-It works on **any architecture supported by Go**: no CGo, no native libraries, just Go.
+[![Go Reference](https://pkg.go.dev/badge/github.com/ziggy42/epsilon.svg)](https://pkg.go.dev/github.com/ziggy42/epsilon)
+[![Go Report Card](https://goreportcard.com/badge/github.com/ziggy42/epsilon)](https://goreportcard.com/report/github.com/ziggy42/epsilon)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-Implements the [WebAssembly 2.0 specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf).
+**Epsilon** is a pure Go WebAssembly runtime with zero dependencies. 
 
-## Library Usage
+* Fully supports [WebAssembly 2.0 Specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
+* Runs on any architecture supported by Go (amd64, arm64, etc.) without requiring CGo
+* Allows embedding WebAssembly modules in Go applications
+* Includes an interactive REPL for testing and debugging
 
-### Installation
+## Installation
 
 ```bash
-go get github.com/ziggy42/epsilon/epsilon
+go get github.com/ziggy42/epsilon
 ```
 
-### Simple Example
+## Quick Start
+
+### Basic Execution
+
+Load and run a WebAssembly module directly from a byte slice:
 
 ```go
-url := "https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm"
-resp, _ := http.Get(url)
-defer resp.Body.Close()
-    
-instance, _ := epsilon.NewRuntime().InstantiateModule(resp.Body)    
-results, _ := instance.Invoke("add", int32(5), int32(37))
-    
-fmt.Println(results[0]) // Output: 42
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/ziggy42/epsilon/epsilon"
+)
+
+func main() {
+	// 1. Read the WASM file
+	wasmBytes, _ := os.ReadFile("add.wasm")
+
+	// 2. Instantiate the module
+	instance, _ := epsilon.NewRuntime().InstantiateModuleFromBytes(wasmBytes)
+
+	// 3. Invoke an exported function
+	result, _ := instance.Invoke("add", int32(5), int32(37))
+
+	fmt.Println(result[0]) // Output: 42
+}
 ```
 
-### Example with Imports
+### Using Host Functions
+
+Extend your WebAssembly modules with custom Go functions and more using 
+`ImportBuilder`:
 
 ```go
-url := "https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/logger.wasm"
-resp, _ := http.Get(url)
-defer resp.Body.Close()
-
+// Create imports before instantiation
 imports := epsilon.NewImportBuilder().
-	AddHostFunc("console", "log", func(args ...any) []any {
-		fmt.Printf("%d\n", args[0].(int32))
-		return []any{}
+	AddHostFunc("env", "log", func(args ...any) []any {
+		fmt.Printf("[WASM Log]: %v\n", args[0])
+		return nil
 	}).
 	Build()
 
+// Instantiate with imports
 instance, _ := epsilon.NewRuntime().
-    InstantiateModuleWithImports(resp.Body, imports)
-_, _ = instance.Invoke("logIt") // Output: 13
-
+	InstantiateModuleWithImports(wasmFile, imports)
 ```
 
-## REPL Usage
+## Interactive REPL
 
-### Running the REPL
+Epsilon includes a REPL for interactively testing and debugging modules.
 
 ```bash
+# Run the REPL
 go run ./cmd/epsilon
 ```
 
-### Commands
+### Essential Commands
 
-#### Module Management
-| Command | Description |
-|---------|-------------|
-| `LOAD [<module-name>] <path-to-file \| url>` | Load a WASM module from a file / URL |
+| Category | Command | Description |
+|----------|---------|-------------|
+| **Loading** | `LOAD <path\|url>` | Load a module from a file or URL |
+| **Running** | `INVOKE <func> [args...]` | Call an exported function |
+| **State** | `GET <global>` | Read a global variable |
+| **Debug** | `MEM <offset> <len>` | Inspect linear memory |
+| **System** | `LIST` | List loaded modules and their exports |
 
-#### Execution
-| Command | Description |
-|---------|-------------|
-| `INVOKE [<module>.]<function-name> [args...]` | Invoke an exported function |
-| `GET [<module>.]<global-name>` | Get the value of an exported global |
-
-#### Inspection
-| Command | Description |
-|---------|-------------|
-| `MEM [<module>] <offset> <length>` | Inspect a range of memory |
-| `LIST` | List loaded modules and their exports |
-
-#### REPL Control
-| Command | Description |
-|---------|-------------|
-| `HELP` | Show available commands |
-| `CLEAR` | Clear the screen and reset the VM state |
-| `QUIT` | Exit the REPL |
-
-### Example Session
-
-```
+**Example Session:**
+```text
 $ go run ./cmd/epsilon
 >> LOAD https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm
 'default' instantiated.
->> INVOKE add 1 2
-3
->> LOAD table https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/wasm-table.wasm
-'table' instantiated.
->> INVOKE table.callByIndex 0
+>> INVOKE add 10 32
 42
->> INVOKE table.callByIndex 1
-13
->>
 ```
 
-## Testing
+## Testing & Benchmarks
 
-### Prerequisites
-
-Tests require the 
-[WebAssembly Binary Toolkit (WABT)](https://github.com/WebAssembly/wabt) for 
-`wat2wasm` and `wast2json`.
-
-### Unit Tests
+### Running Tests
 
 ```bash
+# Run unit tests
 go test ./epsilon/...
-```
 
-### Spec Tests
-
-The official WASM specification tests are included as a submodule:
-
-```bash
+# Run spec tests (requires git submodule)
 go test ./internal/spec_tests/...
-```
 
-### Benchmarks
-
-```bash
+# Run benchmarks
 go test -bench . ./internal/benchmarks
 ```
 
