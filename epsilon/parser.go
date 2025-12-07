@@ -17,6 +17,7 @@ package epsilon
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -223,8 +224,7 @@ func (p *Parser) parseHeader() error {
 	if !bytes.HasPrefix(header, []byte(wasmMagicNumber)) {
 		return fmt.Errorf("invalid WASM: does not start with magic number")
 	}
-
-	version := Int32From4Bytes(header[4:8])
+	version := int32(binary.LittleEndian.Uint32(header[4:8]))
 	if version != supportedWasmVersion {
 		return fmt.Errorf("unsupported WASM version: %d", version)
 	}
