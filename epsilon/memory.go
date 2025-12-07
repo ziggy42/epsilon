@@ -26,7 +26,7 @@ const (
 	maxPages = uint32(1 << 15)
 )
 
-var ErrMemoryOutOfBounds = errors.New("out of bounds memory access")
+var errMemoryOutOfBounds = errors.New("out of bounds memory access")
 
 // Memory represents a linear memory instance.
 type Memory struct {
@@ -82,7 +82,7 @@ func (m *Memory) Get(offset, index, length uint32) ([]byte, error) {
 // Init copies n bytes from a data segment to the memory.
 func (m *Memory) Init(n, srcOffset, destOffset uint32, content []byte) error {
 	if uint64(srcOffset)+uint64(n) > uint64(len(content)) {
-		return ErrMemoryOutOfBounds
+		return errMemoryOutOfBounds
 	}
 	dst, err := m.getRange(destOffset, 0, n)
 	if err != nil {
@@ -121,7 +121,7 @@ func (m *Memory) Fill(n, offset uint32, val byte) error {
 func (m *Memory) LoadByte(offset, index uint32) (byte, error) {
 	addr := uint64(index) + uint64(offset)
 	if addr >= uint64(len(m.data)) {
-		return 0, ErrMemoryOutOfBounds
+		return 0, errMemoryOutOfBounds
 	}
 	return m.data[addr], nil
 }
@@ -164,7 +164,7 @@ func (m *Memory) LoadV128(offset, index uint32) (V128Value, error) {
 func (m *Memory) StoreByte(offset, index uint32, val byte) error {
 	addr := uint64(index) + uint64(offset)
 	if addr >= uint64(len(m.data)) {
-		return ErrMemoryOutOfBounds
+		return errMemoryOutOfBounds
 	}
 	m.data[addr] = val
 	return nil
@@ -211,7 +211,7 @@ func (m *Memory) getRange(offset, index, length uint32) ([]byte, error) {
 	start := uint64(index) + uint64(offset)
 	end := start + uint64(length)
 	if end > uint64(len(m.data)) {
-		return nil, ErrMemoryOutOfBounds
+		return nil, errMemoryOutOfBounds
 	}
 	return m.data[start:end], nil
 }

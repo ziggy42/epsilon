@@ -16,7 +16,7 @@ package epsilon
 
 import "errors"
 
-var ErrTableOutOfBounds = errors.New("out of bounds table access")
+var errTableOutOfBounds = errors.New("out of bounds table access")
 
 // Table represents a WebAssembly table instance.
 type Table struct {
@@ -37,7 +37,7 @@ func NewTable(tt TableType) *Table {
 // Get returns the element at the given index.
 func (t *Table) Get(index int32) (any, error) {
 	if index < 0 || index >= int32(len(t.Elements)) {
-		return nil, ErrTableOutOfBounds
+		return nil, errTableOutOfBounds
 	}
 	return t.Elements[index], nil
 }
@@ -45,7 +45,7 @@ func (t *Table) Get(index int32) (any, error) {
 // Set places a value at the given index.
 func (t *Table) Set(index int32, value any) error {
 	if index < 0 || index >= int32(len(t.Elements)) {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 	t.Elements[index] = value
 	return nil
@@ -86,7 +86,7 @@ func (t *Table) Init(
 		uint64(uint32(funcStartIndex))+uint64(uint32(n)) >
 			uint64(len(funcIndexes)) ||
 		uint64(uint32(tableStartIndex))+uint64(uint32(n)) > uint64(t.Size()) {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 
 	for i := range n {
@@ -106,7 +106,7 @@ func (t *Table) InitFromSlice(startIndex int32, funcIndexes []int32) error {
 func (t *Table) InitFromAnySlice(startIndex int32, values []any) error {
 	if startIndex < 0 || startIndex > t.Size() ||
 		uint64(uint32(startIndex))+uint64(len(values)) > uint64(t.Size()) {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 
 	copy(t.Elements[startIndex:], values)
@@ -119,13 +119,13 @@ func (t *Table) Copy(
 	n, sourceStartIndex, destStartIndex int32,
 ) error {
 	if n < 0 || sourceStartIndex < 0 || destStartIndex < 0 {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 
 	sourceEnd := uint64(uint32(sourceStartIndex)) + uint64(uint32(n))
 	destEnd := uint64(uint32(destStartIndex)) + uint64(uint32(n))
 	if sourceEnd > uint64(t.Size()) || destEnd > uint64(destTable.Size()) {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 
 	copy(
@@ -138,7 +138,7 @@ func (t *Table) Copy(
 // Fill sets n elements to a given value, starting from an index.
 func (t *Table) Fill(n, startIndex int32, val any) error {
 	if uint64(uint32(startIndex))+uint64(uint32(n)) > uint64(uint32(t.Size())) {
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 
 	for i := range n {

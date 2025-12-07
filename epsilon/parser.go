@@ -25,7 +25,7 @@ import (
 	"unicode/utf8"
 )
 
-var ErrElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
+var errElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
 
 const (
 	wasmMagicNumber      = "\x00asm"
@@ -542,7 +542,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return ElementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
@@ -567,7 +567,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return ElementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
@@ -586,7 +586,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 			return ElementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return ElementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {

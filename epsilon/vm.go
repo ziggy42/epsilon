@@ -21,8 +21,8 @@ import (
 )
 
 var (
-	ErrUnreachable        = errors.New("unreachable")
-	ErrCallStackExhausted = errors.New("call stack exhausted")
+	errUnreachable        = errors.New("unreachable")
+	errCallStackExhausted = errors.New("call stack exhausted")
 	// Special error to signal a return instruction was hit.
 	errReturn = errors.New("return instruction")
 )
@@ -228,7 +228,7 @@ func (vm *VM) invoke(function FunctionInstance) ([]any, error) {
 
 func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	if vm.callStackDepth >= maxCallStackDepth {
-		return nil, ErrCallStackExhausted
+		return nil, errCallStackExhausted
 	}
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
@@ -275,7 +275,7 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	// faster.
 	switch instruction.Opcode {
 	case Unreachable:
-		return ErrUnreachable
+		err = errUnreachable
 	case Nop:
 		// Do nothing.
 	case Block, Loop:
@@ -297,7 +297,7 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case Call:
 		err = vm.handleCall(instruction)
 	case CallIndirect:
-		return vm.handleCallIndirect(instruction)
+		err = vm.handleCallIndirect(instruction)
 	case Drop:
 		vm.stack.Drop()
 	case Select:
@@ -1466,7 +1466,7 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 		// Trap if using an active, non-dropped element segment.
 		// A dropped segment has its FuncIndexes slice set to nil.
 		if element.FuncIndexes != nil {
-			return ErrTableOutOfBounds
+			return errTableOutOfBounds
 		}
 		return table.Init(n, d, s, element.FuncIndexes)
 	case PassiveElementMode:
@@ -1474,7 +1474,7 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 		storeIndexes := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
 		return table.Init(n, d, s, storeIndexes)
 	default:
-		return ErrTableOutOfBounds
+		return errTableOutOfBounds
 	}
 }
 
@@ -1799,7 +1799,7 @@ func (vm *VM) initActiveElements(
 		storeTableIndex := moduleInstance.TableAddrs[element.TableIndex]
 		table := vm.store.tables[storeTableIndex]
 		if offset > int32(table.Size()) {
-			return ErrTableOutOfBounds
+			return errTableOutOfBounds
 		}
 
 		if len(element.FuncIndexes) > 0 {

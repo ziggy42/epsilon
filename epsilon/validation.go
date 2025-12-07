@@ -21,33 +21,33 @@ import (
 )
 
 var (
-	ErrBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
-	ErrTypesDoNotMatch                  = errors.New("types do not match")
-	ErrLocalIndexOutOfBounds            = errors.New("local index out of bounds")
-	ErrGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
-	ErrTableIndexOutOfBounds            = errors.New("table index out of bounds")
-	ErrMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
-	ErrAlignmentTooLarge                = errors.New("alignment too large")
-	ErrControlStackEmpty                = errors.New("control stack is empty")
-	ErrElementIndexOutOfBounds          = errors.New("element index out of bounds")
-	ErrDataIndexOutOfBounds             = errors.New("data index out of bounds")
-	ErrFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
-	ErrValueStackUnderflow              = errors.New("value stack underflow")
-	ErrValueStackHeightMismatch         = errors.New("value stack height mismatch")
-	ErrReturnTypeNotSet                 = errors.New("return type not set")
-	ErrElseMustMatchIf                  = errors.New("else must match if")
-	ErrTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
-	ErrCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
-	ErrGlobalIsImmutable                = errors.New("global is immutable")
-	ErrRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
-	ErrSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
-	ErrInvalidConstantExpression        = errors.New("invalid constant expression")
-	ErrInvalidLimits                    = errors.New("invalid limits")
-	ErrDuplicateExport                  = errors.New("duplicate export")
-	ErrInvalidStartFunction             = errors.New("invalid start function")
-	ErrUndeclaredFunctionReference      = errors.New("undeclared function reference")
-	ErrMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
-	ErrDataCountNotSet                  = errors.New("data count not set")
+	errBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
+	errTypesDoNotMatch                  = errors.New("types do not match")
+	errLocalIndexOutOfBounds            = errors.New("local index out of bounds")
+	errGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
+	errTableIndexOutOfBounds            = errors.New("table index out of bounds")
+	errMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
+	errAlignmentTooLarge                = errors.New("alignment too large")
+	errControlStackEmpty                = errors.New("control stack is empty")
+	errElementIndexOutOfBounds          = errors.New("element index out of bounds")
+	errDataIndexOutOfBounds             = errors.New("data index out of bounds")
+	errFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
+	errValueStackUnderflow              = errors.New("value stack underflow")
+	errValueStackHeightMismatch         = errors.New("value stack height mismatch")
+	errReturnTypeNotSet                 = errors.New("return type not set")
+	errElseMustMatchIf                  = errors.New("else must match if")
+	errTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
+	errCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
+	errGlobalIsImmutable                = errors.New("global is immutable")
+	errRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
+	errSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
+	errInvalidConstantExpression        = errors.New("invalid constant expression")
+	errInvalidLimits                    = errors.New("invalid limits")
+	errDuplicateExport                  = errors.New("duplicate export")
+	errInvalidStartFunction             = errors.New("invalid start function")
+	errUndeclaredFunctionReference      = errors.New("undeclared function reference")
+	errMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
+	errDataCountNotSet                  = errors.New("data count not set")
 )
 
 type bottomType struct{}
@@ -118,7 +118,7 @@ func (v *validator) validateModule(module *Module) error {
 		switch t := imp.Type.(type) {
 		case FunctionTypeIndex:
 			if uint32(t) >= uint32(len(v.typeDefs)) {
-				return ErrTypesDoNotMatch
+				return errTypesDoNotMatch
 			}
 
 			v.funcTypes = append(v.funcTypes, module.Types[t])
@@ -134,7 +134,7 @@ func (v *validator) validateModule(module *Module) error {
 
 	for _, function := range module.Funcs {
 		if function.TypeIndex >= uint32(len(module.Types)) {
-			return ErrFunctionIndexOutOfBounds
+			return errFunctionIndexOutOfBounds
 		}
 		v.funcTypes = append(v.funcTypes, module.Types[function.TypeIndex])
 	}
@@ -154,7 +154,7 @@ func (v *validator) validateModule(module *Module) error {
 	}
 
 	if !v.features.MultipleMemories && len(v.memTypes) > 1 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
 	for _, globalVariable := range module.GlobalVariables {
@@ -167,7 +167,7 @@ func (v *validator) validateModule(module *Module) error {
 	exportNamesSet := make(map[string]struct{}, len(module.Exports))
 	for _, export := range module.Exports {
 		if _, ok := exportNamesSet[export.Name]; ok {
-			return ErrDuplicateExport
+			return errDuplicateExport
 		}
 		exportNamesSet[export.Name] = struct{}{}
 		if err := v.validateExport(&export); err != nil {
@@ -242,10 +242,10 @@ func (v *validator) validateStartIndex(index *uint32) error {
 
 	startFunctionType := v.funcTypes[*index]
 	if len(startFunctionType.ParamTypes) != 0 {
-		return ErrInvalidStartFunction
+		return errInvalidStartFunction
 	}
 	if len(startFunctionType.ResultTypes) != 0 {
-		return ErrInvalidStartFunction
+		return errInvalidStartFunction
 	}
 
 	return nil
@@ -263,7 +263,7 @@ func (v *validator) validateElementSegment(elem *ElementSegment) error {
 		}
 
 		if v.tableTypes[elem.TableIndex].ReferenceType != elem.Kind {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 	}
 
@@ -276,7 +276,7 @@ func (v *validator) validateElementSegment(elem *ElementSegment) error {
 	for _, funcIndex := range elem.FuncIndexes {
 		v.referencedFunctions[uint32(funcIndex)] = true
 		if elem.Kind != FuncRefType {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
 			return err
@@ -351,7 +351,7 @@ func (v *validator) validateConstExpression(
 		}
 
 		if !v.isConstantInstruction(instruction) {
-			return ErrInvalidConstantExpression
+			return errInvalidConstantExpression
 		}
 
 		// The order of the statements is important here. The validation for RefFunc
@@ -702,7 +702,7 @@ func (v *validator) validateElse() error {
 	}
 
 	if frame.opcode != If {
-		return ErrElseMustMatchIf
+		return errElseMustMatchIf
 	}
 
 	v.pushControlFrame(Else, frame.startTypes, frame.endTypes)
@@ -719,11 +719,11 @@ func (v *validator) validateEnd() error {
 		// This is the end of an if without an else, therefore the end types
 		// should match the start types.
 		if len(frame.startTypes) != len(frame.endTypes) {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 		for i := range frame.startTypes {
 			if frame.startTypes[i] != frame.endTypes[i] {
-				return ErrTypesDoNotMatch
+				return errTypesDoNotMatch
 			}
 		}
 	}
@@ -735,7 +735,7 @@ func (v *validator) validateEnd() error {
 func (v *validator) validateBr(instruction Instruction) error {
 	labelIndex := uint32(instruction.Immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -750,7 +750,7 @@ func (v *validator) validateBr(instruction Instruction) error {
 func (v *validator) validateBrIf(instruction Instruction) error {
 	labelIndex := uint32(instruction.Immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	if _, err := v.popExpectedValue(I32); err != nil {
@@ -777,7 +777,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 	}
 
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -786,7 +786,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 	for _, index := range table {
 		if index >= uint64(len(v.controlStack)) {
-			return ErrBrLabelIndexOutOfBounds
+			return errBrLabelIndexOutOfBounds
 		}
 
 		frameIndex := len(v.controlStack) - 1 - int(index)
@@ -810,7 +810,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 func (v *validator) validateReturn() error {
 	if v.returnType == nil {
-		return ErrReturnTypeNotSet
+		return errReturnTypeNotSet
 	}
 	if _, err := v.popExpectedValues(v.returnType); err != nil {
 		return err
@@ -840,11 +840,11 @@ func (v *validator) validateCallIndirect(instruction Instruction) error {
 
 	tableType := v.tableTypes[tableIndex]
 	if tableType.ReferenceType != FuncRefType {
-		return ErrTableTypeMustBeFuncRef
+		return errTableTypeMustBeFuncRef
 	}
 
 	if typeIndex >= uint32(len(v.typeDefs)) {
-		return ErrCallIndirectTypeIndexOutOfBounds
+		return errCallIndirectTypeIndexOutOfBounds
 	}
 	functionType := v.typeDefs[typeIndex]
 
@@ -879,10 +879,10 @@ func (v *validator) validateSelect(t ValueType) error {
 	if t == Bottom {
 		if !((isNumber(type1) && isNumber(type2)) ||
 			(isVector(type1) && isVector(type2))) {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 		if type1 != type2 && type1 != Bottom && type2 != Bottom {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 	}
 
@@ -924,7 +924,7 @@ func (v *validator) validateLocalSet(instruction Instruction) error {
 func (v *validator) validateGlobalGet(instruction Instruction) error {
 	globalIndex := instruction.Immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 	return v.validateConst(v.globalTypes[globalIndex].ValueType)
 }
@@ -932,12 +932,12 @@ func (v *validator) validateGlobalGet(instruction Instruction) error {
 func (v *validator) validateGlobalSet(instruction Instruction) error {
 	globalIndex := instruction.Immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 
 	globalType := v.globalTypes[globalIndex]
 	if !globalType.IsMutable {
-		return ErrGlobalIsImmutable
+		return errGlobalIsImmutable
 	}
 
 	_, err := v.popExpectedValue(globalType.ValueType)
@@ -988,7 +988,7 @@ func (v *validator) validateMemArg(
 ) error {
 	align := instruction.Immediates[0]
 	if 1<<align > nBytes {
-		return ErrAlignmentTooLarge
+		return errAlignmentTooLarge
 	}
 	return nil
 }
@@ -996,7 +996,7 @@ func (v *validator) validateMemArg(
 func (v *validator) validateMemorySize(instruction Instruction) error {
 	memoryIndex := uint32(instruction.Immediates[0])
 	if !v.features.MultipleMemories && memoryIndex != 0 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1009,7 +1009,7 @@ func (v *validator) validateMemorySize(instruction Instruction) error {
 func (v *validator) validateMemoryGrow(instruction Instruction) error {
 	memoryIndex := uint32(instruction.Immediates[0])
 	if !v.features.MultipleMemories && memoryIndex != 0 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1030,13 +1030,13 @@ func (v *validator) validateMemoryFill() error {
 
 func (v *validator) validateMemoryInit(instruction Instruction) error {
 	if v.dataCount == nil {
-		return ErrDataCountNotSet
+		return errDataCountNotSet
 	}
 
 	dataIndex := uint32(instruction.Immediates[0])
 	memoryIndex := uint32(instruction.Immediates[1])
 	if dataIndex >= uint32(*v.dataCount) {
-		return ErrDataIndexOutOfBounds
+		return errDataIndexOutOfBounds
 	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
@@ -1064,28 +1064,28 @@ func (v *validator) validateMemoryCopy(instruction Instruction) error {
 
 func (v *validator) validateFunctionTypeExists(index uint32) error {
 	if index >= uint32(len(v.funcTypes)) {
-		return ErrFunctionIndexOutOfBounds
+		return errFunctionIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
-		return ErrTableIndexOutOfBounds
+		return errTableIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateMemoryExists(memoryIndex uint32) error {
 	if memoryIndex >= uint32(len(v.memTypes)) {
-		return ErrMemoryIndexOutOfBounds
+		return errMemoryIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateGlobalExists(globalIndex uint32) error {
 	if globalIndex >= uint32(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 	return nil
 }
@@ -1098,7 +1098,7 @@ func (v *validator) validateConst(valueType ValueType) error {
 func (v *validator) validateRefNull(instruction Instruction) error {
 	refType := toValueType(instruction.Immediates[0])
 	if _, ok := refType.(ReferenceType); !ok {
-		return ErrRefNullRequiresReferenceType
+		return errRefNullRequiresReferenceType
 	}
 	v.pushValue(refType)
 	return nil
@@ -1118,7 +1118,7 @@ func (v *validator) validateRefFunc(instruction Instruction) error {
 		return err
 	}
 	if !v.referencedFunctions[funcIndex] {
-		return ErrUndeclaredFunctionReference
+		return errUndeclaredFunctionReference
 	}
 	v.pushValue(FuncRefType)
 	return nil
@@ -1140,7 +1140,7 @@ func (v *validator) validateSimdLaneOp(
 ) error {
 	laneIndex := instruction.Immediates[0]
 	if laneIndex >= rangeVal {
-		return ErrSimdLaneIndexOutOfBounds
+		return errSimdLaneIndexOutOfBounds
 	}
 	if isReplace {
 		return v.validateVectorScalar(scalarType)
@@ -1167,7 +1167,7 @@ func (v *validator) validateTableInit(instruction Instruction) error {
 	elemIndex := uint32(instruction.Immediates[0])
 	tableIndex := uint32(instruction.Immediates[1])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return ErrElementIndexOutOfBounds
+		return errElementIndexOutOfBounds
 	}
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
@@ -1179,7 +1179,7 @@ func (v *validator) validateTableInit(instruction Instruction) error {
 	tableType := v.tableTypes[tableIndex]
 	elemType := v.elemTypes[elemIndex]
 	if tableType.ReferenceType != elemType {
-		return ErrTypesDoNotMatch
+		return errTypesDoNotMatch
 	}
 
 	return nil
@@ -1201,7 +1201,7 @@ func (v *validator) validateTableCopy(instruction Instruction) error {
 	destTableType := v.tableTypes[destTableIndex]
 	srcTableType := v.tableTypes[srcTableIndex]
 	if destTableType.ReferenceType != srcTableType.ReferenceType {
-		return ErrTypesDoNotMatch
+		return errTypesDoNotMatch
 	}
 
 	return nil
@@ -1253,19 +1253,19 @@ func (v *validator) validateTableFill(instruction Instruction) error {
 func (v *validator) validateElemDrop(instruction Instruction) error {
 	elemIndex := uint32(instruction.Immediates[0])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return ErrElementIndexOutOfBounds
+		return errElementIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateDataDrop(instruction Instruction) error {
 	if v.dataCount == nil {
-		return ErrDataCountNotSet
+		return errDataCountNotSet
 	}
 
 	dataIndex := uint32(instruction.Immediates[0])
 	if dataIndex >= uint32(*v.dataCount) {
-		return ErrDataIndexOutOfBounds
+		return errDataIndexOutOfBounds
 	}
 	return nil
 }
@@ -1326,7 +1326,7 @@ func (v *validator) validateSimdLoadLane(
 	}
 	laneIndex := uint32(instruction.Immediates[3])
 	if laneIndex >= 16/sizeBytes {
-		return ErrSimdLaneIndexOutOfBounds
+		return errSimdLaneIndexOutOfBounds
 	}
 	if _, err := v.popExpectedValue(V128); err != nil {
 		return err
@@ -1359,7 +1359,7 @@ func (v *validator) validateSimdStoreLane(
 
 func (v *validator) getLocalType(index uint64) (ValueType, error) {
 	if index >= uint64(len(v.locals)) {
-		return nil, ErrLocalIndexOutOfBounds
+		return nil, errLocalIndexOutOfBounds
 	}
 	return v.locals[index], nil
 }
@@ -1387,7 +1387,7 @@ func (v *validator) popValue() (ValueType, error) {
 	}
 
 	if len(v.valueStack) == currentFrame.height {
-		return nil, ErrValueStackUnderflow
+		return nil, errValueStackUnderflow
 	}
 
 	value := v.valueStack[len(v.valueStack)-1]
@@ -1401,7 +1401,7 @@ func (v *validator) popExpectedValue(expected ValueType) (ValueType, error) {
 		return nil, err
 	}
 	if val != expected && val != Bottom && expected != Bottom {
-		return nil, ErrTypesDoNotMatch
+		return nil, errTypesDoNotMatch
 	}
 	return val, nil
 }
@@ -1422,7 +1422,7 @@ func (v *validator) popExpectedValues(
 
 func (v *validator) peekControlFrame() (*controlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return nil, ErrControlStackEmpty
+		return nil, errControlStackEmpty
 	}
 	return &v.controlStack[len(v.controlStack)-1], nil
 }
@@ -1440,14 +1440,14 @@ func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
 
 func (v *validator) popControlFrame() (controlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return controlFrame{}, ErrControlStackEmpty
+		return controlFrame{}, errControlStackEmpty
 	}
 	frame := v.controlStack[len(v.controlStack)-1]
 	if _, err := v.popExpectedValues(frame.endTypes); err != nil {
 		return controlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return controlFrame{}, ErrValueStackHeightMismatch
+		return controlFrame{}, errValueStackHeightMismatch
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
@@ -1506,7 +1506,7 @@ func toValueType(code uint64) ValueType {
 
 func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	if limits.Max == nil {
@@ -1514,11 +1514,11 @@ func validateLimits(limits Limits, maximumRange uint32) error {
 	}
 
 	if *limits.Max > maximumRange {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	if limits.Min > *limits.Max {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	return nil
