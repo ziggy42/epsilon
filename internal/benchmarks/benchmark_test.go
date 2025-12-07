@@ -15,7 +15,6 @@
 package benchmarks
 
 import (
-	"bytes"
 	"os"
 	"testing"
 
@@ -23,13 +22,13 @@ import (
 )
 
 func BenchmarkFactorialRecursive(b *testing.B) {
-	vm, instance, err := getVm("code/factorial.wasm")
+	instance, err := instantiate("code/factorial.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "fac_recursive", int64(25))
+		_, err := instance.Invoke("fac_recursive", int64(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -37,13 +36,13 @@ func BenchmarkFactorialRecursive(b *testing.B) {
 }
 
 func BenchmarkFactorialIterative(b *testing.B) {
-	vm, instance, err := getVm("code/factorial.wasm")
+	instance, err := instantiate("code/factorial.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "fac_iterative", int64(25))
+		_, err := instance.Invoke("fac_iterative", int64(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -51,13 +50,13 @@ func BenchmarkFactorialIterative(b *testing.B) {
 }
 
 func BenchmarkFibonacciRecursive(b *testing.B) {
-	vm, instance, err := getVm("code/fibonacci.wasm")
+	instance, err := instantiate("code/fibonacci.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "fib_recursive", int32(25))
+		_, err := instance.Invoke("fib_recursive", int32(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -65,13 +64,13 @@ func BenchmarkFibonacciRecursive(b *testing.B) {
 }
 
 func BenchmarkFibonacciIterative(b *testing.B) {
-	vm, instance, err := getVm("code/fibonacci.wasm")
+	instance, err := instantiate("code/fibonacci.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "fib_iterative", int32(25))
+		_, err := instance.Invoke("fib_iterative", int32(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -79,13 +78,13 @@ func BenchmarkFibonacciIterative(b *testing.B) {
 }
 
 func BenchmarkIndirect(b *testing.B) {
-	vm, instance, err := getVm("code/indirect.wasm")
+	instance, err := instantiate("code/indirect.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "run_indirect_calls", int32(100))
+		_, err := instance.Invoke("run_indirect_calls", int32(100))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -93,13 +92,13 @@ func BenchmarkIndirect(b *testing.B) {
 }
 
 func BenchmarkMatrixMultiplication(b *testing.B) {
-	vm, instance, err := getVm("code/matrix_multiplication.wasm")
+	instance, err := instantiate("code/matrix_multiplication.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "run_matrix_multiplication", int32(100))
+		_, err := instance.Invoke("run_matrix_multiplication", int32(100))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -107,13 +106,13 @@ func BenchmarkMatrixMultiplication(b *testing.B) {
 }
 
 func BenchmarkMemoryAccess(b *testing.B) {
-	vm, instance, err := getVm("code/memory_access.wasm")
+	instance, err := instantiate("code/memory_access.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "run_memcpy", int32(100))
+		_, err := instance.Invoke("run_memcpy", int32(100))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -121,13 +120,13 @@ func BenchmarkMemoryAccess(b *testing.B) {
 }
 
 func BenchmarkTrigonometrySin(b *testing.B) {
-	vm, instance, err := getVm("code/trigonometry.wasm")
+	instance, err := instantiate("code/trigonometry.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "compute_sin", float32(42.7))
+		_, err := instance.Invoke("compute_sin", float32(42.7))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -135,13 +134,13 @@ func BenchmarkTrigonometrySin(b *testing.B) {
 }
 
 func BenchmarkSortingBubbleSort(b *testing.B) {
-	vm, instance, err := getVm("code/sorting.wasm")
+	instance, err := instantiate("code/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "bubble_sort")
+		_, err := instance.Invoke("bubble_sort")
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -149,13 +148,13 @@ func BenchmarkSortingBubbleSort(b *testing.B) {
 }
 
 func BenchmarkSortingMergeSort(b *testing.B) {
-	vm, instance, err := getVm("code/sorting.wasm")
+	instance, err := instantiate("code/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "merge_sort")
+		_, err := instance.Invoke("merge_sort")
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -163,33 +162,23 @@ func BenchmarkSortingMergeSort(b *testing.B) {
 }
 
 func BenchmarkSortingQuickSort(b *testing.B) {
-	vm, instance, err := getVm("code/sorting.wasm")
+	instance, err := instantiate("code/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
 
 	for b.Loop() {
-		_, err := vm.Invoke(instance, "quick_sort")
+		_, err := instance.Invoke("quick_sort")
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
 	}
 }
 
-func getVm(wasmPath string) (*epsilon.VM, *epsilon.ModuleInstance, error) {
+func instantiate(wasmPath string) (*epsilon.ModuleInstance, error) {
 	wasm, err := os.ReadFile(wasmPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	parser := epsilon.NewParser(bytes.NewReader(wasm))
-	module, err := parser.Parse()
-	if err != nil {
-		return nil, nil, err
-	}
-	vm := epsilon.NewVM()
-	moduleInstance, err := vm.Instantiate(module, map[string]map[string]any{})
-	if err != nil {
-		return nil, nil, err
-	}
-	return vm, moduleInstance, nil
+	return epsilon.NewRuntime().InstantiateModuleFromBytes(wasm)
 }
