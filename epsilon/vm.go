@@ -319,51 +319,51 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableSet:
 		err = vm.handleTableSet(instruction)
 	case I32Load:
-		err = handleLoad(vm, instruction, Int32From4Bytes, 4)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, U32ToI32)
 	case I64Load:
-		err = handleLoad(vm, instruction, Int64From8Bytes, 8)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint64, U64ToI64)
 	case F32Load:
-		err = handleLoad(vm, instruction, Float32From4Bytes, 4)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, math.Float32frombits)
 	case F64Load:
-		err = handleLoad(vm, instruction, Float64From8Bytes, 8)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint64, math.Float64frombits)
 	case I32Load8S:
-		err = handleLoad(vm, instruction, IntFrom1Byte[int32], 1)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, SignExtend8To32)
 	case I32Load8U:
-		err = handleLoad(vm, instruction, UintFrom1Byte[int32], 1)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, ZeroExtend8To32)
 	case I32Load16S:
-		err = handleLoad(vm, instruction, IntFrom2Bytes[int32], 2)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, SignExtend16To32)
 	case I32Load16U:
-		err = handleLoad(vm, instruction, UintFrom2Bytes[int32], 2)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, ZeroExtend16To32)
 	case I64Load8S:
-		err = handleLoad(vm, instruction, IntFrom1Byte[int64], 1)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, SignExtend8To64)
 	case I64Load8U:
-		err = handleLoad(vm, instruction, UintFrom1Byte[int64], 1)
+		err = handleLoad(vm, instruction, (*Memory).LoadByte, ZeroExtend8To64)
 	case I64Load16S:
-		err = handleLoad(vm, instruction, IntFrom2Bytes[int64], 2)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, SignExtend16To64)
 	case I64Load16U:
-		err = handleLoad(vm, instruction, UintFrom2Bytes[int64], 2)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint16, ZeroExtend16To64)
 	case I64Load32S:
-		err = handleLoad(vm, instruction, Int64From4Bytes, 4)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, SignExtend32To64)
 	case I64Load32U:
-		err = handleLoad(vm, instruction, Uint64From4Bytes, 4)
+		err = handleLoad(vm, instruction, (*Memory).LoadUint32, ZeroExtend32To64)
 	case I32Store:
-		err = handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 4)
+		err = handleStore(vm, instruction, uint32(vm.stack.PopInt32()), (*Memory).StoreUint32)
 	case I64Store:
-		err = handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 8)
+		err = handleStore(vm, instruction, uint64(vm.stack.PopInt64()), (*Memory).StoreUint64)
 	case F32Store:
-		err = handleStore(vm, instruction, vm.stack.PopFloat32, BytesFromFloat32, 4)
+		err = handleStore(vm, instruction, math.Float32bits(vm.stack.PopFloat32()), (*Memory).StoreUint32)
 	case F64Store:
-		err = handleStore(vm, instruction, vm.stack.PopFloat64, BytesFromFloat64, 8)
+		err = handleStore(vm, instruction, math.Float64bits(vm.stack.PopFloat64()), (*Memory).StoreUint64)
 	case I32Store8:
-		err = handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 1)
+		err = handleStore(vm, instruction, byte(vm.stack.PopInt32()), (*Memory).StoreByte)
 	case I32Store16:
-		err = handleStore(vm, instruction, vm.stack.PopInt32, BytesFromInt32, 2)
+		err = handleStore(vm, instruction, uint16(vm.stack.PopInt32()), (*Memory).StoreUint16)
 	case I64Store8:
-		err = handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 1)
+		err = handleStore(vm, instruction, byte(vm.stack.PopInt64()), (*Memory).StoreByte)
 	case I64Store16:
-		err = handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 2)
+		err = handleStore(vm, instruction, uint16(vm.stack.PopInt64()), (*Memory).StoreUint16)
 	case I64Store32:
-		err = handleStore(vm, instruction, vm.stack.PopInt64, BytesFromInt64, 4)
+		err = handleStore(vm, instruction, uint32(vm.stack.PopInt64()), (*Memory).StoreUint32)
 	case MemorySize:
 		vm.handleMemorySize(instruction)
 	case MemoryGrow:
@@ -675,29 +675,29 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case TableFill:
 		err = vm.handleTableFill(instruction)
 	case V128Load:
-		err = handleLoad(vm, instruction, NewV128ValueFromSlice, 16)
+		err = handleLoad(vm, instruction, (*Memory).LoadV128, IdentityV128)
 	case V128Load8x8S:
-		err = handleLoad(vm, instruction, SimdV128Load8x8S, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load8x8S, 8)
 	case V128Load8x8U:
-		err = handleLoad(vm, instruction, SimdV128Load8x8U, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load8x8U, 8)
 	case V128Load16x4S:
-		err = handleLoad(vm, instruction, SimdV128Load16x4S, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load16x4S, 8)
 	case V128Load16x4U:
-		err = handleLoad(vm, instruction, SimdV128Load16x4U, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load16x4U, 8)
 	case V128Load32x2S:
-		err = handleLoad(vm, instruction, SimdV128Load32x2S, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load32x2S, 8)
 	case V128Load32x2U:
-		err = handleLoad(vm, instruction, SimdV128Load32x2U, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load32x2U, 8)
 	case V128Load8Splat:
-		err = handleLoad(vm, instruction, SimdI8x16SplatFromBytes, 1)
+		err = vm.handleLoadV128FromBytes(instruction, SimdI8x16SplatFromBytes, 1)
 	case V128Load16Splat:
-		err = handleLoad(vm, instruction, SimdI16x8SplatFromBytes, 2)
+		err = vm.handleLoadV128FromBytes(instruction, SimdI16x8SplatFromBytes, 2)
 	case V128Load32Splat:
-		err = handleLoad(vm, instruction, SimdI32x4SplatFromBytes, 4)
+		err = vm.handleLoadV128FromBytes(instruction, SimdI32x4SplatFromBytes, 4)
 	case V128Load64Splat:
-		err = handleLoad(vm, instruction, SimdI64x2SplatFromBytes, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdI64x2SplatFromBytes, 8)
 	case V128Store:
-		err = handleStore(vm, instruction, vm.stack.PopV128, GetBytes, 16)
+		err = handleStore(vm, instruction, vm.stack.PopV128(), (*Memory).StoreV128)
 	case V128Const:
 		vm.handleSimdConst(instruction)
 	case I8x16Shuffle:
@@ -859,9 +859,9 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case V128Store64Lane:
 		err = vm.handleSimdStoreLane(instruction, 64)
 	case V128Load32Zero:
-		err = handleLoad(vm, instruction, SimdV128Load32Zero, 4)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load32Zero, 4)
 	case V128Load64Zero:
-		err = handleLoad(vm, instruction, SimdV128Load64Zero, 8)
+		err = vm.handleLoadV128FromBytes(instruction, SimdV128Load64Zero, 8)
 	case F32x4DemoteF64x2Zero:
 		handleUnary(vm, vm.stack.PopV128, SimdF32x4DemoteF64x2Zero)
 	case F64x2PromoteLowF32x4:
@@ -1611,28 +1611,38 @@ func handleSimdExtractLane[R WasmNumber](
 	vm.stack.Push(op(v, laneIndex))
 }
 
-func handleStore[T WasmNumber | V128Value](
+func handleStore[T any](
 	vm *VM,
 	instruction Instruction,
-	pop func() T,
-	toBytes func(T) []byte,
-	sizeBytes uint32,
+	val T,
+	store func(*Memory, uint32, uint32, T) error,
 ) error {
 	memory := vm.getMemory(uint32(instruction.Immediates[1]))
 	offset := uint32(instruction.Immediates[2])
-	value := pop()
-	index := vm.stack.PopInt32()
-	data := toBytes(value)
-	if len(data) > int(sizeBytes) {
-		data = data[:sizeBytes]
-	}
-	return memory.Set(offset, uint32(index), data)
+	index := uint32(vm.stack.PopInt32())
+	return store(memory, offset, index, val)
 }
 
-func handleLoad[T WasmNumber | V128Value](
+func handleLoad[T any, R any](
 	vm *VM,
 	instruction Instruction,
-	fromBytes func(bytes []byte) T,
+	load func(*Memory, uint32, uint32) (T, error),
+	convert func(T) R,
+) error {
+	memory := vm.getMemory(uint32(instruction.Immediates[1]))
+	offset := uint32(instruction.Immediates[2])
+	index := uint32(vm.stack.PopInt32())
+	v, err := load(memory, offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.Push(convert(v))
+	return nil
+}
+
+func (vm *VM) handleLoadV128FromBytes(
+	instruction Instruction,
+	fromBytes func(bytes []byte) V128Value,
 	sizeBytes uint32,
 ) error {
 	memory := vm.getMemory(uint32(instruction.Immediates[1]))

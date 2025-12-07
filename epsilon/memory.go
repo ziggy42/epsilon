@@ -14,7 +14,10 @@
 
 package epsilon
 
-import "errors"
+import (
+	"encoding/binary"
+	"errors"
+)
 
 const (
 	// pageSize defines the size of a WebAssembly page in bytes (64KiB).
@@ -127,5 +130,93 @@ func (m *Memory) Fill(n, offset uint32, val byte) error {
 	for i := range n {
 		m.data[offset+i] = val
 	}
+	return nil
+}
+
+func (m *Memory) LoadByte(offset, index uint32) (byte, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr >= m.bytesSize() {
+		return 0, ErrMemoryOutOfBounds
+	}
+	return m.data[addr], nil
+}
+
+func (m *Memory) LoadUint16(offset, index uint32) (uint16, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr+2 > m.bytesSize() {
+		return 0, ErrMemoryOutOfBounds
+	}
+	return binary.LittleEndian.Uint16(m.data[addr:]), nil
+}
+
+func (m *Memory) LoadUint32(offset, index uint32) (uint32, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr+4 > m.bytesSize() {
+		return 0, ErrMemoryOutOfBounds
+	}
+	return binary.LittleEndian.Uint32(m.data[addr:]), nil
+}
+
+func (m *Memory) LoadUint64(offset, index uint32) (uint64, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr+8 > m.bytesSize() {
+		return 0, ErrMemoryOutOfBounds
+	}
+	return binary.LittleEndian.Uint64(m.data[addr:]), nil
+}
+
+func (m *Memory) LoadV128(offset, index uint32) (V128Value, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr+16 > m.bytesSize() {
+		return V128Value{}, ErrMemoryOutOfBounds
+	}
+	low := binary.LittleEndian.Uint64(m.data[addr:])
+	high := binary.LittleEndian.Uint64(m.data[addr+8:])
+	return V128Value{Low: low, High: high}, nil
+}
+
+func (m *Memory) StoreByte(offset, index uint32, val byte) error {
+	addr := uint64(index) + uint64(offset)
+	if addr >= m.bytesSize() {
+		return ErrMemoryOutOfBounds
+	}
+	m.data[addr] = val
+	return nil
+}
+
+func (m *Memory) StoreUint16(offset, index uint32, val uint16) error {
+	addr := uint64(index) + uint64(offset)
+	if addr+2 > m.bytesSize() {
+		return ErrMemoryOutOfBounds
+	}
+	binary.LittleEndian.PutUint16(m.data[addr:], val)
+	return nil
+}
+
+func (m *Memory) StoreUint32(offset, index uint32, val uint32) error {
+	addr := uint64(index) + uint64(offset)
+	if addr+4 > m.bytesSize() {
+		return ErrMemoryOutOfBounds
+	}
+	binary.LittleEndian.PutUint32(m.data[addr:], val)
+	return nil
+}
+
+func (m *Memory) StoreUint64(offset, index uint32, val uint64) error {
+	addr := uint64(index) + uint64(offset)
+	if addr+8 > m.bytesSize() {
+		return ErrMemoryOutOfBounds
+	}
+	binary.LittleEndian.PutUint64(m.data[addr:], val)
+	return nil
+}
+
+func (m *Memory) StoreV128(offset, index uint32, val V128Value) error {
+	addr := uint64(index) + uint64(offset)
+	if addr+16 > m.bytesSize() {
+		return ErrMemoryOutOfBounds
+	}
+	binary.LittleEndian.PutUint64(m.data[addr:], val.Low)
+	binary.LittleEndian.PutUint64(m.data[addr+8:], val.High)
 	return nil
 }
