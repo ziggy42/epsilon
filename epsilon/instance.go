@@ -119,33 +119,9 @@ type HostFunction struct {
 
 func (hf *HostFunction) GetType() *FunctionType { return &hf.Type }
 
-// Store represents all global state that can be manipulated by WebAssembly
-// programs. It consists of the runtime representation of all instances of
-// functions, tables, memories, globals, element segments, and data segments
-// that have been allocated during the life time of the VM.
-type Store struct {
-	funcs    []FunctionInstance
-	tables   []*Table
-	memories []*Memory
-	globals  []*Global
-	elements []elementSegment
-	datas    []dataSegment
-}
-
 // Global is a global variable.
 type Global struct {
 	Value   any
 	Mutable bool
 	Type    ValueType
-}
-
-func NewStore() *Store {
-	return &Store{
-		funcs:    []FunctionInstance{},
-		tables:   []*Table{},
-		memories: []*Memory{},
-		globals:  []*Global{},
-		elements: []elementSegment{},
-		datas:    []dataSegment{},
-	}
 }

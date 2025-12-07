@@ -29,6 +29,19 @@ var (
 
 const maxCallStackDepth = 1000
 
+// store represents all global state that can be manipulated by the vm. It
+// consists of the runtime representation of all instances of functions,
+// tables, memories, globals, element segments, and data segments that have
+// been allocated during the vm life time.
+type store struct {
+	funcs    []FunctionInstance
+	tables   []*Table
+	memories []*Memory
+	globals  []*Global
+	elements []elementSegment
+	datas    []dataSegment
+}
+
 type callFrame struct {
 	decoder      *decoder
 	controlStack []*controlFrame
@@ -47,7 +60,7 @@ type controlFrame struct {
 
 // vm is the WebAssembly Virtual Machine.
 type vm struct {
-	store          *Store
+	store          *store
 	stack          *valueStack
 	callStack      []*callFrame
 	callStackDepth int
@@ -55,7 +68,7 @@ type vm struct {
 }
 
 func newVm() *vm {
-	return &vm{store: NewStore(), stack: newValueStack()}
+	return &vm{store: &store{}, stack: newValueStack()}
 }
 
 func (vm *vm) instantiate(
