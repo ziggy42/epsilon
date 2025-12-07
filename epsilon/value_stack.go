@@ -73,26 +73,6 @@ func (s *ValueStack) Pop() any {
 	return element
 }
 
-func (s *ValueStack) PopValueType(vt ValueType) any {
-	switch vt {
-	case I32:
-		return s.PopInt32()
-	case I64:
-		return s.PopInt64()
-	case F32:
-		return s.PopFloat32()
-	case F64:
-		return s.PopFloat64()
-	case V128:
-		return s.PopV128()
-	case ExternRefType, FuncRefType:
-		return s.Pop()
-	default:
-		// Due to validation, we know this is never reached.
-		panic("unsupported value type")
-	}
-}
-
 func (s *ValueStack) PopN(n int) []any {
 	newLen := len(s.data) - n
 	results := make([]any, n)

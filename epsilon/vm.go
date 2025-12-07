@@ -1361,15 +1361,15 @@ func (vm *VM) handleLocalGet(instruction Instruction) {
 func (vm *VM) handleLocalSet(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
-	valueType := getLocalValueType(frame.Function, localIndex)
-	frame.Locals[localIndex] = vm.stack.PopValueType(valueType)
+	// We know, due to validation, the top of the stack is always the right type.
+	frame.Locals[localIndex] = vm.stack.Pop()
 }
 
 func (vm *VM) handleLocalTee(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
-	valueType := getLocalValueType(frame.Function, localIndex)
-	val := vm.stack.PopValueType(valueType)
+	// We know, due to validation, the top of the stack is always the right type.
+	val := vm.stack.Pop()
 	frame.Locals[localIndex] = val
 	vm.stack.Push(val)
 }
@@ -1712,14 +1712,6 @@ func (vm *VM) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	}
 
 	return 0, 1 // value type.
-}
-
-func getLocalValueType(function *WasmFunction, localIndex int32) ValueType {
-	if int(localIndex) < len(function.Type.ParamTypes) {
-		return function.Type.ParamTypes[localIndex]
-	}
-
-	return function.Code.Locals[localIndex-int32(len(function.Type.ParamTypes))]
 }
 
 func getExport(
