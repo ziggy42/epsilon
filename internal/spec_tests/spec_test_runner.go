@@ -346,8 +346,8 @@ func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
 	switch laneType {
 	case "f32":
 		for i := range uint32(4) {
-			expLane := epsilon.SimdF32x4ExtractLane(expected, i)
-			actLane := epsilon.SimdF32x4ExtractLane(actual, i)
+			expLane := simdF32x4ExtractLane(expected, i)
+			actLane := simdF32x4ExtractLane(actual, i)
 			if !floatsEqual(expLane, actLane) {
 				return false
 			}
@@ -355,8 +355,8 @@ func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
 		return true
 	case "f64":
 		for i := range uint32(2) {
-			expLane := epsilon.SimdF64x2ExtractLane(expected, i)
-			actLane := epsilon.SimdF64x2ExtractLane(actual, i)
+			expLane := simdF64x2ExtractLane(expected, i)
+			actLane := simdF64x2ExtractLane(actual, i)
 			if !floatsEqual(expLane, actLane) {
 				return false
 			}
@@ -507,4 +507,22 @@ func parseF64(s string) (float64, error) {
 		return 0, err
 	}
 	return math.Float64frombits(val), nil
+}
+
+func simdF32x4ExtractLane(v epsilon.V128Value, laneIndex uint32) float32 {
+	source := v.Low
+	if laneIndex >= 2 {
+		source = v.High
+	}
+
+	shift := (laneIndex & 1) * 32
+	return math.Float32frombits(uint32(source >> shift))
+}
+
+func simdF64x2ExtractLane(v epsilon.V128Value, laneIndex uint32) float64 {
+	bits := v.Low
+	if laneIndex == 1 {
+		bits = v.High
+	}
+	return math.Float64frombits(bits)
 }
