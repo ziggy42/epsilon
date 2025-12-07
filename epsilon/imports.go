@@ -16,19 +16,19 @@ package epsilon
 
 import "fmt"
 
-type ResolvedImports struct {
-	Functions []FunctionInstance
-	Tables    []*Table
-	Memories  []*Memory
-	Globals   []*Global
+type resolvedImports struct {
+	functions []FunctionInstance
+	tables    []*Table
+	memories  []*Memory
+	globals   []*Global
 }
 
-// ResolveImports resolves the imports declared in the given module against
+// resolveImports resolves the imports declared in the given module against
 // the provided map of available imports.
-func ResolveImports(
+func resolveImports(
 	module *Module,
 	imports map[string]map[string]any,
-) (*ResolvedImports, error) {
+) (*resolvedImports, error) {
 	functions := []FunctionInstance{}
 	tables := []*Table{}
 	memories := []*Memory{}
@@ -67,11 +67,11 @@ func ResolveImports(
 			tables = append(tables, table)
 		}
 	}
-	return &ResolvedImports{
-		Functions: functions,
-		Tables:    tables,
-		Memories:  memories,
-		Globals:   globals,
+	return &resolvedImports{
+		functions: functions,
+		tables:    tables,
+		memories:  memories,
+		globals:   globals,
 	}, nil
 }
 

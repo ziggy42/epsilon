@@ -88,12 +88,12 @@ func (vm *VM) Instantiate(
 		vm:    vm,
 	}
 
-	resolvedImports, err := ResolveImports(module, imports)
+	resolvedImports, err := resolveImports(module, imports)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, functionInstance := range resolvedImports.Functions {
+	for _, functionInstance := range resolvedImports.functions {
 		storeIndex := uint32(len(vm.store.funcs))
 		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
@@ -107,7 +107,7 @@ func (vm *VM) Instantiate(
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
 
-	for _, table := range resolvedImports.Tables {
+	for _, table := range resolvedImports.tables {
 		storeIndex := uint32(len(vm.store.tables))
 		moduleInstance.TableAddrs = append(moduleInstance.TableAddrs, storeIndex)
 		vm.store.tables = append(vm.store.tables, table)
@@ -120,7 +120,7 @@ func (vm *VM) Instantiate(
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
-	for _, memory := range resolvedImports.Memories {
+	for _, memory := range resolvedImports.memories {
 		storeIndex := uint32(len(vm.store.memories))
 		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
 		vm.store.memories = append(vm.store.memories, memory)
@@ -133,7 +133,7 @@ func (vm *VM) Instantiate(
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
-	for _, global := range resolvedImports.Globals {
+	for _, global := range resolvedImports.globals {
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, global)
