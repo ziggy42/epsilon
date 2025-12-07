@@ -1598,8 +1598,7 @@ func (vm *VM) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 	v3 := vm.stack.PopV128()
 	v2 := vm.stack.PopV128()
 	v1 := vm.stack.PopV128()
-	result := op(v1, v2, v3)
-	vm.stack.Push(result)
+	vm.stack.Push(op(v1, v2, v3))
 }
 
 func handleSimdExtractLane[R WasmNumber](
