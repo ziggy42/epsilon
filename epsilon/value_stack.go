@@ -14,32 +14,32 @@
 
 package epsilon
 
-type ValueStack struct {
+type valueStack struct {
 	data []any
 }
 
-func NewValueStack() *ValueStack {
-	return &ValueStack{data: make([]any, 512)}
+func newValueStack() *valueStack {
+	return &valueStack{data: make([]any, 512)}
 }
 
-func (s *ValueStack) Push(v any) {
+func (s *valueStack) push(v any) {
 	// We know, due to validation, this is always safe.
 	s.data = append(s.data, v)
 }
 
-func (s *ValueStack) PushAll(values []any) {
+func (s *valueStack) pushAll(values []any) {
 	s.data = append(s.data, values...)
 }
 
-func (s *ValueStack) Drop() {
+func (s *valueStack) drop() {
 	s.data = s.data[:len(s.data)-1]
 }
 
-func (s *ValueStack) PopInt32() int32 {
-	return s.Pop().(int32)
+func (s *valueStack) popInt32() int32 {
+	return s.pop().(int32)
 }
 
-func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
+func (s *valueStack) pop3Int32() (int32, int32, int32) {
 	data := s.data
 	n := len(data)
 	c := data[n-3].(int32)
@@ -49,23 +49,23 @@ func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
 	return a, b, c
 }
 
-func (s *ValueStack) PopInt64() int64 {
-	return s.Pop().(int64)
+func (s *valueStack) popInt64() int64 {
+	return s.pop().(int64)
 }
 
-func (s *ValueStack) PopFloat32() float32 {
-	return s.Pop().(float32)
+func (s *valueStack) popFloat32() float32 {
+	return s.pop().(float32)
 }
 
-func (s *ValueStack) PopFloat64() float64 {
-	return s.Pop().(float64)
+func (s *valueStack) popFloat64() float64 {
+	return s.pop().(float64)
 }
 
-func (s *ValueStack) PopV128() V128Value {
-	return s.Pop().(V128Value)
+func (s *valueStack) popV128() V128Value {
+	return s.pop().(V128Value)
 }
 
-func (s *ValueStack) Pop() any {
+func (s *valueStack) pop() any {
 	// Due to validation, we know the stack is never empty if we call Pop.
 	index := len(s.data) - 1
 	element := s.data[index]
@@ -73,7 +73,7 @@ func (s *ValueStack) Pop() any {
 	return element
 }
 
-func (s *ValueStack) PopN(n int) []any {
+func (s *valueStack) popN(n int) []any {
 	newLen := len(s.data) - n
 	results := make([]any, n)
 	copy(results, s.data[newLen:])
@@ -81,12 +81,12 @@ func (s *ValueStack) PopN(n int) []any {
 	return results
 }
 
-func (s *ValueStack) Unwind(targetHeight, preserveCount uint) {
-	valuesToPreserve := s.data[s.Size()-preserveCount:]
+func (s *valueStack) unwind(targetHeight, preserveCount uint) {
+	valuesToPreserve := s.data[s.size()-preserveCount:]
 	s.data = s.data[:targetHeight]
 	s.data = append(s.data, valuesToPreserve...)
 }
 
-func (s *ValueStack) Size() uint {
+func (s *valueStack) size() uint {
 	return uint(len(s.data))
 }
