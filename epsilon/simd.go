@@ -2364,3 +2364,5 @@ func boolToFloat64(b bool) float64 {
 	}
 	return 0
 }
+
+func identityV128(v V128Value) V128Value { return v }

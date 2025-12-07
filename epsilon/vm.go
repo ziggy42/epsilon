@@ -377,261 +377,261 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case F64Const:
 		vm.stack.Push(math.Float64frombits(instruction.Immediates[0]))
 	case I32Eqz:
-		handleUnaryBool(vm, vm.stack.PopInt32, EqualZero)
+		handleUnaryBool(vm, vm.stack.PopInt32, equalZero)
 	case I32Eq:
-		handleBinaryBool(vm, vm.stack.PopInt32, Equal)
+		handleBinaryBool(vm, vm.stack.PopInt32, equal)
 	case I32Ne:
-		handleBinaryBool(vm, vm.stack.PopInt32, NotEqual)
+		handleBinaryBool(vm, vm.stack.PopInt32, notEqual)
 	case I32LtS:
-		handleBinaryBool(vm, vm.stack.PopInt32, LessThan)
+		handleBinaryBool(vm, vm.stack.PopInt32, lessThan)
 	case I32LtU:
-		handleBinaryBool(vm, vm.stack.PopInt32, LessThanUnsigned32)
+		handleBinaryBool(vm, vm.stack.PopInt32, lessThanU32)
 	case I32GtS:
-		handleBinaryBool(vm, vm.stack.PopInt32, GreaterThan)
+		handleBinaryBool(vm, vm.stack.PopInt32, greaterThan)
 	case I32GtU:
-		handleBinaryBool(vm, vm.stack.PopInt32, GreaterThanUnsigned32)
+		handleBinaryBool(vm, vm.stack.PopInt32, greaterThanU32)
 	case I32LeS:
-		handleBinaryBool(vm, vm.stack.PopInt32, LessOrEqual)
+		handleBinaryBool(vm, vm.stack.PopInt32, lessOrEqual)
 	case I32LeU:
-		handleBinaryBool(vm, vm.stack.PopInt32, LessOrEqualUnsigned32)
+		handleBinaryBool(vm, vm.stack.PopInt32, lessOrEqualU32)
 	case I32GeS:
-		handleBinaryBool(vm, vm.stack.PopInt32, GreaterOrEqual)
+		handleBinaryBool(vm, vm.stack.PopInt32, greaterOrEqual)
 	case I32GeU:
-		handleBinaryBool(vm, vm.stack.PopInt32, GreaterOrEqualUnsigned32)
+		handleBinaryBool(vm, vm.stack.PopInt32, greaterOrEqualU32)
 	case I64Eqz:
-		handleUnaryBool(vm, vm.stack.PopInt64, EqualZero)
+		handleUnaryBool(vm, vm.stack.PopInt64, equalZero)
 	case I64Eq:
-		handleBinaryBool(vm, vm.stack.PopInt64, Equal)
+		handleBinaryBool(vm, vm.stack.PopInt64, equal)
 	case I64Ne:
-		handleBinaryBool(vm, vm.stack.PopInt64, NotEqual)
+		handleBinaryBool(vm, vm.stack.PopInt64, notEqual)
 	case I64LtS:
-		handleBinaryBool(vm, vm.stack.PopInt64, LessThan)
+		handleBinaryBool(vm, vm.stack.PopInt64, lessThan)
 	case I64LtU:
-		handleBinaryBool(vm, vm.stack.PopInt64, LessThanUnsigned64)
+		handleBinaryBool(vm, vm.stack.PopInt64, lessThanU64)
 	case I64GtS:
-		handleBinaryBool(vm, vm.stack.PopInt64, GreaterThan)
+		handleBinaryBool(vm, vm.stack.PopInt64, greaterThan)
 	case I64GtU:
-		handleBinaryBool(vm, vm.stack.PopInt64, GreaterThanUnsigned64)
+		handleBinaryBool(vm, vm.stack.PopInt64, greaterThanU64)
 	case I64LeS:
-		handleBinaryBool(vm, vm.stack.PopInt64, LessOrEqual)
+		handleBinaryBool(vm, vm.stack.PopInt64, lessOrEqual)
 	case I64LeU:
-		handleBinaryBool(vm, vm.stack.PopInt64, LessOrEqualUnsigned64)
+		handleBinaryBool(vm, vm.stack.PopInt64, lessOrEqualU64)
 	case I64GeS:
-		handleBinaryBool(vm, vm.stack.PopInt64, GreaterOrEqual)
+		handleBinaryBool(vm, vm.stack.PopInt64, greaterOrEqual)
 	case I64GeU:
-		handleBinaryBool(vm, vm.stack.PopInt64, GreaterOrEqualUnsigned64)
+		handleBinaryBool(vm, vm.stack.PopInt64, greaterOrEqualU64)
 	case F32Eq:
-		handleBinaryBool(vm, vm.stack.PopFloat32, Equal)
+		handleBinaryBool(vm, vm.stack.PopFloat32, equal)
 	case F32Ne:
-		handleBinaryBool(vm, vm.stack.PopFloat32, NotEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat32, notEqual)
 	case F32Lt:
-		handleBinaryBool(vm, vm.stack.PopFloat32, LessThan)
+		handleBinaryBool(vm, vm.stack.PopFloat32, lessThan)
 	case F32Gt:
-		handleBinaryBool(vm, vm.stack.PopFloat32, GreaterThan)
+		handleBinaryBool(vm, vm.stack.PopFloat32, greaterThan)
 	case F32Le:
-		handleBinaryBool(vm, vm.stack.PopFloat32, LessOrEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat32, lessOrEqual)
 	case F32Ge:
-		handleBinaryBool(vm, vm.stack.PopFloat32, GreaterOrEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat32, greaterOrEqual)
 	case F64Eq:
-		handleBinaryBool(vm, vm.stack.PopFloat64, Equal)
+		handleBinaryBool(vm, vm.stack.PopFloat64, equal)
 	case F64Ne:
-		handleBinaryBool(vm, vm.stack.PopFloat64, NotEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat64, notEqual)
 	case F64Lt:
-		handleBinaryBool(vm, vm.stack.PopFloat64, LessThan)
+		handleBinaryBool(vm, vm.stack.PopFloat64, lessThan)
 	case F64Gt:
-		handleBinaryBool(vm, vm.stack.PopFloat64, GreaterThan)
+		handleBinaryBool(vm, vm.stack.PopFloat64, greaterThan)
 	case F64Le:
-		handleBinaryBool(vm, vm.stack.PopFloat64, LessOrEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat64, lessOrEqual)
 	case F64Ge:
-		handleBinaryBool(vm, vm.stack.PopFloat64, GreaterOrEqual)
+		handleBinaryBool(vm, vm.stack.PopFloat64, greaterOrEqual)
 	case I32Clz:
-		handleUnary(vm, vm.stack.PopInt32, Clz32)
+		handleUnary(vm, vm.stack.PopInt32, clz32)
 	case I32Ctz:
-		handleUnary(vm, vm.stack.PopInt32, Ctz32)
+		handleUnary(vm, vm.stack.PopInt32, ctz32)
 	case I32Popcnt:
-		handleUnary(vm, vm.stack.PopInt32, Popcnt32)
+		handleUnary(vm, vm.stack.PopInt32, popcnt32)
 	case I32Add:
-		handleBinary(vm, vm.stack.PopInt32, Add)
+		handleBinary(vm, vm.stack.PopInt32, add)
 	case I32Sub:
-		handleBinary(vm, vm.stack.PopInt32, Sub)
+		handleBinary(vm, vm.stack.PopInt32, sub)
 	case I32Mul:
-		handleBinary(vm, vm.stack.PopInt32, Mul)
+		handleBinary(vm, vm.stack.PopInt32, mul)
 	case I32DivS:
-		err = handleBinarySafe(vm, vm.stack.PopInt32, DivS32)
+		err = handleBinarySafe(vm, vm.stack.PopInt32, divS32)
 	case I32DivU:
-		err = handleBinarySafe(vm, vm.stack.PopInt32, DivU32)
+		err = handleBinarySafe(vm, vm.stack.PopInt32, divU32)
 	case I32RemS:
-		err = handleBinarySafe(vm, vm.stack.PopInt32, RemS32)
+		err = handleBinarySafe(vm, vm.stack.PopInt32, remS32)
 	case I32RemU:
-		err = handleBinarySafe(vm, vm.stack.PopInt32, RemU32)
+		err = handleBinarySafe(vm, vm.stack.PopInt32, remU32)
 	case I32And:
-		handleBinary(vm, vm.stack.PopInt32, And)
+		handleBinary(vm, vm.stack.PopInt32, and)
 	case I32Or:
-		handleBinary(vm, vm.stack.PopInt32, Or)
+		handleBinary(vm, vm.stack.PopInt32, or)
 	case I32Xor:
-		handleBinary(vm, vm.stack.PopInt32, Xor)
+		handleBinary(vm, vm.stack.PopInt32, xor)
 	case I32Shl:
-		handleBinary(vm, vm.stack.PopInt32, Shl32)
+		handleBinary(vm, vm.stack.PopInt32, shl32)
 	case I32ShrS:
-		handleBinary(vm, vm.stack.PopInt32, ShrS32)
+		handleBinary(vm, vm.stack.PopInt32, shrS32)
 	case I32ShrU:
-		handleBinary(vm, vm.stack.PopInt32, ShrU32)
+		handleBinary(vm, vm.stack.PopInt32, shrU32)
 	case I32Rotl:
-		handleBinary(vm, vm.stack.PopInt32, Rotl32)
+		handleBinary(vm, vm.stack.PopInt32, rotl32)
 	case I32Rotr:
-		handleBinary(vm, vm.stack.PopInt32, Rotr32)
+		handleBinary(vm, vm.stack.PopInt32, rotr32)
 	case I64Clz:
-		handleUnary(vm, vm.stack.PopInt64, Clz64)
+		handleUnary(vm, vm.stack.PopInt64, clz64)
 	case I64Ctz:
-		handleUnary(vm, vm.stack.PopInt64, Ctz64)
+		handleUnary(vm, vm.stack.PopInt64, ctz64)
 	case I64Popcnt:
-		handleUnary(vm, vm.stack.PopInt64, Popcnt64)
+		handleUnary(vm, vm.stack.PopInt64, popcnt64)
 	case I64Add:
-		handleBinary(vm, vm.stack.PopInt64, Add)
+		handleBinary(vm, vm.stack.PopInt64, add)
 	case I64Sub:
-		handleBinary(vm, vm.stack.PopInt64, Sub)
+		handleBinary(vm, vm.stack.PopInt64, sub)
 	case I64Mul:
-		handleBinary(vm, vm.stack.PopInt64, Mul)
+		handleBinary(vm, vm.stack.PopInt64, mul)
 	case I64DivS:
-		err = handleBinarySafe(vm, vm.stack.PopInt64, DivS64)
+		err = handleBinarySafe(vm, vm.stack.PopInt64, divS64)
 	case I64DivU:
-		err = handleBinarySafe(vm, vm.stack.PopInt64, DivU64)
+		err = handleBinarySafe(vm, vm.stack.PopInt64, divU64)
 	case I64RemS:
-		err = handleBinarySafe(vm, vm.stack.PopInt64, RemS64)
+		err = handleBinarySafe(vm, vm.stack.PopInt64, remS64)
 	case I64RemU:
-		err = handleBinarySafe(vm, vm.stack.PopInt64, RemU64)
+		err = handleBinarySafe(vm, vm.stack.PopInt64, remU64)
 	case I64And:
-		handleBinary(vm, vm.stack.PopInt64, And)
+		handleBinary(vm, vm.stack.PopInt64, and)
 	case I64Or:
-		handleBinary(vm, vm.stack.PopInt64, Or)
+		handleBinary(vm, vm.stack.PopInt64, or)
 	case I64Xor:
-		handleBinary(vm, vm.stack.PopInt64, Xor)
+		handleBinary(vm, vm.stack.PopInt64, xor)
 	case I64Shl:
-		handleBinary(vm, vm.stack.PopInt64, Shl64)
+		handleBinary(vm, vm.stack.PopInt64, shl64)
 	case I64ShrS:
-		handleBinary(vm, vm.stack.PopInt64, ShrS64)
+		handleBinary(vm, vm.stack.PopInt64, shrS64)
 	case I64ShrU:
-		handleBinary(vm, vm.stack.PopInt64, ShrU64)
+		handleBinary(vm, vm.stack.PopInt64, shrU64)
 	case I64Rotl:
-		handleBinary(vm, vm.stack.PopInt64, Rotl64)
+		handleBinary(vm, vm.stack.PopInt64, rotl64)
 	case I64Rotr:
-		handleBinary(vm, vm.stack.PopInt64, Rotr64)
+		handleBinary(vm, vm.stack.PopInt64, rotr64)
 	case F32Abs:
-		handleUnary(vm, vm.stack.PopFloat32, Abs[float32])
+		handleUnary(vm, vm.stack.PopFloat32, abs[float32])
 	case F32Neg:
-		handleUnary(vm, vm.stack.PopFloat32, Neg[float32])
+		handleUnary(vm, vm.stack.PopFloat32, neg[float32])
 	case F32Ceil:
-		handleUnary(vm, vm.stack.PopFloat32, Ceil[float32])
+		handleUnary(vm, vm.stack.PopFloat32, ceil[float32])
 	case F32Floor:
-		handleUnary(vm, vm.stack.PopFloat32, Floor[float32])
+		handleUnary(vm, vm.stack.PopFloat32, floor[float32])
 	case F32Trunc:
-		handleUnary(vm, vm.stack.PopFloat32, Trunc[float32])
+		handleUnary(vm, vm.stack.PopFloat32, trunc[float32])
 	case F32Nearest:
-		handleUnary(vm, vm.stack.PopFloat32, Nearest[float32])
+		handleUnary(vm, vm.stack.PopFloat32, nearest[float32])
 	case F32Sqrt:
-		handleUnary(vm, vm.stack.PopFloat32, Sqrt[float32])
+		handleUnary(vm, vm.stack.PopFloat32, sqrt[float32])
 	case F32Add:
-		handleBinary(vm, vm.stack.PopFloat32, Add[float32])
+		handleBinary(vm, vm.stack.PopFloat32, add[float32])
 	case F32Sub:
-		handleBinary(vm, vm.stack.PopFloat32, Sub[float32])
+		handleBinary(vm, vm.stack.PopFloat32, sub[float32])
 	case F32Mul:
-		handleBinary(vm, vm.stack.PopFloat32, Mul[float32])
+		handleBinary(vm, vm.stack.PopFloat32, mul[float32])
 	case F32Div:
-		handleBinary(vm, vm.stack.PopFloat32, Div[float32])
+		handleBinary(vm, vm.stack.PopFloat32, div[float32])
 	case F32Min:
-		handleBinary(vm, vm.stack.PopFloat32, Min[float32])
+		handleBinary(vm, vm.stack.PopFloat32, wasmMin[float32])
 	case F32Max:
-		handleBinary(vm, vm.stack.PopFloat32, Max[float32])
+		handleBinary(vm, vm.stack.PopFloat32, wasmMax[float32])
 	case F32Copysign:
-		handleBinary(vm, vm.stack.PopFloat32, Copysign[float32])
+		handleBinary(vm, vm.stack.PopFloat32, copysign[float32])
 	case F64Abs:
-		handleUnary(vm, vm.stack.PopFloat64, Abs[float64])
+		handleUnary(vm, vm.stack.PopFloat64, abs[float64])
 	case F64Neg:
-		handleUnary(vm, vm.stack.PopFloat64, Neg[float64])
+		handleUnary(vm, vm.stack.PopFloat64, neg[float64])
 	case F64Ceil:
-		handleUnary(vm, vm.stack.PopFloat64, Ceil[float64])
+		handleUnary(vm, vm.stack.PopFloat64, ceil[float64])
 	case F64Floor:
-		handleUnary(vm, vm.stack.PopFloat64, Floor[float64])
+		handleUnary(vm, vm.stack.PopFloat64, floor[float64])
 	case F64Trunc:
-		handleUnary(vm, vm.stack.PopFloat64, Trunc[float64])
+		handleUnary(vm, vm.stack.PopFloat64, trunc[float64])
 	case F64Nearest:
-		handleUnary(vm, vm.stack.PopFloat64, Nearest[float64])
+		handleUnary(vm, vm.stack.PopFloat64, nearest[float64])
 	case F64Sqrt:
-		handleUnary(vm, vm.stack.PopFloat64, Sqrt[float64])
+		handleUnary(vm, vm.stack.PopFloat64, sqrt[float64])
 	case F64Add:
-		handleBinary(vm, vm.stack.PopFloat64, Add[float64])
+		handleBinary(vm, vm.stack.PopFloat64, add[float64])
 	case F64Sub:
-		handleBinary(vm, vm.stack.PopFloat64, Sub[float64])
+		handleBinary(vm, vm.stack.PopFloat64, sub[float64])
 	case F64Mul:
-		handleBinary(vm, vm.stack.PopFloat64, Mul[float64])
+		handleBinary(vm, vm.stack.PopFloat64, mul[float64])
 	case F64Div:
-		handleBinary(vm, vm.stack.PopFloat64, Div[float64])
+		handleBinary(vm, vm.stack.PopFloat64, div[float64])
 	case F64Min:
-		handleBinary(vm, vm.stack.PopFloat64, Min[float64])
+		handleBinary(vm, vm.stack.PopFloat64, wasmMin[float64])
 	case F64Max:
-		handleBinary(vm, vm.stack.PopFloat64, Max[float64])
+		handleBinary(vm, vm.stack.PopFloat64, wasmMax[float64])
 	case F64Copysign:
-		handleBinary(vm, vm.stack.PopFloat64, Copysign[float64])
+		handleBinary(vm, vm.stack.PopFloat64, copysign[float64])
 	case I32WrapI64:
-		handleUnary(vm, vm.stack.PopInt64, WrapI64ToI32)
+		handleUnary(vm, vm.stack.PopInt64, wrapI64ToI32)
 	case I32TruncF32S:
-		err = handleUnarySafe(vm, vm.stack.PopFloat32, TruncF32SToI32)
+		err = handleUnarySafe(vm, vm.stack.PopFloat32, truncF32SToI32)
 	case I32TruncF32U:
-		err = handleUnarySafe(vm, vm.stack.PopFloat32, TruncF32UToI32)
+		err = handleUnarySafe(vm, vm.stack.PopFloat32, truncF32UToI32)
 	case I32TruncF64S:
-		err = handleUnarySafe(vm, vm.stack.PopFloat64, TruncF64SToI32)
+		err = handleUnarySafe(vm, vm.stack.PopFloat64, truncF64SToI32)
 	case I32TruncF64U:
-		err = handleUnarySafe(vm, vm.stack.PopFloat64, TruncF64UToI32)
+		err = handleUnarySafe(vm, vm.stack.PopFloat64, truncF64UToI32)
 	case I64ExtendI32S:
-		handleUnary(vm, vm.stack.PopInt32, ExtendI32SToI64)
+		handleUnary(vm, vm.stack.PopInt32, extendI32SToI64)
 	case I64ExtendI32U:
-		handleUnary(vm, vm.stack.PopInt32, ExtendI32UToI64)
+		handleUnary(vm, vm.stack.PopInt32, extendI32UToI64)
 	case I64TruncF32S:
-		err = handleUnarySafe(vm, vm.stack.PopFloat32, TruncF32SToI64)
+		err = handleUnarySafe(vm, vm.stack.PopFloat32, truncF32SToI64)
 	case I64TruncF32U:
-		err = handleUnarySafe(vm, vm.stack.PopFloat32, TruncF32UToI64)
+		err = handleUnarySafe(vm, vm.stack.PopFloat32, truncF32UToI64)
 	case I64TruncF64S:
-		err = handleUnarySafe(vm, vm.stack.PopFloat64, TruncF64SToI64)
+		err = handleUnarySafe(vm, vm.stack.PopFloat64, truncF64SToI64)
 	case I64TruncF64U:
-		err = handleUnarySafe(vm, vm.stack.PopFloat64, TruncF64UToI64)
+		err = handleUnarySafe(vm, vm.stack.PopFloat64, truncF64UToI64)
 	case F32ConvertI32S:
-		handleUnary(vm, vm.stack.PopInt32, ConvertI32SToF32)
+		handleUnary(vm, vm.stack.PopInt32, convertI32SToF32)
 	case F32ConvertI32U:
-		handleUnary(vm, vm.stack.PopInt32, ConvertI32UToF32)
+		handleUnary(vm, vm.stack.PopInt32, convertI32UToF32)
 	case F32ConvertI64S:
-		handleUnary(vm, vm.stack.PopInt64, ConvertI64SToF32)
+		handleUnary(vm, vm.stack.PopInt64, convertI64SToF32)
 	case F32ConvertI64U:
-		handleUnary(vm, vm.stack.PopInt64, ConvertI64UToF32)
+		handleUnary(vm, vm.stack.PopInt64, convertI64UToF32)
 	case F32DemoteF64:
-		handleUnary(vm, vm.stack.PopFloat64, DemoteF64ToF32)
+		handleUnary(vm, vm.stack.PopFloat64, demoteF64ToF32)
 	case F64ConvertI32S:
-		handleUnary(vm, vm.stack.PopInt32, ConvertI32SToF64)
+		handleUnary(vm, vm.stack.PopInt32, convertI32SToF64)
 	case F64ConvertI32U:
-		handleUnary(vm, vm.stack.PopInt32, ConvertI32UToF64)
+		handleUnary(vm, vm.stack.PopInt32, convertI32UToF64)
 	case F64ConvertI64S:
-		handleUnary(vm, vm.stack.PopInt64, ConvertI64SToF64)
+		handleUnary(vm, vm.stack.PopInt64, convertI64SToF64)
 	case F64ConvertI64U:
-		handleUnary(vm, vm.stack.PopInt64, ConvertI64UToF64)
+		handleUnary(vm, vm.stack.PopInt64, convertI64UToF64)
 	case F64PromoteF32:
-		handleUnary(vm, vm.stack.PopFloat32, PromoteF32ToF64)
+		handleUnary(vm, vm.stack.PopFloat32, promoteF32ToF64)
 	case I32ReinterpretF32:
-		handleUnary(vm, vm.stack.PopFloat32, ReinterpretF32ToI32)
+		handleUnary(vm, vm.stack.PopFloat32, reinterpretF32ToI32)
 	case I64ReinterpretF64:
-		handleUnary(vm, vm.stack.PopFloat64, ReinterpretF64ToI64)
+		handleUnary(vm, vm.stack.PopFloat64, reinterpretF64ToI64)
 	case F32ReinterpretI32:
-		handleUnary(vm, vm.stack.PopInt32, ReinterpretI32ToF32)
+		handleUnary(vm, vm.stack.PopInt32, reinterpretI32ToF32)
 	case F64ReinterpretI64:
-		handleUnary(vm, vm.stack.PopInt64, ReinterpretI64ToF64)
+		handleUnary(vm, vm.stack.PopInt64, reinterpretI64ToF64)
 	case I32Extend8S:
-		handleUnary(vm, vm.stack.PopInt32, Extend8STo32)
+		handleUnary(vm, vm.stack.PopInt32, extend8STo32)
 	case I32Extend16S:
-		handleUnary(vm, vm.stack.PopInt32, Extend16STo32)
+		handleUnary(vm, vm.stack.PopInt32, extend16STo32)
 	case I64Extend8S:
-		handleUnary(vm, vm.stack.PopInt64, Extend8STo64)
+		handleUnary(vm, vm.stack.PopInt64, extend8STo64)
 	case I64Extend16S:
-		handleUnary(vm, vm.stack.PopInt64, Extend16STo64)
+		handleUnary(vm, vm.stack.PopInt64, extend16STo64)
 	case I64Extend32S:
-		handleUnary(vm, vm.stack.PopInt64, Extend32STo64)
+		handleUnary(vm, vm.stack.PopInt64, extend32STo64)
 	case RefNull:
 		vm.stack.Push(NullVal)
 	case RefIsNull:
@@ -639,21 +639,21 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case RefFunc:
 		vm.handleRefFunc(instruction)
 	case I32TruncSatF32S:
-		handleUnary(vm, vm.stack.PopFloat32, TruncSatF32SToI32)
+		handleUnary(vm, vm.stack.PopFloat32, truncSatF32SToI32)
 	case I32TruncSatF32U:
-		handleUnary(vm, vm.stack.PopFloat32, TruncSatF32UToI32)
+		handleUnary(vm, vm.stack.PopFloat32, truncSatF32UToI32)
 	case I32TruncSatF64S:
-		handleUnary(vm, vm.stack.PopFloat64, TruncSatF64SToI32)
+		handleUnary(vm, vm.stack.PopFloat64, truncSatF64SToI32)
 	case I32TruncSatF64U:
-		handleUnary(vm, vm.stack.PopFloat64, TruncSatF64UToI32)
+		handleUnary(vm, vm.stack.PopFloat64, truncSatF64UToI32)
 	case I64TruncSatF32S:
-		handleUnary(vm, vm.stack.PopFloat32, TruncSatF32SToI64)
+		handleUnary(vm, vm.stack.PopFloat32, truncSatF32SToI64)
 	case I64TruncSatF32U:
-		handleUnary(vm, vm.stack.PopFloat32, TruncSatF32UToI64)
+		handleUnary(vm, vm.stack.PopFloat32, truncSatF32UToI64)
 	case I64TruncSatF64S:
-		handleUnary(vm, vm.stack.PopFloat64, TruncSatF64SToI64)
+		handleUnary(vm, vm.stack.PopFloat64, truncSatF64SToI64)
 	case I64TruncSatF64U:
-		handleUnary(vm, vm.stack.PopFloat64, TruncSatF64UToI64)
+		handleUnary(vm, vm.stack.PopFloat64, truncSatF64UToI64)
 	case MemoryInit:
 		err = vm.handleMemoryInit(instruction)
 	case DataDrop:
