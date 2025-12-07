@@ -16,7 +16,6 @@ package epsilon
 
 import (
 	"bytes"
-	"fmt"
 	"testing"
 
 	"github.com/ziggy42/epsilon/internal/wabt"
@@ -827,7 +826,7 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 	checkMemory := func(exportName, expectedValue string) {
 		t.Helper()
 
-		mem, err := getExportedMemory(moduleInstance, exportName)
+		mem, err := moduleInstance.GetMemory(exportName)
 		if err != nil {
 			t.Fatalf("failed to get %s: %v", exportName, err)
 		}
@@ -961,13 +960,4 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 	if got := result[0]; got != int32(0x2a) {
 		t.Fatalf("expected %d, got %d", 0x2a, got)
 	}
-}
-
-func getExportedMemory(module *ModuleInstance, name string) (*Memory, error) {
-	for _, export := range module.Exports {
-		if export.Name == name {
-			return export.Value.(*Memory), nil
-		}
-	}
-	return nil, fmt.Errorf("Memory %s not found", name)
 }

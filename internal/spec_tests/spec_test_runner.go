@@ -145,19 +145,17 @@ func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 }
 
 func (r *specTestRunner) buildImports() map[string]map[string]any {
-	imports := map[string]map[string]any{
-		"spectest": r.spectestImports,
+	builder := epsilon.NewImportBuilder()
+
+	for name, value := range r.spectestImports {
+		builder.AddHostFunc("spectest", name, value)
 	}
 
 	for regName, moduleInstance := range r.moduleInstanceMap {
-		exports := make(map[string]any)
-		for _, export := range moduleInstance.Exports {
-			exports[export.Name] = export.Value
-		}
-		imports[regName] = exports
+		builder.AddModuleExports(regName, moduleInstance)
 	}
 
-	return imports
+	return builder.Build()
 }
 
 func (r *specTestRunner) handleModule(cmd wabt.Command) {

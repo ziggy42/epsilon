@@ -131,6 +131,20 @@ func (b *ImportBuilder) AddGlobal(
 	return b
 }
 
+// AddModuleExports adds all exports from a ModuleInstance as imports.
+// This is useful when you want to import functions, memories, tables, or
+// globals from one module into another.
+func (b *ImportBuilder) AddModuleExports(
+	module string,
+	instance *ModuleInstance,
+) *ImportBuilder {
+	b.ensureModule(module)
+	for _, export := range instance.exports {
+		b.imports[module][export.name] = export.value
+	}
+	return b
+}
+
 func (b *ImportBuilder) Build() map[string]map[string]any {
 	return b.imports
 }

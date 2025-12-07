@@ -184,8 +184,7 @@ func (vm *vm) instantiate(
 		}
 	}
 
-	exports := vm.resolveExports(module, moduleInstance)
-	moduleInstance.Exports = exports
+	moduleInstance.exports = vm.resolveExports(module, moduleInstance)
 	return moduleInstance, nil
 }
 
@@ -1719,32 +1718,32 @@ func getExport(
 	name string,
 	indexType exportIndexKind,
 ) (any, error) {
-	for _, export := range module.Exports {
-		if export.Name != name {
+	for _, export := range module.exports {
+		if export.name != name {
 			continue
 		}
 
 		switch indexType {
 		case functionExportKind:
-			function, ok := export.Value.(FunctionInstance)
+			function, ok := export.value.(FunctionInstance)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a function", name)
 			}
 			return function, nil
 		case globalExportKind:
-			global, ok := export.Value.(*Global)
+			global, ok := export.value.(*Global)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a global", name)
 			}
 			return global, nil
 		case memoryExportKind:
-			memory, ok := export.Value.(*Memory)
+			memory, ok := export.value.(*Memory)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a memory", name)
 			}
 			return memory, nil
 		case tableExportKind:
-			table, ok := export.Value.(*Table)
+			table, ok := export.value.(*Table)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a table", name)
 			}
@@ -1851,8 +1850,8 @@ func (vm *vm) initActiveDatas(
 func (vm *vm) resolveExports(
 	module *moduleDefinition,
 	instance *ModuleInstance,
-) []ExportInstance {
-	exports := []ExportInstance{}
+) []exportInstance {
+	exports := []exportInstance{}
 	for _, export := range module.exports {
 		var value any
 		switch export.indexType {
@@ -1869,7 +1868,7 @@ func (vm *vm) resolveExports(
 			storeIndex := instance.tableAddrs[export.index]
 			value = vm.store.tables[storeIndex]
 		}
-		exports = append(exports, ExportInstance{Name: export.name, Value: value})
+		exports = append(exports, exportInstance{name: export.name, value: value})
 	}
 	return exports
 }

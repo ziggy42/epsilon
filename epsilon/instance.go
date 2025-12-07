@@ -14,15 +14,14 @@
 
 package epsilon
 
-// ExportInstance represents the runtime representation of an export.
-type ExportInstance struct {
-	Name  string
-	Value any
+// exportInstance represents the runtime representation of an export.
+type exportInstance struct {
+	name  string
+	value any
 }
 
 // ModuleInstance is the runtime representation of a module.
 type ModuleInstance struct {
-	Exports     []ExportInstance
 	types       []FunctionType
 	funcAddrs   []uint32
 	tableAddrs  []uint32
@@ -30,6 +29,7 @@ type ModuleInstance struct {
 	globalAddrs []uint32
 	dlemAddrs   []uint32
 	dataAddrs   []uint32
+	exports     []exportInstance
 	vm          *vm // Internal reference to resolve exports
 }
 
@@ -75,6 +75,15 @@ func (m *ModuleInstance) GetFunction(name string) (FunctionInstance, error) {
 		return nil, err
 	}
 	return export.(FunctionInstance), nil
+}
+
+// ExportNames returns a slice of all export names in the module.
+func (m *ModuleInstance) ExportNames() []string {
+	names := make([]string, len(m.exports))
+	for i, export := range m.exports {
+		names[i] = export.name
+	}
+	return names
 }
 
 type FunctionInstance interface {

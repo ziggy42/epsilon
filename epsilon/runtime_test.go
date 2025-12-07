@@ -217,3 +217,60 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 		t.Fatalf("expected 11, got %d", results[0])
 	}
 }
+
+func TestRuntimeModuleToModuleImport(t *testing.T) {
+	module1Wasm, _ := wabt.Wat2Wasm(`(module
+		(func (export "multiply") (param i32 i32) (result i32)
+			local.get 0
+			local.get 1
+			i32.mul)
+		(func (export "square") (param i32) (result i32)
+			local.get 0
+			local.get 0
+			i32.mul)
+	)`)
+
+	runtime := NewRuntime()
+	module1, err := runtime.InstantiateModule(bytes.NewReader(module1Wasm))
+	if err != nil {
+		t.Fatalf("failed to instantiate module1: %v", err)
+	}
+
+	module2Wasm, _ := wabt.Wat2Wasm(`(module
+		(import "math" "multiply" (func $multiply (param i32 i32) (result i32)))
+		(func (export "multiplyAndAdd") (param i32 i32 i32) (result i32)
+			local.get 0
+			local.get 1
+			call $multiply
+			local.get 2
+			i32.add)
+	)`)
+
+	module2, err := runtime.InstantiateModuleWithImports(
+		bytes.NewReader(module2Wasm),
+		NewImportBuilder().AddModuleExports("math", module1).Build(),
+	)
+	if err != nil {
+		t.Fatalf("failed to instantiate module2: %v", err)
+	}
+
+	results, err := module2.Invoke("multiplyAndAdd", int32(3), int32(4), int32(5))
+	if err != nil {
+		t.Fatalf("failed to invoke multiplyAndAdd: %v", err)
+	}
+
+	expected := int32(17)
+	if results[0].(int32) != expected {
+		t.Fatalf("expected %d, got %d", expected, results[0])
+	}
+
+	results, err = module1.Invoke("square", int32(5))
+	if err != nil {
+		t.Fatalf("failed to invoke square: %v", err)
+	}
+
+	expected = int32(25)
+	if results[0].(int32) != expected {
+		t.Fatalf("expected %d, got %d", expected, results[0])
+	}
+}
