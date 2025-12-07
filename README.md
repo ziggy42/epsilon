@@ -1,11 +1,52 @@
 # ε Epsilon
 
-A WebAssembly virtual machine written in Go.
+**Epsilon** is a pure-Go library for executing WebAssembly code with **zero dependencies**.
+It works on **any architecture supported by Go**: no CGo, no native libraries, just Go.
 
-Implements the [WebAssembly 2.0 specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
-with no runtime dependencies.
+Implements the [WebAssembly 2.0 specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf).
 
-## Usage
+## Library Usage
+
+### Installation
+
+```bash
+go get github.com/ziggy42/epsilon/epsilon
+```
+
+### Simple Example
+
+```go
+url := "https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm"
+resp, _ := http.Get(url)
+defer resp.Body.Close()
+    
+instance, _ := epsilon.NewRuntime().InstantiateModule(resp.Body)    
+results, _ := instance.Invoke("add", int32(5), int32(37))
+    
+fmt.Println(results[0]) // Output: 42
+```
+
+### Example with Imports
+
+```go
+url := "https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/logger.wasm"
+resp, _ := http.Get(url)
+defer resp.Body.Close()
+
+imports := epsilon.NewImportBuilder().
+	AddHostFunc("console", "log", func(args ...any) []any {
+		fmt.Printf("%d\n", args[0].(int32))
+		return []any{}
+	}).
+	Build()
+
+instance, _ := epsilon.NewRuntime().
+    InstantiateModuleWithImports(resp.Body, imports)
+_, _ = instance.Invoke("logIt") // Output: 13
+
+```
+
+## REPL Usage
 
 ### Running the REPL
 
