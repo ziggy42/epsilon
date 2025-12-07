@@ -32,7 +32,7 @@ func (s *ValueStack) PushAll(values []any) {
 }
 
 func (s *ValueStack) Drop() {
-	s.Pop()
+	s.data = s.data[:len(s.data)-1]
 }
 
 func (s *ValueStack) PopInt32() int32 {
