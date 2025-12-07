@@ -29,40 +29,27 @@ var (
 
 const maxCallStackDepth = 1000
 
-type CallFrame struct {
-	Decoder      *Decoder
-	ControlStack []*ControlFrame
-	Locals       []any
-	Function     *WasmFunction
+type callFrame struct {
+	decoder      *Decoder
+	controlStack []*controlFrame
+	locals       []any
+	function     *WasmFunction
 }
 
-func NewCallFrame(
-	function *WasmFunction,
-	locals []any,
-	controlFrame ControlFrame,
-) *CallFrame {
-	return &CallFrame{
-		Decoder:      NewDecoder(function.Code.Body),
-		ControlStack: []*ControlFrame{&controlFrame},
-		Locals:       locals,
-		Function:     function,
-	}
-}
-
-// ControlFrame represents a block of code that can be branched to.
-type ControlFrame struct {
-	Opcode         Opcode // The opcode that created this control frame.
-	ContinuationPc uint   // The address to jump to when `br` targets this frame.
-	InputCount     uint   // Count of inputs this control instruction consumes.
-	OutputCount    uint   // Count of outputs this control instruction produces.
-	StackHeight    uint
+// controlFrame represents a block of code that can be branched to.
+type controlFrame struct {
+	opcode         Opcode // The opcode that created this control frame.
+	continuationPc uint   // The address to jump to when `br` targets this frame.
+	inputCount     uint   // Count of inputs this control instruction consumes.
+	outputCount    uint   // Count of outputs this control instruction produces.
+	stackHeight    uint
 }
 
 // VM is the WebAssembly Virtual Machine.
 type VM struct {
 	store          *Store
 	stack          *ValueStack
-	callStack      []*CallFrame
+	callStack      []*callFrame
 	callStackDepth int
 	features       ExperimentalFeatures
 }
@@ -238,19 +225,22 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 		locals = append(locals, DefaultValueForType(local))
 	}
 
-	controlFrame := ControlFrame{
-		Opcode:         Block,
-		ContinuationPc: uint(len(function.Code.Body)),
-		InputCount:     uint(len(function.Type.ParamTypes)),
-		OutputCount:    uint(len(function.Type.ResultTypes)),
-		StackHeight:    vm.stack.Size(),
+	callFrame := &callFrame{
+		decoder: NewDecoder(function.Code.Body),
+		controlStack: []*controlFrame{{
+			opcode:         Block,
+			continuationPc: uint(len(function.Code.Body)),
+			inputCount:     uint(len(function.Type.ParamTypes)),
+			outputCount:    uint(len(function.Type.ResultTypes)),
+			stackHeight:    vm.stack.Size(),
+		}},
+		locals:   locals,
+		function: function,
 	}
-
-	callFrame := NewCallFrame(function, locals, controlFrame)
 	vm.callStack = append(vm.callStack, callFrame)
 
-	for callFrame.Decoder.HasMore() {
-		instruction, err := callFrame.Decoder.Decode()
+	for callFrame.decoder.HasMore() {
+		instruction, err := callFrame.decoder.Decode()
 		if err != nil {
 			return nil, err
 		}
@@ -265,7 +255,7 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	}
 
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	values := vm.stack.PopN(len(callFrame.Function.Type.ResultTypes))
+	values := vm.stack.PopN(len(callFrame.function.Type.ResultTypes))
 	return values, nil
 }
 
@@ -1152,40 +1142,40 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	return err
 }
 
-func (vm *VM) currentCallFrame() *CallFrame {
+func (vm *VM) currentCallFrame() *callFrame {
 	return vm.callStack[len(vm.callStack)-1]
 }
 
 func (vm *VM) currentModuleInstance() *ModuleInstance {
-	return vm.currentCallFrame().Function.Module
+	return vm.currentCallFrame().function.Module
 }
 
 func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
 	callFrame := vm.currentCallFrame()
-	originalPc := callFrame.Decoder.Pc
+	originalPc := callFrame.decoder.Pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
-	frame := &ControlFrame{
-		Opcode:      opcode,
-		InputCount:  inputCount,
-		OutputCount: outputCount,
-		StackHeight: vm.stack.Size(),
+	frame := &controlFrame{
+		opcode:      opcode,
+		inputCount:  inputCount,
+		outputCount: outputCount,
+		stackHeight: vm.stack.Size(),
 	}
 
 	// For loops, the continuation is a branch back to the start of the block.
 	if opcode == Loop {
-		frame.ContinuationPc = originalPc
+		frame.continuationPc = originalPc
 	} else {
-		if cachedPc, ok := callFrame.Function.JumpCache[originalPc]; ok {
-			frame.ContinuationPc = cachedPc
+		if cachedPc, ok := callFrame.function.JumpCache[originalPc]; ok {
+			frame.continuationPc = cachedPc
 		} else {
 			// Cache miss: we need to scan forward to find the matching 'end'.
-			if err := callFrame.Decoder.DecodeUntilMatchingEnd(); err != nil {
+			if err := callFrame.decoder.DecodeUntilMatchingEnd(); err != nil {
 				return err
 			}
 
-			callFrame.Function.JumpCache[originalPc] = callFrame.Decoder.Pc
-			frame.ContinuationPc = callFrame.Decoder.Pc
-			callFrame.Decoder.Pc = originalPc
+			callFrame.function.JumpCache[originalPc] = callFrame.decoder.Pc
+			frame.continuationPc = callFrame.decoder.Pc
+			callFrame.decoder.Pc = originalPc
 		}
 	}
 
@@ -1201,7 +1191,7 @@ func (vm *VM) handleStructured(instruction Instruction) error {
 func (vm *VM) handleIf(instruction Instruction) error {
 	frame := vm.currentCallFrame()
 	blockType := int32(instruction.Immediates[0])
-	originalPc := frame.Decoder.Pc
+	originalPc := frame.decoder.Pc
 
 	condition := vm.stack.PopInt32()
 
@@ -1214,13 +1204,13 @@ func (vm *VM) handleIf(instruction Instruction) error {
 	}
 
 	// We need to jump to the 'else' or 'end'.
-	if elsePc, ok := frame.Function.JumpElseCache[originalPc]; ok {
-		frame.Decoder.Pc = elsePc
+	if elsePc, ok := frame.function.JumpElseCache[originalPc]; ok {
+		frame.decoder.Pc = elsePc
 		return nil
 	}
 
 	// Cache miss, we need to find the matching Else or End.
-	matchingOpcode, err := frame.Decoder.DecodeUntilMatchingElseOrEnd()
+	matchingOpcode, err := frame.decoder.DecodeUntilMatchingElseOrEnd()
 	if err != nil {
 		return err
 	}
@@ -1228,12 +1218,12 @@ func (vm *VM) handleIf(instruction Instruction) error {
 	if matchingOpcode == Else {
 		// We need to consume the Else instruction and jump to the next "actual"
 		// instruction after it.
-		if _, err := frame.Decoder.Decode(); err != nil {
+		if _, err := frame.decoder.Decode(); err != nil {
 			return err
 		}
 	}
 
-	frame.Function.JumpElseCache[originalPc] = frame.Decoder.Pc
+	frame.function.JumpElseCache[originalPc] = frame.decoder.Pc
 	return nil
 }
 
@@ -1243,12 +1233,12 @@ func (vm *VM) handleElse() {
 	// executing the 'then' block of an 'if' statement. We need to jump to the
 	// 'end' of the 'if' block, skipping the 'else' block.
 	ifFrame := vm.popControlFrame()
-	callFrame.Decoder.Pc = ifFrame.ContinuationPc
+	callFrame.decoder.Pc = ifFrame.continuationPc
 }
 
 func (vm *VM) handleEnd() {
 	frame := vm.popControlFrame()
-	vm.stack.Unwind(frame.StackHeight, frame.OutputCount)
+	vm.stack.Unwind(frame.stackHeight, frame.outputCount)
 }
 
 func (vm *VM) handleBr(instruction Instruction) {
@@ -1280,24 +1270,24 @@ func (vm *VM) handleBrTable(instruction Instruction) {
 func (vm *VM) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
-	var targetFrame *ControlFrame
+	var targetFrame *controlFrame
 	for range int(labelIndex) + 1 {
 		targetFrame = vm.popControlFrame()
 	}
 
 	var arity uint
-	if targetFrame.Opcode == Loop {
-		arity = targetFrame.InputCount
+	if targetFrame.opcode == Loop {
+		arity = targetFrame.inputCount
 	} else {
-		arity = targetFrame.OutputCount
+		arity = targetFrame.outputCount
 	}
 
-	vm.stack.Unwind(targetFrame.StackHeight, arity)
-	if targetFrame.Opcode == Loop {
+	vm.stack.Unwind(targetFrame.stackHeight, arity)
+	if targetFrame.opcode == Loop {
 		vm.pushControlFrame(targetFrame)
 	}
 
-	callFrame.Decoder.Pc = targetFrame.ContinuationPc
+	callFrame.decoder.Pc = targetFrame.continuationPc
 }
 
 func (vm *VM) handleCall(instruction Instruction) error {
@@ -1355,14 +1345,14 @@ func (vm *VM) handleSelect() {
 func (vm *VM) handleLocalGet(instruction Instruction) {
 	callFrame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
-	vm.stack.Push(callFrame.Locals[localIndex])
+	vm.stack.Push(callFrame.locals[localIndex])
 }
 
 func (vm *VM) handleLocalSet(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
 	// We know, due to validation, the top of the stack is always the right type.
-	frame.Locals[localIndex] = vm.stack.Pop()
+	frame.locals[localIndex] = vm.stack.Pop()
 }
 
 func (vm *VM) handleLocalTee(instruction Instruction) {
@@ -1370,7 +1360,7 @@ func (vm *VM) handleLocalTee(instruction Instruction) {
 	localIndex := int32(instruction.Immediates[0])
 	// We know, due to validation, the top of the stack is always the right type.
 	val := vm.stack.Pop()
-	frame.Locals[localIndex] = val
+	frame.locals[localIndex] = val
 	vm.stack.Push(val)
 }
 
@@ -1766,17 +1756,17 @@ func getExport(
 	return nil, fmt.Errorf("failed to find export with name: %s", name)
 }
 
-func (vm *VM) pushControlFrame(frame *ControlFrame) {
+func (vm *VM) pushControlFrame(frame *controlFrame) {
 	callFrame := vm.currentCallFrame()
-	callFrame.ControlStack = append(callFrame.ControlStack, frame)
+	callFrame.controlStack = append(callFrame.controlStack, frame)
 }
 
-func (vm *VM) popControlFrame() *ControlFrame {
+func (vm *VM) popControlFrame() *controlFrame {
 	callFrame := vm.currentCallFrame()
 	// Validation guarantees the control stack is never empty.
-	index := len(callFrame.ControlStack) - 1
-	frame := callFrame.ControlStack[index]
-	callFrame.ControlStack = callFrame.ControlStack[:index]
+	index := len(callFrame.controlStack) - 1
+	frame := callFrame.controlStack[index]
+	callFrame.controlStack = callFrame.controlStack[:index]
 	return frame
 }
 

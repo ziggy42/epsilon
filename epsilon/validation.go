@@ -66,7 +66,7 @@ func isVector(vt ValueType) bool {
 	return ok || vt == Bottom
 }
 
-type controlFrame struct {
+type validationControlFrame struct {
 	opcode      Opcode
 	startTypes  []ValueType
 	endTypes    []ValueType
@@ -76,7 +76,7 @@ type controlFrame struct {
 
 type validator struct {
 	valueStack          []ValueType
-	controlStack        []controlFrame
+	controlStack        []validationControlFrame
 	locals              []ValueType
 	returnType          []ValueType
 	typeDefs            []FunctionType
@@ -94,7 +94,7 @@ type validator struct {
 func NewValidator(features ExperimentalFeatures) *validator {
 	return &validator{
 		valueStack:          make([]ValueType, 0),
-		controlStack:        make([]controlFrame, 0),
+		controlStack:        make([]validationControlFrame, 0),
 		locals:              make([]ValueType, 0),
 		returnType:          make([]ValueType, 0),
 		referencedFunctions: make(map[uint32]bool),
@@ -1420,7 +1420,7 @@ func (v *validator) popExpectedValues(
 	return values, nil
 }
 
-func (v *validator) peekControlFrame() (*controlFrame, error) {
+func (v *validator) peekControlFrame() (*validationControlFrame, error) {
 	if len(v.controlStack) == 0 {
 		return nil, errControlStackEmpty
 	}
@@ -1428,7 +1428,7 @@ func (v *validator) peekControlFrame() (*controlFrame, error) {
 }
 
 func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
-	v.controlStack = append(v.controlStack, controlFrame{
+	v.controlStack = append(v.controlStack, validationControlFrame{
 		opcode:      opcode,
 		startTypes:  start,
 		endTypes:    end,
@@ -1438,22 +1438,22 @@ func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
 	v.pushValues(start)
 }
 
-func (v *validator) popControlFrame() (controlFrame, error) {
+func (v *validator) popControlFrame() (validationControlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return controlFrame{}, errControlStackEmpty
+		return validationControlFrame{}, errControlStackEmpty
 	}
 	frame := v.controlStack[len(v.controlStack)-1]
 	if _, err := v.popExpectedValues(frame.endTypes); err != nil {
-		return controlFrame{}, err
+		return validationControlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return controlFrame{}, errValueStackHeightMismatch
+		return validationControlFrame{}, errValueStackHeightMismatch
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
 }
 
-func (v *validator) labelTypes(frame controlFrame) []ValueType {
+func (v *validator) labelTypes(frame validationControlFrame) []ValueType {
 	if frame.opcode == Loop {
 		return frame.startTypes
 	}
