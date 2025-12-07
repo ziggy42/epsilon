@@ -55,11 +55,7 @@ type VM struct {
 }
 
 func NewVM() *VM {
-	return NewVMWithFeatures(ExperimentalFeatures{})
-}
-
-func NewVMWithFeatures(features ExperimentalFeatures) *VM {
-	return &VM{store: NewStore(), stack: NewValueStack(), features: features}
+	return &VM{store: NewStore(), stack: NewValueStack()}
 }
 
 func (vm *VM) Instantiate(

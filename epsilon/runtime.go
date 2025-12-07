@@ -30,10 +30,9 @@ func NewRuntime() *Runtime {
 	return &Runtime{vm: NewVM()}
 }
 
-// NewRuntimeWithFeatures creates a Runtime with specific experimental features
-// enabled.
-func NewRuntimeWithFeatures(features ExperimentalFeatures) *Runtime {
-	return &Runtime{vm: NewVMWithFeatures(features)}
+func (r *Runtime) WithFeatures(features ExperimentalFeatures) *Runtime {
+	r.vm.features = features
+	return r
 }
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.

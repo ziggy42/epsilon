@@ -36,11 +36,9 @@ func initVM(
 		return nil, nil, err
 	}
 
-	var vm *VM
+	vm := NewVM()
 	if features != nil {
-		vm = NewVMWithFeatures(*features)
-	} else {
-		vm = NewVM()
+		vm.features = *features
 	}
 
 	moduleInstance, err := vm.Instantiate(module, imports)
