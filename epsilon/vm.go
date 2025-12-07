@@ -52,7 +52,6 @@ func NewCallFrame(
 // ControlFrame represents a block of code that can be branched to.
 type ControlFrame struct {
 	Opcode         Opcode // The opcode that created this control frame.
-	Pc             uint   // The pc after the current opcode.
 	ContinuationPc uint   // The address to jump to when `br` targets this frame.
 	InputCount     uint   // Count of inputs this control instruction consumes.
 	OutputCount    uint   // Count of outputs this control instruction produces.
@@ -1167,7 +1166,6 @@ func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
 	frame := &ControlFrame{
 		Opcode:      opcode,
-		Pc:          originalPc,
 		InputCount:  inputCount,
 		OutputCount: outputCount,
 		StackHeight: vm.stack.Size(),
