@@ -20,13 +20,6 @@ import (
 	"math/bits"
 )
 
-func NewV128ValueFromSlice(bytes []byte) V128Value {
-	return V128Value{
-		Low:  binary.LittleEndian.Uint64(bytes[0:8]),
-		High: binary.LittleEndian.Uint64(bytes[8:16]),
-	}
-}
-
 func GetBytes(v V128Value) []byte {
 	var buf [16]byte
 	binary.LittleEndian.PutUint64(buf[0:8], v.Low)

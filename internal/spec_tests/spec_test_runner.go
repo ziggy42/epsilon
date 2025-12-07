@@ -423,7 +423,10 @@ func parseV128(v wabt.Value) (any, error) {
 		binary.Write(buf, binary.LittleEndian, lane)
 	}
 
-	return epsilon.NewV128ValueFromSlice(buf.Bytes()), nil
+	return epsilon.V128Value{
+		Low:  binary.LittleEndian.Uint64(buf.Bytes()[0:8]),
+		High: binary.LittleEndian.Uint64(buf.Bytes()[8:16]),
+	}, nil
 }
 
 func parseScalar(value string, valueType string) (any, error) {
