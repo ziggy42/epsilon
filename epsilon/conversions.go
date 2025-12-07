@@ -84,22 +84,6 @@ func BytesFromFloat64(v float64) []byte {
 	return b
 }
 
-func Uint64ToInt32(v uint64) int32 {
-	return int32(v)
-}
-
-func Uint64ToInt64(v uint64) int64 {
-	return int64(v)
-}
-
-func Uint64ToFloat32(v uint64) float32 {
-	return math.Float32frombits(uint32(v))
-}
-
-func Uint64ToFloat64(v uint64) float64 {
-	return math.Float64frombits(v)
-}
-
 func BoolToInt32(v bool) int32 {
 	if v {
 		return 1

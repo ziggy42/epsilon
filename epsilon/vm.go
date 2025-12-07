@@ -17,6 +17,7 @@ package epsilon
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 var (
@@ -369,13 +370,13 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	case MemoryGrow:
 		vm.handleMemoryGrow(instruction)
 	case I32Const:
-		vm.stack.Push(Uint64ToInt32(instruction.Immediates[0]))
+		vm.stack.Push(int32(instruction.Immediates[0]))
 	case I64Const:
-		vm.stack.Push(Uint64ToInt64(instruction.Immediates[0]))
+		vm.stack.Push(int64(instruction.Immediates[0]))
 	case F32Const:
-		vm.stack.Push(Uint64ToFloat32(instruction.Immediates[0]))
+		vm.stack.Push(math.Float32frombits(uint32(instruction.Immediates[0])))
 	case F64Const:
-		vm.stack.Push(Uint64ToFloat64(instruction.Immediates[0]))
+		vm.stack.Push(math.Float64frombits(instruction.Immediates[0]))
 	case I32Eqz:
 		handleUnaryBool(vm, vm.stack.PopInt32, EqualZero)
 	case I32Eq:
