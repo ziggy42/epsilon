@@ -41,20 +41,20 @@ const (
 // in between Decode calls since their values will be corrupted.
 var immediatesBuffer []uint64 = make([]uint64, 16)
 
-type Decoder struct {
-	Code []byte
-	Pc   uint
+type decoder struct {
+	code []byte
+	pc   uint
 }
 
-func NewDecoder(code []byte) *Decoder {
-	return &Decoder{Code: code, Pc: 0}
+func newDecoder(code []byte) *decoder {
+	return &decoder{code: code, pc: 0}
 }
 
-func (d *Decoder) HasMore() bool {
-	return d.Pc < uint(len(d.Code))
+func (d *decoder) hasMore() bool {
+	return d.pc < uint(len(d.code))
 }
 
-func (d *Decoder) Decode() (Instruction, error) {
+func (d *decoder) decode() (Instruction, error) {
 	opcode, err := d.readOpcode()
 	if err != nil {
 		return Instruction{}, err
@@ -66,7 +66,7 @@ func (d *Decoder) Decode() (Instruction, error) {
 	return Instruction{Opcode: opcode, Immediates: immediates}, nil
 }
 
-func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
+func (d *decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 	switch opcode {
 	case Block, Loop, If:
 		immediate, err := d.readBlockType()
@@ -268,7 +268,7 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 }
 
 // readOpcode reads the next Opcode from the byte stream.
-func (d *Decoder) readOpcode() (Opcode, error) {
+func (d *decoder) readOpcode() (Opcode, error) {
 	opcode, err := d.readByte()
 	if err != nil {
 		return 0, err
@@ -300,7 +300,7 @@ func (d *Decoder) readOpcode() (Opcode, error) {
 	return Opcode(compositeOpcode), nil
 }
 
-func (d *Decoder) readImmediateVector() ([]uint64, error) {
+func (d *decoder) readImmediateVector() ([]uint64, error) {
 	size, err := d.readUint32()
 	if err != nil {
 		return nil, err
@@ -323,7 +323,7 @@ func (d *Decoder) readImmediateVector() ([]uint64, error) {
 	return immediates, nil
 }
 
-func (d *Decoder) readFloat32() (uint64, error) {
+func (d *decoder) readFloat32() (uint64, error) {
 	bytes, err := d.readBytes(4)
 	if err != nil {
 		return 0, err
@@ -331,7 +331,7 @@ func (d *Decoder) readFloat32() (uint64, error) {
 	return uint64(binary.LittleEndian.Uint32(bytes)), nil
 }
 
-func (d *Decoder) readFloat64() (uint64, error) {
+func (d *decoder) readFloat64() (uint64, error) {
 	bytes, err := d.readBytes(8)
 	if err != nil {
 		return 0, err
@@ -339,7 +339,7 @@ func (d *Decoder) readFloat64() (uint64, error) {
 	return binary.LittleEndian.Uint64(bytes), nil
 }
 
-func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
+func (d *decoder) readMemArg() (uint64, uint64, uint64, error) {
 	align, err := d.readUint32()
 	if err != nil {
 		return 0, 0, 0, err
@@ -369,7 +369,7 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 	return align, memoryIndex, offset, nil
 }
 
-func (d *Decoder) readBlockType() (uint64, error) {
+func (d *decoder) readBlockType() (uint64, error) {
 	blockType, err := d.readSleb128(5)
 	if err != nil {
 		return 0, err
@@ -385,7 +385,7 @@ func (d *Decoder) readBlockType() (uint64, error) {
 }
 
 // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
-func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
+func (d *decoder) readSleb128(maxBytes int) (uint64, error) {
 	var result int64
 	var shift uint
 	var b byte
@@ -438,7 +438,7 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
-func (d *Decoder) readUint32() (uint64, error) {
+func (d *decoder) readUint32() (uint64, error) {
 	val, err := d.readUleb128(5)
 	if err != nil {
 		return 0, err
@@ -449,7 +449,7 @@ func (d *Decoder) readUint32() (uint64, error) {
 	return val, nil
 }
 
-func (d *Decoder) readInt32() (uint64, error) {
+func (d *decoder) readInt32() (uint64, error) {
 	val, err := d.readSleb128(5)
 	if err != nil {
 		return 0, err
@@ -462,7 +462,7 @@ func (d *Decoder) readInt32() (uint64, error) {
 
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
-func (d *Decoder) readUint8() (uint64, error) {
+func (d *decoder) readUint8() (uint64, error) {
 	val, err := d.readUleb128(5)
 	if err != nil {
 		return 0, err
@@ -474,7 +474,7 @@ func (d *Decoder) readUint8() (uint64, error) {
 }
 
 // readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
+func (d *decoder) readUleb128(maxBytes int) (uint64, error) {
 	var result uint64
 	var shift uint
 	bytesRead := 0
@@ -501,31 +501,31 @@ func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
 	}
 }
 
-func (d *Decoder) readByte() (byte, error) {
-	if !d.HasMore() {
+func (d *decoder) readByte() (byte, error) {
+	if !d.hasMore() {
 		return 0, io.EOF
 	}
-	b := d.Code[d.Pc]
-	d.Pc++
+	b := d.code[d.pc]
+	d.pc++
 	return b, nil
 }
 
-func (d *Decoder) readBytes(n uint) ([]byte, error) {
-	if d.Pc+n > uint(len(d.Code)) {
+func (d *decoder) readBytes(n uint) ([]byte, error) {
+	if d.pc+n > uint(len(d.code)) {
 		return nil, io.EOF
 	}
-	bytes := d.Code[d.Pc : d.Pc+n]
-	d.Pc += n
+	bytes := d.code[d.pc : d.pc+n]
+	d.pc += n
 	return bytes, nil
 }
 
-// DecodeUntilMatchingEnd continues decoding instructions until the matching
+// decodeUntilMatchingEnd continues decoding instructions until the matching
 // 'end' of the current block is found. The next instruction to be decoded will
 // be the one AFTER the 'end' instruction.
-func (d *Decoder) DecodeUntilMatchingEnd() error {
+func (d *decoder) decodeUntilMatchingEnd() error {
 	nesting := 1
 	for nesting > 0 {
-		instruction, err := d.Decode()
+		instruction, err := d.decode()
 		if err != nil {
 			return err
 		}
@@ -540,17 +540,17 @@ func (d *Decoder) DecodeUntilMatchingEnd() error {
 	return nil
 }
 
-// DecodeUntilMatchingElseOrEnd continues decoding instructions until the
+// decodeUntilMatchingElseOrEnd continues decoding instructions until the
 // matching 'else' or 'end' of the current block is found. It returns the opcode
 // found (either Else or End). The next instruction to be decoded will be the
 // found instruction itself.
-func (d *Decoder) DecodeUntilMatchingElseOrEnd() (Opcode, error) {
+func (d *decoder) decodeUntilMatchingElseOrEnd() (Opcode, error) {
 	nesting := 1
 	var lastPc uint
 	var lastOpcode Opcode
 	for nesting > 0 {
-		lastPc = d.Pc
-		instruction, err := d.Decode()
+		lastPc = d.pc
+		instruction, err := d.decode()
 		if err != nil {
 			return 0, err
 		}
@@ -569,6 +569,6 @@ func (d *Decoder) DecodeUntilMatchingElseOrEnd() (Opcode, error) {
 		}
 	}
 	// We rewind the PC to the last instruction parsed.
-	d.Pc = lastPc
+	d.pc = lastPc
 	return lastOpcode, nil
 }

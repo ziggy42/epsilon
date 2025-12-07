@@ -30,7 +30,7 @@ var (
 const maxCallStackDepth = 1000
 
 type callFrame struct {
-	decoder      *Decoder
+	decoder      *decoder
 	controlStack []*controlFrame
 	locals       []any
 	function     *WasmFunction
@@ -226,7 +226,7 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	}
 
 	callFrame := &callFrame{
-		decoder: NewDecoder(function.Code.Body),
+		decoder: newDecoder(function.Code.Body),
 		controlStack: []*controlFrame{{
 			opcode:         Block,
 			continuationPc: uint(len(function.Code.Body)),
@@ -239,8 +239,8 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	}
 	vm.callStack = append(vm.callStack, callFrame)
 
-	for callFrame.decoder.HasMore() {
-		instruction, err := callFrame.decoder.Decode()
+	for callFrame.decoder.hasMore() {
+		instruction, err := callFrame.decoder.decode()
 		if err != nil {
 			return nil, err
 		}
@@ -1152,7 +1152,7 @@ func (vm *VM) currentModuleInstance() *ModuleInstance {
 
 func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
 	callFrame := vm.currentCallFrame()
-	originalPc := callFrame.decoder.Pc
+	originalPc := callFrame.decoder.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
 	frame := &controlFrame{
 		opcode:      opcode,
@@ -1169,13 +1169,13 @@ func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
 			frame.continuationPc = cachedPc
 		} else {
 			// Cache miss: we need to scan forward to find the matching 'end'.
-			if err := callFrame.decoder.DecodeUntilMatchingEnd(); err != nil {
+			if err := callFrame.decoder.decodeUntilMatchingEnd(); err != nil {
 				return err
 			}
 
-			callFrame.function.JumpCache[originalPc] = callFrame.decoder.Pc
-			frame.continuationPc = callFrame.decoder.Pc
-			callFrame.decoder.Pc = originalPc
+			callFrame.function.JumpCache[originalPc] = callFrame.decoder.pc
+			frame.continuationPc = callFrame.decoder.pc
+			callFrame.decoder.pc = originalPc
 		}
 	}
 
@@ -1191,7 +1191,7 @@ func (vm *VM) handleStructured(instruction Instruction) error {
 func (vm *VM) handleIf(instruction Instruction) error {
 	frame := vm.currentCallFrame()
 	blockType := int32(instruction.Immediates[0])
-	originalPc := frame.decoder.Pc
+	originalPc := frame.decoder.pc
 
 	condition := vm.stack.PopInt32()
 
@@ -1205,12 +1205,12 @@ func (vm *VM) handleIf(instruction Instruction) error {
 
 	// We need to jump to the 'else' or 'end'.
 	if elsePc, ok := frame.function.JumpElseCache[originalPc]; ok {
-		frame.decoder.Pc = elsePc
+		frame.decoder.pc = elsePc
 		return nil
 	}
 
 	// Cache miss, we need to find the matching Else or End.
-	matchingOpcode, err := frame.decoder.DecodeUntilMatchingElseOrEnd()
+	matchingOpcode, err := frame.decoder.decodeUntilMatchingElseOrEnd()
 	if err != nil {
 		return err
 	}
@@ -1218,12 +1218,12 @@ func (vm *VM) handleIf(instruction Instruction) error {
 	if matchingOpcode == Else {
 		// We need to consume the Else instruction and jump to the next "actual"
 		// instruction after it.
-		if _, err := frame.decoder.Decode(); err != nil {
+		if _, err := frame.decoder.decode(); err != nil {
 			return err
 		}
 	}
 
-	frame.function.JumpElseCache[originalPc] = frame.decoder.Pc
+	frame.function.JumpElseCache[originalPc] = frame.decoder.pc
 	return nil
 }
 
@@ -1233,7 +1233,7 @@ func (vm *VM) handleElse() {
 	// executing the 'then' block of an 'if' statement. We need to jump to the
 	// 'end' of the 'if' block, skipping the 'else' block.
 	ifFrame := vm.popControlFrame()
-	callFrame.decoder.Pc = ifFrame.continuationPc
+	callFrame.decoder.pc = ifFrame.continuationPc
 }
 
 func (vm *VM) handleEnd() {
@@ -1287,7 +1287,7 @@ func (vm *VM) brToLabel(labelIndex uint32) {
 		vm.pushControlFrame(targetFrame)
 	}
 
-	callFrame.decoder.Pc = targetFrame.continuationPc
+	callFrame.decoder.pc = targetFrame.continuationPc
 }
 
 func (vm *VM) handleCall(instruction Instruction) error {

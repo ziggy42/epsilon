@@ -689,18 +689,18 @@ func (p *parser) parseExpression() ([]byte, error) {
 
 		// Create a decoder for the bytes we have so far.
 		code := buf.Bytes()
-		decoder := NewDecoder(code)
+		decoder := newDecoder(code)
 
 		// Try to decode instructions.
-		for decoder.HasMore() {
+		for decoder.hasMore() {
 			// If the next byte is the end opcode, we are done.
-			if Opcode(code[decoder.Pc]) == End {
+			if Opcode(code[decoder.pc]) == End {
 				// The expression is the content of the buffer *before* the End opcode.
-				return code[:decoder.Pc], nil
+				return code[:decoder.pc], nil
 			}
 
 			// Try to decode one instruction.
-			_, err := decoder.Decode()
+			_, err := decoder.decode()
 			if err != nil {
 				// Decoding failed. This is expected if we are in the middle of an
 				// immediate. We break the inner loop and read more bytes.

@@ -307,9 +307,9 @@ func (v *validator) validateFunction(function *Function) error {
 
 	v.pushControlFrame(Block, []ValueType{}, functionType.ResultTypes)
 
-	decoder := NewDecoder(function.Body)
-	for decoder.HasMore() {
-		instruction, err := decoder.Decode()
+	decoder := newDecoder(function.Body)
+	for decoder.hasMore() {
+		instruction, err := decoder.decode()
 		if err != nil {
 			return err
 		}
@@ -343,9 +343,9 @@ func (v *validator) validateConstExpression(
 
 	v.pushControlFrame(Block, []ValueType{}, []ValueType{expectedReturnType})
 
-	decoder := NewDecoder(data)
-	for decoder.HasMore() {
-		instruction, err := decoder.Decode()
+	decoder := newDecoder(data)
+	for decoder.hasMore() {
+		instruction, err := decoder.decode()
 		if err != nil {
 			return err
 		}
