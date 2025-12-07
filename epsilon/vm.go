@@ -210,7 +210,7 @@ func (vm *vm) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 
 	locals := vm.stack.popN(len(function.Type.ParamTypes))
 	for _, local := range function.Code.Locals {
-		locals = append(locals, DefaultValueForType(local))
+		locals = append(locals, defaultValue(local))
 	}
 
 	callFrame := &callFrame{
@@ -1911,6 +1911,26 @@ func toStoreFuncIndexes(
 		storeIndices[i] = int32(moduleInstance.FuncAddrs[localIndex])
 	}
 	return storeIndices
+}
+
+func defaultValue(vt ValueType) any {
+	switch vt {
+	case I32:
+		return int32(0)
+	case I64:
+		return int64(0)
+	case F32:
+		return float32(0)
+	case F64:
+		return float64(0)
+	case V128:
+		return V128Value{}
+	case FuncRefType, ExternRefType:
+		return NullVal
+	default:
+		// Should ideally not be reached with a valid module.
+		return nil
+	}
 }
 
 func (vm *vm) getFunction(localIndex uint32) FunctionInstance {
