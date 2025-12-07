@@ -221,21 +221,19 @@ func shrU64(a, b int64) int64 {
 }
 
 func rotl32(a, b int32) int32 {
-	return int32(bits.RotateLeft32(uint32(a), int(uint32(b)%32)))
+	return int32(bits.RotateLeft32(uint32(a), int(b)))
 }
 
 func rotr32(a, b int32) int32 {
-	shiftAmount := uint32(b) % 32
-	return int32(bits.RotateLeft32(uint32(a), int(32-shiftAmount)))
+	return int32(bits.RotateLeft32(uint32(a), -int(b)))
 }
 
 func rotl64(a, b int64) int64 {
-	return int64(bits.RotateLeft64(uint64(a), int(uint64(b)%64)))
+	return int64(bits.RotateLeft64(uint64(a), int(b)))
 }
 
 func rotr64(a, b int64) int64 {
-	shiftAmount := uint64(b) % 64
-	return int64(bits.RotateLeft64(uint64(a), int(64-shiftAmount)))
+	return int64(bits.RotateLeft64(uint64(a), -int(b)))
 }
 
 func clz32(a int32) int32 {
@@ -292,16 +290,10 @@ func sqrt[T wasmFloat](a T) T {
 }
 
 func wasmMin[T wasmFloat](a, b T) T {
-	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
-		return T(math.NaN())
-	}
 	return min(a, b)
 }
 
 func wasmMax[T wasmFloat](a, b T) T {
-	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
-		return T(math.NaN())
-	}
 	return max(a, b)
 }
 
