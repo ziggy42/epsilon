@@ -64,6 +64,23 @@ type V128Value struct {
 	Low, High uint64
 }
 
+type TableType struct {
+	ReferenceType ReferenceType
+	Limits        Limits
+}
+
+type MemoryType struct {
+	Limits Limits
+}
+
+// GlobalType defines the type of a global variable, which includes its value
+// type and whether it is mutable.
+// See https://webassembly.github.io/spec/core/syntax/modules.html#globals
+type GlobalType struct {
+	ValueType ValueType
+	IsMutable bool
+}
+
 // Limits define min/max constraints for tables and memories.
 // See https://webassembly.github.io/spec/core/binary/types.html#limits
 type Limits struct {

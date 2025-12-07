@@ -43,7 +43,7 @@ func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
 
 // GetMemory returns an exported memory by name.
 func (m *ModuleInstance) GetMemory(name string) (*Memory, error) {
-	export, err := getExport(m, name, MemoryExportKind)
+	export, err := getExport(m, name, memoryExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (m *ModuleInstance) GetMemory(name string) (*Memory, error) {
 
 // GetTable returns an exported table by name.
 func (m *ModuleInstance) GetTable(name string) (*Table, error) {
-	export, err := getExport(m, name, TableExportKind)
+	export, err := getExport(m, name, tableExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (m *ModuleInstance) GetTable(name string) (*Table, error) {
 
 // GetGlobal returns the value of an exported global by name.
 func (m *ModuleInstance) GetGlobal(name string) (any, error) {
-	export, err := getExport(m, name, GlobalExportKind)
+	export, err := getExport(m, name, globalExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (m *ModuleInstance) GetGlobal(name string) (any, error) {
 
 // GetFunction returns an exported function by name.
 func (m *ModuleInstance) GetFunction(name string) (FunctionInstance, error) {
-	export, err := getExport(m, name, FunctionExportKind)
+	export, err := getExport(m, name, functionExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -85,27 +85,27 @@ type FunctionInstance interface {
 type WasmFunction struct {
 	Type   FunctionType
 	Module *ModuleInstance
-	Code   Function
+	Code   function
 	// We cache the continuation pc for each block-like opcde we encounter so we
 	// can compute it only once. The key is the pc of the first instruction inside
 	// the block.
-	// These caches are stored in a WasmFunction and not in e.g. a CallFrame so
+	// These caches are stored in a WasmFunction and not in e.g. a callFrame so
 	// that multiple invocation of the same WasmFunction share the same caches.
-	JumpCache     map[uint]uint
-	JumpElseCache map[uint]uint
+	jumpCache     map[uint]uint
+	jumpElseCache map[uint]uint
 }
 
 func NewWasmFunction(
 	funType FunctionType,
 	module *ModuleInstance,
-	function Function,
+	function function,
 ) *WasmFunction {
 	return &WasmFunction{
 		Type:          funType,
 		Module:        module,
 		Code:          function,
-		JumpCache:     map[uint]uint{},
-		JumpElseCache: map[uint]uint{},
+		jumpCache:     map[uint]uint{},
+		jumpElseCache: map[uint]uint{},
 	}
 }
 
@@ -128,8 +128,8 @@ type Store struct {
 	tables   []*Table
 	memories []*Memory
 	globals  []*Global
-	elements []ElementSegment
-	datas    []DataSegment
+	elements []elementSegment
+	datas    []dataSegment
 }
 
 // Global is a global variable.
@@ -145,7 +145,7 @@ func NewStore() *Store {
 		tables:   []*Table{},
 		memories: []*Memory{},
 		globals:  []*Global{},
-		elements: []ElementSegment{},
-		datas:    []DataSegment{},
+		elements: []elementSegment{},
+		datas:    []dataSegment{},
 	}
 }

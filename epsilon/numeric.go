@@ -34,31 +34,31 @@ const (
 	maxUint64Plus1 = 18446744073709551616.0
 )
 
-type WasmNumber interface {
+type wasmNumber interface {
 	int32 | int64 | float32 | float64
 }
 
-type WasmFloat interface {
+type wasmFloat interface {
 	float32 | float64
 }
 
-type WasmInt interface {
+type wasmInt interface {
 	int32 | int64
 }
 
-func equalZero[T WasmNumber](a T) bool {
+func equalZero[T wasmNumber](a T) bool {
 	return a == 0
 }
 
-func equal[T WasmNumber](a, b T) bool {
+func equal[T wasmNumber](a, b T) bool {
 	return a == b
 }
 
-func notEqual[T WasmNumber](a, b T) bool {
+func notEqual[T wasmNumber](a, b T) bool {
 	return a != b
 }
 
-func lessThan[T WasmNumber](a, b T) bool {
+func lessThan[T wasmNumber](a, b T) bool {
 	return a < b
 }
 
@@ -70,7 +70,7 @@ func lessThanU64(a, b int64) bool {
 	return uint64(a) < uint64(b)
 }
 
-func lessOrEqual[T WasmNumber](a, b T) bool {
+func lessOrEqual[T wasmNumber](a, b T) bool {
 	return a <= b
 }
 
@@ -82,7 +82,7 @@ func lessOrEqualU64(a, b int64) bool {
 	return uint64(a) <= uint64(b)
 }
 
-func greaterThan[T WasmNumber](a, b T) bool {
+func greaterThan[T wasmNumber](a, b T) bool {
 	return a > b
 }
 
@@ -94,7 +94,7 @@ func greaterThanU64(a, b int64) bool {
 	return uint64(a) > uint64(b)
 }
 
-func greaterOrEqual[T WasmNumber](a, b T) bool {
+func greaterOrEqual[T wasmNumber](a, b T) bool {
 	return a >= b
 }
 
@@ -106,19 +106,19 @@ func greaterOrEqualU64(a, b int64) bool {
 	return uint64(a) >= uint64(b)
 }
 
-func add[T WasmNumber](a, b T) T {
+func add[T wasmNumber](a, b T) T {
 	return a + b
 }
 
-func sub[T WasmNumber](a, b T) T {
+func sub[T wasmNumber](a, b T) T {
 	return a - b
 }
 
-func mul[T WasmNumber](a, b T) T {
+func mul[T wasmNumber](a, b T) T {
 	return a * b
 }
 
-func div[T WasmFloat](a, b T) T {
+func div[T wasmFloat](a, b T) T {
 	return a / b
 }
 
@@ -184,15 +184,15 @@ func remU64(a, b int64) (int64, error) {
 	return int64(uint64(a) % uint64(b)), nil
 }
 
-func and[T WasmInt](a, b T) T {
+func and[T wasmInt](a, b T) T {
 	return a & b
 }
 
-func or[T WasmInt](a, b T) T {
+func or[T wasmInt](a, b T) T {
 	return a | b
 }
 
-func xor[T WasmInt](a, b T) T {
+func xor[T wasmInt](a, b T) T {
 	return a ^ b
 }
 
@@ -262,50 +262,50 @@ func popcnt64(a int64) int64 {
 	return int64(bits.OnesCount64(uint64(a)))
 }
 
-func abs[T WasmFloat](a T) T {
+func abs[T wasmFloat](a T) T {
 	return T(math.Abs(float64(a)))
 }
 
-func neg[T WasmFloat](a T) T {
+func neg[T wasmFloat](a T) T {
 	return -a
 }
 
-func ceil[T WasmFloat](a T) T {
+func ceil[T wasmFloat](a T) T {
 	return T(math.Ceil(float64(a)))
 }
 
-func floor[T WasmFloat](a T) T {
+func floor[T wasmFloat](a T) T {
 	return T(math.Floor(float64(a)))
 }
 
-func trunc[T WasmFloat](a T) T {
+func trunc[T wasmFloat](a T) T {
 	return T(math.Trunc(float64(a)))
 }
 
-func nearest[T WasmFloat](a T) T {
+func nearest[T wasmFloat](a T) T {
 	f64 := float64(a)
 	return T(math.Copysign(math.RoundToEven(f64), f64))
 }
 
-func sqrt[T WasmFloat](a T) T {
+func sqrt[T wasmFloat](a T) T {
 	return T(math.Sqrt(float64(a)))
 }
 
-func wasmMin[T WasmFloat](a, b T) T {
+func wasmMin[T wasmFloat](a, b T) T {
 	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 		return T(math.NaN())
 	}
 	return min(a, b)
 }
 
-func wasmMax[T WasmFloat](a, b T) T {
+func wasmMax[T wasmFloat](a, b T) T {
 	if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
 		return T(math.NaN())
 	}
 	return max(a, b)
 }
 
-func copysign[T WasmFloat](a, b T) T {
+func copysign[T wasmFloat](a, b T) T {
 	return T(math.Copysign(float64(a), float64(b)))
 }
 

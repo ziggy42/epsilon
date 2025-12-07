@@ -21,7 +21,7 @@ import (
 	"github.com/ziggy42/epsilon/internal/wabt"
 )
 
-func getModule(wat string) (*Module, error) {
+func getModule(wat string) (*moduleDefinition, error) {
 	wasm, err := wabt.Wat2Wasm(wat)
 	if err != nil {
 		return nil, err

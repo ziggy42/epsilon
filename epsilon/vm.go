@@ -59,7 +59,7 @@ func newVm() *vm {
 }
 
 func (vm *vm) instantiate(
-	module *Module,
+	module *moduleDefinition,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
 	validator := newValidator(vm.features)
@@ -67,7 +67,7 @@ func (vm *vm) instantiate(
 		return nil, err
 	}
 	moduleInstance := &ModuleInstance{
-		Types: module.Types,
+		Types: module.types,
 		vm:    vm,
 	}
 
@@ -82,9 +82,9 @@ func (vm *vm) instantiate(
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
 	}
 
-	for _, function := range module.Funcs {
+	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
-		funType := module.Types[function.TypeIndex]
+		funType := module.types[function.typeIndex]
 		wasmFunc := NewWasmFunction(funType, moduleInstance, function)
 		moduleInstance.FuncAddrs = append(moduleInstance.FuncAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
@@ -96,7 +96,7 @@ func (vm *vm) instantiate(
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
-	for _, tableType := range module.Tables {
+	for _, tableType := range module.tables {
 		storeIndex := uint32(len(vm.store.tables))
 		table := NewTable(tableType)
 		moduleInstance.TableAddrs = append(moduleInstance.TableAddrs, storeIndex)
@@ -109,7 +109,7 @@ func (vm *vm) instantiate(
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
-	for _, memoryType := range module.Memories {
+	for _, memoryType := range module.memories {
 		storeIndex := uint32(len(vm.store.memories))
 		memory := NewMemory(memoryType)
 		moduleInstance.MemAddrs = append(moduleInstance.MemAddrs, storeIndex)
@@ -122,10 +122,10 @@ func (vm *vm) instantiate(
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
-	for _, global := range module.GlobalVariables {
+	for _, global := range module.globalVariables {
 		val, err := vm.invokeInitExpression(
-			global.InitExpression,
-			global.GlobalType.ValueType,
+			global.initExpression,
+			global.globalType.ValueType,
 			moduleInstance,
 		)
 		if err != nil {
@@ -136,20 +136,20 @@ func (vm *vm) instantiate(
 		moduleInstance.GlobalAddrs = append(moduleInstance.GlobalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, &Global{
 			Value:   val,
-			Mutable: global.GlobalType.IsMutable,
-			Type:    global.GlobalType.ValueType,
+			Mutable: global.globalType.IsMutable,
+			Type:    global.globalType.ValueType,
 		})
 	}
 
 	// TODO: elements and data segments should at the very least be copied, but we
 	// should probably have some runtime representation for them.
-	for _, elem := range module.ElementSegments {
+	for _, elem := range module.elementSegments {
 		storeIndex := uint32(len(vm.store.elements))
 		moduleInstance.ElemAddrs = append(moduleInstance.ElemAddrs, storeIndex)
 		vm.store.elements = append(vm.store.elements, elem)
 	}
 
-	for _, data := range module.DataSegments {
+	for _, data := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.DataAddrs = append(moduleInstance.DataAddrs, storeIndex)
 		vm.store.datas = append(vm.store.datas, data)
@@ -163,8 +163,8 @@ func (vm *vm) instantiate(
 		return nil, err
 	}
 
-	if module.StartIndex != nil {
-		storeFunctionIndex := moduleInstance.FuncAddrs[*module.StartIndex]
+	if module.startIndex != nil {
+		storeFunctionIndex := moduleInstance.FuncAddrs[*module.startIndex]
 		function := vm.store.funcs[storeFunctionIndex]
 		if _, err := vm.invokeFunction(function); err != nil {
 			return nil, err
@@ -181,7 +181,7 @@ func (vm *vm) invoke(
 	name string,
 	args ...any,
 ) ([]any, error) {
-	export, err := getExport(module, name, FunctionExportKind)
+	export, err := getExport(module, name, functionExportKind)
 	if err != nil {
 		return nil, err
 	}
@@ -209,15 +209,15 @@ func (vm *vm) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	defer func() { vm.callStackDepth-- }()
 
 	locals := vm.stack.popN(len(function.Type.ParamTypes))
-	for _, local := range function.Code.Locals {
+	for _, local := range function.Code.locals {
 		locals = append(locals, defaultValue(local))
 	}
 
 	callFrame := &callFrame{
-		decoder: newDecoder(function.Code.Body),
+		decoder: newDecoder(function.Code.body),
 		controlStack: []*controlFrame{{
 			opcode:         Block,
-			continuationPc: uint(len(function.Code.Body)),
+			continuationPc: uint(len(function.Code.body)),
 			inputCount:     uint(len(function.Type.ParamTypes)),
 			outputCount:    uint(len(function.Type.ResultTypes)),
 			stackHeight:    vm.stack.size(),
@@ -1153,7 +1153,7 @@ func (vm *vm) pushBlockFrame(opcode Opcode, blockType int32) error {
 	if opcode == Loop {
 		frame.continuationPc = originalPc
 	} else {
-		if cachedPc, ok := callFrame.function.JumpCache[originalPc]; ok {
+		if cachedPc, ok := callFrame.function.jumpCache[originalPc]; ok {
 			frame.continuationPc = cachedPc
 		} else {
 			// Cache miss: we need to scan forward to find the matching 'end'.
@@ -1161,7 +1161,7 @@ func (vm *vm) pushBlockFrame(opcode Opcode, blockType int32) error {
 				return err
 			}
 
-			callFrame.function.JumpCache[originalPc] = callFrame.decoder.pc
+			callFrame.function.jumpCache[originalPc] = callFrame.decoder.pc
 			frame.continuationPc = callFrame.decoder.pc
 			callFrame.decoder.pc = originalPc
 		}
@@ -1192,7 +1192,7 @@ func (vm *vm) handleIf(instruction Instruction) error {
 	}
 
 	// We need to jump to the 'else' or 'end'.
-	if elsePc, ok := frame.function.JumpElseCache[originalPc]; ok {
+	if elsePc, ok := frame.function.jumpElseCache[originalPc]; ok {
 		frame.decoder.pc = elsePc
 		return nil
 	}
@@ -1211,7 +1211,7 @@ func (vm *vm) handleIf(instruction Instruction) error {
 		}
 	}
 
-	frame.function.JumpElseCache[originalPc] = frame.decoder.pc
+	frame.function.jumpElseCache[originalPc] = frame.decoder.pc
 	return nil
 }
 
@@ -1413,12 +1413,12 @@ func (vm *vm) handleMemoryInit(instruction Instruction) error {
 	data := vm.getData(uint32(instruction.Immediates[0]))
 	memory := vm.getMemory(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
-	return memory.Init(uint32(n), uint32(s), uint32(d), data.Content)
+	return memory.Init(uint32(n), uint32(s), uint32(d), data.content)
 }
 
 func (vm *vm) handleDataDrop(instruction Instruction) {
 	dataSegment := vm.getData(uint32(instruction.Immediates[0]))
-	dataSegment.Content = nil
+	dataSegment.content = nil
 }
 
 func (vm *vm) handleMemoryCopy(instruction Instruction) error {
@@ -1439,17 +1439,17 @@ func (vm *vm) handleTableInit(instruction Instruction) error {
 	table := vm.getTable(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
 
-	switch element.Mode {
-	case ActiveElementMode:
+	switch element.mode {
+	case activeElementMode:
 		// Trap if using an active, non-dropped element segment.
 		// A dropped segment has its FuncIndexes slice set to nil.
-		if element.FuncIndexes != nil {
+		if element.functionIndexes != nil {
 			return errTableOutOfBounds
 		}
-		return table.Init(n, d, s, element.FuncIndexes)
-	case PassiveElementMode:
+		return table.Init(n, d, s, element.functionIndexes)
+	case passiveElementMode:
 		moduleInstance := vm.currentModuleInstance()
-		storeIndexes := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
+		storeIndexes := toStoreFuncIndexes(moduleInstance, element.functionIndexes)
 		return table.Init(n, d, s, storeIndexes)
 	default:
 		return errTableOutOfBounds
@@ -1458,8 +1458,8 @@ func (vm *vm) handleTableInit(instruction Instruction) error {
 
 func (vm *vm) handleElemDrop(instruction Instruction) {
 	element := vm.getElement(uint32(instruction.Immediates[0]))
-	element.FuncIndexes = nil
-	element.FuncIndexesExpressions = nil
+	element.functionIndexes = nil
+	element.functionIndexesExpressions = nil
 }
 
 func (vm *vm) handleTableCopy(instruction Instruction) error {
@@ -1501,7 +1501,7 @@ func (vm *vm) handleI8x16Shuffle(instruction Instruction) {
 	vm.stack.push(simdI8x16Shuffle(v1, v2, lanes))
 }
 
-func handleBinary[T WasmNumber | V128Value, R WasmNumber | V128Value](
+func handleBinary[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	vm *vm,
 	pop func() T,
 	op func(a, b T) R,
@@ -1511,7 +1511,7 @@ func handleBinary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	vm.stack.push(op(a, b))
 }
 
-func handleBinarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
+func handleBinarySafe[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	vm *vm,
 	pop func() T,
 	op func(a, b T) (R, error),
@@ -1526,7 +1526,7 @@ func handleBinarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	return nil
 }
 
-func handleBinaryBool[T WasmNumber](
+func handleBinaryBool[T wasmNumber](
 	vm *vm,
 	pop func() T,
 	op func(a, b T) bool,
@@ -1536,7 +1536,7 @@ func handleBinaryBool[T WasmNumber](
 	vm.stack.push(boolToInt32(op(a, b)))
 }
 
-func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
+func handleUnary[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	vm *vm,
 	pop func() T,
 	op func(a T) R,
@@ -1544,7 +1544,7 @@ func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	vm.stack.push(op(pop()))
 }
 
-func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
+func handleUnarySafe[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	vm *vm,
 	pop func() T,
 	op func(a T) (R, error),
@@ -1558,7 +1558,7 @@ func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
 	return nil
 }
 
-func handleUnaryBool[T WasmNumber | V128Value](
+func handleUnaryBool[T wasmNumber | V128Value](
 	vm *vm,
 	pop func() T,
 	op func(a T) bool,
@@ -1579,7 +1579,7 @@ func (vm *vm) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 	vm.stack.push(op(v1, v2, v3))
 }
 
-func handleSimdExtractLane[R WasmNumber](
+func handleSimdExtractLane[R wasmNumber](
 	vm *vm,
 	instruction Instruction,
 	op func(v V128Value, laneIndex uint32) R,
@@ -1676,7 +1676,7 @@ func (vm *vm) handleSimdStoreLane(
 	return memory.Set(offset, uint32(index), laneData)
 }
 
-func handleSimdReplaceLane[T WasmNumber](
+func handleSimdReplaceLane[T wasmNumber](
 	vm *vm,
 	instruction Instruction,
 	pop func() T,
@@ -1704,7 +1704,7 @@ func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 func getExport(
 	module *ModuleInstance,
 	name string,
-	indexType ExportIndexKind,
+	indexType exportIndexKind,
 ) (any, error) {
 	for _, export := range module.Exports {
 		if export.Name != name {
@@ -1712,25 +1712,25 @@ func getExport(
 		}
 
 		switch indexType {
-		case FunctionExportKind:
+		case functionExportKind:
 			function, ok := export.Value.(FunctionInstance)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a function", name)
 			}
 			return function, nil
-		case GlobalExportKind:
+		case globalExportKind:
 			global, ok := export.Value.(*Global)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a global", name)
 			}
 			return global, nil
-		case MemoryExportKind:
+		case memoryExportKind:
 			memory, ok := export.Value.(*Memory)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a memory", name)
 			}
 			return memory, nil
-		case TableExportKind:
+		case tableExportKind:
 			table, ok := export.Value.(*Table)
 			if !ok {
 				return nil, fmt.Errorf("export %s is not a table", name)
@@ -1759,40 +1759,40 @@ func (vm *vm) popControlFrame() *controlFrame {
 }
 
 func (vm *vm) initActiveElements(
-	module *Module,
+	module *moduleDefinition,
 	moduleInstance *ModuleInstance,
 ) error {
-	for _, element := range module.ElementSegments {
-		if element.Mode != ActiveElementMode {
+	for _, element := range module.elementSegments {
+		if element.mode != activeElementMode {
 			continue
 		}
 
-		expression := element.OffsetExpression
+		expression := element.offsetExpression
 		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
 		offset := offsetAny.(int32)
 
-		storeTableIndex := moduleInstance.TableAddrs[element.TableIndex]
+		storeTableIndex := moduleInstance.TableAddrs[element.tableIndex]
 		table := vm.store.tables[storeTableIndex]
 		if offset > int32(table.Size()) {
 			return errTableOutOfBounds
 		}
 
-		if len(element.FuncIndexes) > 0 {
-			indexes := toStoreFuncIndexes(moduleInstance, element.FuncIndexes)
+		if len(element.functionIndexes) > 0 {
+			indexes := toStoreFuncIndexes(moduleInstance, element.functionIndexes)
 			if err := table.InitFromSlice(offset, indexes); err != nil {
 				return err
 			}
 		}
 
-		if len(element.FuncIndexesExpressions) > 0 {
-			values := make([]any, len(element.FuncIndexesExpressions))
-			for i, expr := range element.FuncIndexesExpressions {
+		if len(element.functionIndexesExpressions) > 0 {
+			values := make([]any, len(element.functionIndexesExpressions))
+			for i, expr := range element.functionIndexesExpressions {
 				refAny, err := vm.invokeInitExpression(
 					expr,
-					element.Kind,
+					element.kind,
 					moduleInstance,
 				)
 				if err != nil {
@@ -1811,23 +1811,23 @@ func (vm *vm) initActiveElements(
 }
 
 func (vm *vm) initActiveDatas(
-	module *Module,
+	module *moduleDefinition,
 	moduleInstance *ModuleInstance,
 ) error {
-	for _, segment := range module.DataSegments {
-		if segment.Mode != ActiveDataMode {
+	for _, segment := range module.dataSegments {
+		if segment.mode != activeDataMode {
 			continue
 		}
 
-		expression := segment.OffsetExpression
+		expression := segment.offsetExpression
 		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
 		offset := offsetAny.(int32)
-		storeMemoryIndex := moduleInstance.MemAddrs[segment.MemoryIndex]
+		storeMemoryIndex := moduleInstance.MemAddrs[segment.memoryIndex]
 		memory := vm.store.memories[storeMemoryIndex]
-		if err := memory.Set(uint32(offset), 0, segment.Content); err != nil {
+		if err := memory.Set(uint32(offset), 0, segment.content); err != nil {
 			return err
 		}
 	}
@@ -1836,27 +1836,27 @@ func (vm *vm) initActiveDatas(
 }
 
 func (vm *vm) resolveExports(
-	module *Module,
+	module *moduleDefinition,
 	instance *ModuleInstance,
 ) []ExportInstance {
 	exports := []ExportInstance{}
-	for _, export := range module.Exports {
+	for _, export := range module.exports {
 		var value any
-		switch export.IndexType {
-		case FunctionExportKind:
-			storeIndex := instance.FuncAddrs[export.Index]
+		switch export.indexType {
+		case functionExportKind:
+			storeIndex := instance.FuncAddrs[export.index]
 			value = vm.store.funcs[storeIndex]
-		case GlobalExportKind:
-			storeIndex := instance.GlobalAddrs[export.Index]
+		case globalExportKind:
+			storeIndex := instance.GlobalAddrs[export.index]
 			value = vm.store.globals[storeIndex]
-		case MemoryExportKind:
-			storeIndex := instance.MemAddrs[export.Index]
+		case memoryExportKind:
+			storeIndex := instance.MemAddrs[export.index]
 			value = vm.store.memories[storeIndex]
-		case TableExportKind:
-			storeIndex := instance.TableAddrs[export.Index]
+		case tableExportKind:
+			storeIndex := instance.TableAddrs[export.index]
 			value = vm.store.tables[storeIndex]
 		}
-		exports = append(exports, ExportInstance{Name: export.Name, Value: value})
+		exports = append(exports, ExportInstance{Name: export.name, Value: value})
 	}
 	return exports
 }
@@ -1892,7 +1892,7 @@ func (vm *vm) invokeInitExpression(
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},
 		},
-		Code:   Function{Body: expression},
+		Code:   function{body: expression},
 		Module: moduleInstance,
 	}
 	results, err := vm.invokeWasmFunction(&function)
@@ -1953,12 +1953,12 @@ func (vm *vm) getGlobal(localIndex uint32) *Global {
 	return vm.store.globals[globalIndex]
 }
 
-func (vm *vm) getElement(localIndex uint32) *ElementSegment {
+func (vm *vm) getElement(localIndex uint32) *elementSegment {
 	elementIndex := vm.currentModuleInstance().ElemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 
-func (vm *vm) getData(localIndex uint32) *DataSegment {
+func (vm *vm) getData(localIndex uint32) *dataSegment {
 	dataIndex := vm.currentModuleInstance().DataAddrs[localIndex]
 	return &vm.store.datas[dataIndex]
 }

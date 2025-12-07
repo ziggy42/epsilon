@@ -22,14 +22,14 @@ import (
 	"github.com/ziggy42/epsilon/internal/wabt"
 )
 
-func parseModule(wat string) (Module, error) {
+func parseModule(wat string) (moduleDefinition, error) {
 	wasm, err := wabt.Wat2Wasm(wat)
 	if err != nil {
-		return Module{}, err
+		return moduleDefinition{}, err
 	}
 	module, err := newParser(bytes.NewReader(wasm)).parse()
 	if err != nil {
-		return Module{}, err
+		return moduleDefinition{}, err
 	}
 	return *module, nil
 }
@@ -48,28 +48,28 @@ func TestParseExportedFunction(t *testing.T) {
     local.get 1
     i32.add)
   )`
-	expectedModule := Module{
-		Types: []FunctionType{
+	expectedModule := moduleDefinition{
+		types: []FunctionType{
 			{
 				ParamTypes:  []ValueType{I32, I32},
 				ResultTypes: []ValueType{I32},
 			},
 		},
-		Funcs: []Function{
+		funcs: []function{
 			{
-				TypeIndex: 0,
-				Locals:    []ValueType{},
-				Body:      []byte{byte(LocalGet), 0, byte(LocalGet), 1, byte(I32Add)},
+				typeIndex: 0,
+				locals:    []ValueType{},
+				body:      []byte{byte(LocalGet), 0, byte(LocalGet), 1, byte(I32Add)},
 			},
 		},
-		Exports: []Export{
+		exports: []export{
 			{
-				Name:      "sum",
-				IndexType: FunctionExportKind,
-				Index:     0,
+				name:      "sum",
+				indexType: functionExportKind,
+				index:     0,
 			},
 		},
-		StartIndex: nil,
+		startIndex: nil,
 	}
 
 	module, err := parseModule(wat)
@@ -109,11 +109,11 @@ func TestParseLocals(t *testing.T) {
 	}
 
 	expectedLocals := []ValueType{I32}
-	if !reflect.DeepEqual(expectedLocals, module.Funcs[0].Locals) {
+	if !reflect.DeepEqual(expectedLocals, module.funcs[0].locals) {
 		t.Errorf(
 			"parseModule() result mismatch:\n\nwant: %+v\n\ngot:  %+v",
 			expectedLocals,
-			module.Funcs[0].Locals,
+			module.funcs[0].locals,
 		)
 	}
 }
@@ -139,47 +139,47 @@ func TestParseActiveElement(t *testing.T) {
 		t.Fatalf("parsing module failed: %v", err)
 	}
 
-	if len(module.ElementSegments) != 1 {
-		t.Fatalf("expected 1 element, got %d", len(module.ElementSegments))
+	if len(module.elementSegments) != 1 {
+		t.Fatalf("expected 1 element, got %d", len(module.elementSegments))
 	}
 
-	element := module.ElementSegments[0]
-	if element.Mode != ActiveElementMode {
-		t.Fatalf("expected active element, got mode %d", element.Mode)
+	element := module.elementSegments[0]
+	if element.mode != activeElementMode {
+		t.Fatalf("expected active element, got mode %d", element.mode)
 	}
 
-	if element.TableIndex != 0 {
-		t.Fatalf("expected table index 0, got %d", element.TableIndex)
+	if element.tableIndex != 0 {
+		t.Fatalf("expected table index 0, got %d", element.tableIndex)
 	}
 
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(element.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(element.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset %v, got %v",
 			expectedOffsetExpression,
-			element.OffsetExpression,
+			element.offsetExpression,
 		)
 	}
-	if element.Kind != FuncRefType {
-		t.Fatalf("expected FuncRefType, got %d", element.Kind)
+	if element.kind != FuncRefType {
+		t.Fatalf("expected FuncRefType, got %d", element.kind)
 	}
 
-	if len(element.FuncIndexes) != 2 {
-		t.Fatalf("expected 2 func indexes, got %d", len(element.FuncIndexes))
+	if len(element.functionIndexes) != 2 {
+		t.Fatalf("expected 2 func indexes, got %d", len(element.functionIndexes))
 	}
 
-	if element.FuncIndexes[0] != 0 {
-		t.Fatalf("expected func index 0, got %d", element.FuncIndexes[0])
+	if element.functionIndexes[0] != 0 {
+		t.Fatalf("expected func index 0, got %d", element.functionIndexes[0])
 	}
 
-	if element.FuncIndexes[1] != 1 {
-		t.Fatalf("expected func index 1, got %d", element.FuncIndexes[1])
+	if element.functionIndexes[1] != 1 {
+		t.Fatalf("expected func index 1, got %d", element.functionIndexes[1])
 	}
 
-	if len(element.FuncIndexesExpressions) != 0 {
+	if len(element.functionIndexesExpressions) != 0 {
 		t.Fatalf(
 			"expected 0 func indexes expressions, got %d",
-			len(element.FuncIndexesExpressions),
+			len(element.functionIndexesExpressions),
 		)
 	}
 }
@@ -192,29 +192,29 @@ func TestParseGlobalVariable(t *testing.T) {
 		t.Fatalf("parsing module failed: %v", err)
 	}
 
-	if len(module.GlobalVariables) != 1 {
-		t.Fatalf("expected 1 global variable, got %d", len(module.GlobalVariables))
+	if len(module.globalVariables) != 1 {
+		t.Fatalf("expected 1 global variable, got %d", len(module.globalVariables))
 	}
 
-	globalVar := module.GlobalVariables[0]
-	if !globalVar.GlobalType.IsMutable {
+	globalVar := module.globalVariables[0]
+	if !globalVar.globalType.IsMutable {
 		t.Error("expected global variable to be mutable")
 	}
 
-	if globalVar.GlobalType.ValueType != I32 {
+	if globalVar.globalType.ValueType != I32 {
 		t.Errorf(
 			"expected value type %d, got %d",
 			I32,
-			globalVar.GlobalType.ValueType,
+			globalVar.globalType.ValueType,
 		)
 	}
 
 	expectedInitExpression := []byte{byte(I32Const), 42}
-	if !bytes.Equal(globalVar.InitExpression, expectedInitExpression) {
+	if !bytes.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
 			expectedInitExpression,
-			globalVar.InitExpression,
+			globalVar.initExpression,
 		)
 	}
 }
@@ -227,29 +227,29 @@ func TestParseImmutableGlobalVariable(t *testing.T) {
 		t.Fatalf("parsing module failed: %v", err)
 	}
 
-	if len(module.GlobalVariables) != 1 {
-		t.Fatalf("expected 1 global variable, got %d", len(module.GlobalVariables))
+	if len(module.globalVariables) != 1 {
+		t.Fatalf("expected 1 global variable, got %d", len(module.globalVariables))
 	}
 
-	globalVar := module.GlobalVariables[0]
-	if globalVar.GlobalType.IsMutable {
+	globalVar := module.globalVariables[0]
+	if globalVar.globalType.IsMutable {
 		t.Error("expected global variable to be immutable")
 	}
 
-	if globalVar.GlobalType.ValueType != I32 {
+	if globalVar.globalType.ValueType != I32 {
 		t.Errorf(
 			"expected value type %d, got %d",
 			I32,
-			globalVar.GlobalType.ValueType,
+			globalVar.globalType.ValueType,
 		)
 	}
 
 	expectedInitExpression := []byte{byte(I32Const), 63}
-	if !bytes.Equal(globalVar.InitExpression, expectedInitExpression) {
+	if !bytes.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
 			expectedInitExpression,
-			globalVar.InitExpression,
+			globalVar.initExpression,
 		)
 	}
 }
@@ -262,18 +262,18 @@ func TestParseImportFunction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.Imports) != 1 {
-		t.Fatalf("expected 1 import, got %d", len(module.Imports))
+	if len(module.imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(module.imports))
 	}
-	imp := module.Imports[0]
-	if imp.ModuleName != "console" {
-		t.Errorf("expected module name \"console\", got %s", imp.ModuleName)
+	imp := module.imports[0]
+	if imp.moduleName != "console" {
+		t.Errorf("expected module name \"console\", got %s", imp.moduleName)
 	}
-	if imp.Name != "log" {
-		t.Errorf("expected name \"log\", got %s", imp.Name)
+	if imp.name != "log" {
+		t.Errorf("expected name \"log\", got %s", imp.name)
 	}
-	if imp.Type != FunctionTypeIndex(0) {
-		t.Errorf("expected import type FunctionTypeIndex(0), got %v", imp.Type)
+	if imp.importType != functionTypeIndex(0) {
+		t.Errorf("expected import type FunctionTypeIndex(0), got %v", imp.importType)
 	}
 }
 
@@ -284,19 +284,19 @@ func TestParseImportTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.Imports) != 1 {
-		t.Fatalf("expected 1 import, got %d", len(module.Imports))
+	if len(module.imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(module.imports))
 	}
-	imp := module.Imports[0]
-	if imp.ModuleName != "module" {
-		t.Errorf("expected module name \"module\", got %s", imp.ModuleName)
+	imp := module.imports[0]
+	if imp.moduleName != "module" {
+		t.Errorf("expected module name \"module\", got %s", imp.moduleName)
 	}
-	if imp.Name != "table" {
-		t.Errorf("expected name \"table\", got %s", imp.Name)
+	if imp.name != "table" {
+		t.Errorf("expected name \"table\", got %s", imp.name)
 	}
-	tableType, ok := imp.Type.(TableType)
+	tableType, ok := imp.importType.(TableType)
 	if !ok {
-		t.Fatalf("expected import type TableType, got %T", imp.Type)
+		t.Fatalf("expected import type TableType, got %T", imp.importType)
 	}
 	if tableType.Limits.Min != 1 {
 		t.Errorf("expected limits min 1, got %d", tableType.Limits.Min)
@@ -320,19 +320,19 @@ func TestParseImportMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.Imports) != 1 {
-		t.Fatalf("expected 1 import, got %d", len(module.Imports))
+	if len(module.imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(module.imports))
 	}
-	imp := module.Imports[0]
-	if imp.ModuleName != "module" {
-		t.Errorf("expected module name \"module\", got %s", imp.ModuleName)
+	imp := module.imports[0]
+	if imp.moduleName != "module" {
+		t.Errorf("expected module name \"module\", got %s", imp.moduleName)
 	}
-	if imp.Name != "memory" {
-		t.Errorf("expected name \"memory\", got %s", imp.Name)
+	if imp.name != "memory" {
+		t.Errorf("expected name \"memory\", got %s", imp.name)
 	}
-	memoryType, ok := imp.Type.(MemoryType)
+	memoryType, ok := imp.importType.(MemoryType)
 	if !ok {
-		t.Fatalf("expected import type MemoryType, got %T", imp.Type)
+		t.Fatalf("expected import type MemoryType, got %T", imp.importType)
 	}
 	if memoryType.Limits.Min != 1 {
 		t.Errorf("expected limits min 1, got %d", memoryType.Limits.Min)
@@ -350,19 +350,19 @@ func TestParseImportGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.Imports) != 1 {
-		t.Fatalf("expected 1 import, got %d", len(module.Imports))
+	if len(module.imports) != 1 {
+		t.Fatalf("expected 1 import, got %d", len(module.imports))
 	}
-	imp := module.Imports[0]
-	if imp.ModuleName != "module" {
-		t.Errorf("expected module name \"module\", got %s", imp.ModuleName)
+	imp := module.imports[0]
+	if imp.moduleName != "module" {
+		t.Errorf("expected module name \"module\", got %s", imp.moduleName)
 	}
-	if imp.Name != "global" {
-		t.Errorf("expected name \"global\", got %s", imp.Name)
+	if imp.name != "global" {
+		t.Errorf("expected name \"global\", got %s", imp.name)
 	}
-	globalType, ok := imp.Type.(GlobalType)
+	globalType, ok := imp.importType.(GlobalType)
 	if !ok {
-		t.Fatalf("expected import type GlobalType, got %T", imp.Type)
+		t.Fatalf("expected import type GlobalType, got %T", imp.importType)
 	}
 	if globalType.IsMutable {
 		t.Error("expected global to be immutable")
@@ -380,27 +380,27 @@ func TestParseActiveDataSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.DataSegments) != 1 {
-		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
+	if len(module.dataSegments) != 1 {
+		t.Fatalf("expected 1 data segment, got %d", len(module.dataSegments))
 	}
-	data := module.DataSegments[0]
-	if data.Mode != ActiveDataMode {
-		t.Fatalf("expected active data segment, got mode %d", data.Mode)
+	data := module.dataSegments[0]
+	if data.mode != activeDataMode {
+		t.Fatalf("expected active data segment, got mode %d", data.mode)
 	}
-	if data.MemoryIndex != 0 {
-		t.Fatalf("expected memory index 0, got %d", data.MemoryIndex)
+	if data.memoryIndex != 0 {
+		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(data.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
 			expectedOffsetExpression,
-			data.OffsetExpression,
+			data.offsetExpression,
 		)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(data.Content, expectedContent) {
-		t.Fatalf("expected content %v, got %v", expectedContent, data.Content)
+	if !bytes.Equal(data.content, expectedContent) {
+		t.Fatalf("expected content %v, got %v", expectedContent, data.content)
 	}
 }
 
@@ -412,27 +412,27 @@ func TestParseActiveDataSegmentWithMemoryIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.DataSegments) != 1 {
-		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
+	if len(module.dataSegments) != 1 {
+		t.Fatalf("expected 1 data segment, got %d", len(module.dataSegments))
 	}
-	data := module.DataSegments[0]
-	if data.Mode != ActiveDataMode {
-		t.Fatalf("expected active data segment, got mode %d", data.Mode)
+	data := module.dataSegments[0]
+	if data.mode != activeDataMode {
+		t.Fatalf("expected active data segment, got mode %d", data.mode)
 	}
-	if data.MemoryIndex != 0 {
-		t.Fatalf("expected memory index 0, got %d", data.MemoryIndex)
+	if data.memoryIndex != 0 {
+		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
 	expectedOffsetExpression := []byte{byte(I32Const), 0x0}
-	if !bytes.Equal(data.OffsetExpression, expectedOffsetExpression) {
+	if !bytes.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
 			expectedOffsetExpression,
-			data.OffsetExpression,
+			data.offsetExpression,
 		)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(data.Content, expectedContent) {
-		t.Fatalf("expected content %v, got %v", expectedContent, data.Content)
+	if !bytes.Equal(data.content, expectedContent) {
+		t.Fatalf("expected content %v, got %v", expectedContent, data.content)
 	}
 }
 
@@ -444,19 +444,19 @@ func TestParsePassiveDataSegment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parsing module failed: %v", err)
 	}
-	if len(module.DataSegments) != 1 {
-		t.Fatalf("expected 1 data segment, got %d", len(module.DataSegments))
+	if len(module.dataSegments) != 1 {
+		t.Fatalf("expected 1 data segment, got %d", len(module.dataSegments))
 	}
-	data := module.DataSegments[0]
-	if data.Mode != PassiveDataMode {
-		t.Fatalf("expected passive data segment, got mode %d", data.Mode)
+	data := module.dataSegments[0]
+	if data.mode != passiveDataMode {
+		t.Fatalf("expected passive data segment, got mode %d", data.mode)
 	}
 	expectedContent := []byte{0x01, 0x02}
-	if !bytes.Equal(data.Content, expectedContent) {
+	if !bytes.Equal(data.content, expectedContent) {
 		t.Fatalf(
 			"expected content %v, got %v",
 			expectedContent,
-			data.Content,
+			data.content,
 		)
 	}
 }

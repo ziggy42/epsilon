@@ -102,26 +102,26 @@ func newValidator(features ExperimentalFeatures) *validator {
 	}
 }
 
-func (v *validator) validateModule(module *Module) error {
-	v.typeDefs = module.Types
-	v.funcTypes = make([]FunctionType, 0, len(module.Imports)+len(module.Funcs))
-	v.tableTypes = make([]TableType, 0, len(module.Imports)+len(module.Tables))
-	v.memTypes = make([]MemoryType, 0, len(module.Imports)+len(module.Memories))
+func (v *validator) validateModule(module *moduleDefinition) error {
+	v.typeDefs = module.types
+	v.funcTypes = make([]FunctionType, 0, len(module.imports)+len(module.funcs))
+	v.tableTypes = make([]TableType, 0, len(module.imports)+len(module.tables))
+	v.memTypes = make([]MemoryType, 0, len(module.imports)+len(module.memories))
 	v.globalTypes = make(
 		[]GlobalType,
 		0,
-		len(module.Imports)+len(module.GlobalVariables),
+		len(module.imports)+len(module.globalVariables),
 	)
-	v.importedTypes = make([]GlobalType, 0, len(module.Imports))
+	v.importedTypes = make([]GlobalType, 0, len(module.imports))
 
-	for _, imp := range module.Imports {
-		switch t := imp.Type.(type) {
-		case FunctionTypeIndex:
+	for _, imp := range module.imports {
+		switch t := imp.importType.(type) {
+		case functionTypeIndex:
 			if uint32(t) >= uint32(len(v.typeDefs)) {
 				return errTypesDoNotMatch
 			}
 
-			v.funcTypes = append(v.funcTypes, module.Types[t])
+			v.funcTypes = append(v.funcTypes, module.types[t])
 		case TableType:
 			v.tableTypes = append(v.tableTypes, t)
 		case MemoryType:
@@ -132,21 +132,21 @@ func (v *validator) validateModule(module *Module) error {
 		}
 	}
 
-	for _, function := range module.Funcs {
-		if function.TypeIndex >= uint32(len(module.Types)) {
+	for _, function := range module.funcs {
+		if function.typeIndex >= uint32(len(module.types)) {
 			return errFunctionIndexOutOfBounds
 		}
-		v.funcTypes = append(v.funcTypes, module.Types[function.TypeIndex])
+		v.funcTypes = append(v.funcTypes, module.types[function.typeIndex])
 	}
 
-	for _, table := range module.Tables {
+	for _, table := range module.tables {
 		if err := validateLimits(table.Limits, math.MaxUint32); err != nil {
 			return err
 		}
 		v.tableTypes = append(v.tableTypes, table)
 	}
 
-	for _, memoryType := range module.Memories {
+	for _, memoryType := range module.memories {
 		if err := validateLimits(memoryType.Limits, uint32(1)<<16); err != nil {
 			return err
 		}
@@ -157,44 +157,44 @@ func (v *validator) validateModule(module *Module) error {
 		return errMultipleMemoriesNotEnabled
 	}
 
-	for _, globalVariable := range module.GlobalVariables {
+	for _, globalVariable := range module.globalVariables {
 		if err := v.validateGlobal(&globalVariable); err != nil {
 			return err
 		}
-		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
+		v.globalTypes = append(v.globalTypes, globalVariable.globalType)
 	}
 
-	exportNamesSet := make(map[string]struct{}, len(module.Exports))
-	for _, export := range module.Exports {
-		if _, ok := exportNamesSet[export.Name]; ok {
+	exportNamesSet := make(map[string]struct{}, len(module.exports))
+	for _, export := range module.exports {
+		if _, ok := exportNamesSet[export.name]; ok {
 			return errDuplicateExport
 		}
-		exportNamesSet[export.Name] = struct{}{}
+		exportNamesSet[export.name] = struct{}{}
 		if err := v.validateExport(&export); err != nil {
 			return err
 		}
 	}
 
-	if err := v.validateStartIndex(module.StartIndex); err != nil {
+	if err := v.validateStartIndex(module.startIndex); err != nil {
 		return err
 	}
 
-	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
-	for i, elem := range module.ElementSegments {
+	v.elemTypes = make([]ReferenceType, len(module.elementSegments))
+	for i, elem := range module.elementSegments {
 		if err := v.validateElementSegment(&elem); err != nil {
 			return err
 		}
-		v.elemTypes[i] = elem.Kind
+		v.elemTypes[i] = elem.kind
 	}
 
-	v.dataCount = module.DataCount
-	for _, data := range module.DataSegments {
+	v.dataCount = module.dataCount
+	for _, data := range module.dataSegments {
 		if err := v.validateDataSegment(&data); err != nil {
 			return err
 		}
 	}
 
-	for _, function := range module.Funcs {
+	for _, function := range module.funcs {
 		if err := v.validateFunction(&function); err != nil {
 			return err
 		}
@@ -203,29 +203,29 @@ func (v *validator) validateModule(module *Module) error {
 	return nil
 }
 
-func (v *validator) validateGlobal(global *GlobalVariable) error {
-	globalType := global.GlobalType
-	initExpr := global.InitExpression
+func (v *validator) validateGlobal(global *globalVariable) error {
+	globalType := global.globalType
+	initExpr := global.initExpression
 	return v.validateConstExpression(initExpr, globalType.ValueType)
 }
 
-func (v *validator) validateExport(export *Export) error {
-	switch export.IndexType {
-	case FunctionExportKind:
-		if err := v.validateFunctionTypeExists(export.Index); err != nil {
+func (v *validator) validateExport(export *export) error {
+	switch export.indexType {
+	case functionExportKind:
+		if err := v.validateFunctionTypeExists(export.index); err != nil {
 			return err
 		}
-		v.referencedFunctions[export.Index] = true
-	case TableExportKind:
-		if err := v.validateTableExists(export.Index); err != nil {
+		v.referencedFunctions[export.index] = true
+	case tableExportKind:
+		if err := v.validateTableExists(export.index); err != nil {
 			return err
 		}
-	case MemoryExportKind:
-		if err := v.validateMemoryExists(export.Index); err != nil {
+	case memoryExportKind:
+		if err := v.validateMemoryExists(export.index); err != nil {
 			return err
 		}
-	case GlobalExportKind:
-		if err := v.validateGlobalExists(export.Index); err != nil {
+	case globalExportKind:
+		if err := v.validateGlobalExists(export.index); err != nil {
 			return err
 		}
 	}
@@ -251,31 +251,31 @@ func (v *validator) validateStartIndex(index *uint32) error {
 	return nil
 }
 
-func (v *validator) validateElementSegment(elem *ElementSegment) error {
-	if elem.Mode == ActiveElementMode {
-		if err := v.validateTableExists(elem.TableIndex); err != nil {
+func (v *validator) validateElementSegment(elem *elementSegment) error {
+	if elem.mode == activeElementMode {
+		if err := v.validateTableExists(elem.tableIndex); err != nil {
 			return err
 		}
 
-		expression := elem.OffsetExpression
+		expression := elem.offsetExpression
 		if err := v.validateConstExpression(expression, I32); err != nil {
 			return err
 		}
 
-		if v.tableTypes[elem.TableIndex].ReferenceType != elem.Kind {
+		if v.tableTypes[elem.tableIndex].ReferenceType != elem.kind {
 			return errTypesDoNotMatch
 		}
 	}
 
-	for _, expr := range elem.FuncIndexesExpressions {
-		if err := v.validateConstExpression(expr, elem.Kind); err != nil {
+	for _, expr := range elem.functionIndexesExpressions {
+		if err := v.validateConstExpression(expr, elem.kind); err != nil {
 			return err
 		}
 	}
 
-	for _, funcIndex := range elem.FuncIndexes {
+	for _, funcIndex := range elem.functionIndexes {
 		v.referencedFunctions[uint32(funcIndex)] = true
-		if elem.Kind != FuncRefType {
+		if elem.kind != FuncRefType {
 			return errTypesDoNotMatch
 		}
 		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
@@ -285,29 +285,29 @@ func (v *validator) validateElementSegment(elem *ElementSegment) error {
 	return nil
 }
 
-func (v *validator) validateDataSegment(data *DataSegment) error {
-	if data.Mode != ActiveDataMode {
+func (v *validator) validateDataSegment(data *dataSegment) error {
+	if data.mode != activeDataMode {
 		return nil
 	}
-	if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
+	if err := v.validateMemoryExists(data.memoryIndex); err != nil {
 		return err
 	}
-	if err := v.validateConstExpression(data.OffsetExpression, I32); err != nil {
+	if err := v.validateConstExpression(data.offsetExpression, I32); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (v *validator) validateFunction(function *Function) error {
-	functionType := v.typeDefs[function.TypeIndex]
-	v.locals = append(functionType.ParamTypes, function.Locals...)
+func (v *validator) validateFunction(function *function) error {
+	functionType := v.typeDefs[function.typeIndex]
+	v.locals = append(functionType.ParamTypes, function.locals...)
 	v.returnType = functionType.ResultTypes
 	v.valueStack = v.valueStack[:0]
 	v.controlStack = v.controlStack[:0]
 
 	v.pushControlFrame(Block, []ValueType{}, functionType.ResultTypes)
 
-	decoder := newDecoder(function.Body)
+	decoder := newDecoder(function.body)
 	for decoder.hasMore() {
 		instruction, err := decoder.decode()
 		if err != nil {
