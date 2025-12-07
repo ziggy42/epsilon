@@ -36,7 +36,7 @@ func (s *ValueStack) Drop() {
 }
 
 func (s *ValueStack) PopInt32() int32 {
-	return popAs[int32](s)
+	return s.Pop().(int32)
 }
 
 func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
@@ -50,19 +50,19 @@ func (s *ValueStack) Pop3Int32() (int32, int32, int32) {
 }
 
 func (s *ValueStack) PopInt64() int64 {
-	return popAs[int64](s)
+	return s.Pop().(int64)
 }
 
 func (s *ValueStack) PopFloat32() float32 {
-	return popAs[float32](s)
+	return s.Pop().(float32)
 }
 
 func (s *ValueStack) PopFloat64() float64 {
-	return popAs[float64](s)
+	return s.Pop().(float64)
 }
 
 func (s *ValueStack) PopV128() V128Value {
-	return popAs[V128Value](s)
+	return s.Pop().(V128Value)
 }
 
 func (s *ValueStack) Pop() any {
@@ -89,9 +89,4 @@ func (s *ValueStack) Unwind(targetHeight, preserveCount uint) {
 
 func (s *ValueStack) Size() uint {
 	return uint(len(s.data))
-}
-
-func popAs[T any](s *ValueStack) T {
-	val := s.Pop()
-	return val.(T)
 }
