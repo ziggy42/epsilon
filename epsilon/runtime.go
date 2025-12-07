@@ -22,12 +22,12 @@ import (
 // Runtime provides the main API for instantiating and interacting with WASM
 // modules.
 type Runtime struct {
-	vm *VM
+	vm *vm
 }
 
 // NewRuntime creates a new Runtime with default settings.
 func NewRuntime() *Runtime {
-	return &Runtime{vm: NewVM()}
+	return &Runtime{vm: newVm()}
 }
 
 func (r *Runtime) WithFeatures(features ExperimentalFeatures) *Runtime {
@@ -51,7 +51,7 @@ func (r *Runtime) InstantiateModuleWithImports(
 		return nil, err
 	}
 
-	return r.vm.Instantiate(module, imports)
+	return r.vm.instantiate(module, imports)
 }
 
 // InstantiateModuleFromBytes is a convenience method to instantiate

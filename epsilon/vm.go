@@ -45,8 +45,8 @@ type controlFrame struct {
 	stackHeight    uint
 }
 
-// VM is the WebAssembly Virtual Machine.
-type VM struct {
+// vm is the WebAssembly Virtual Machine.
+type vm struct {
 	store          *Store
 	stack          *valueStack
 	callStack      []*callFrame
@@ -54,11 +54,11 @@ type VM struct {
 	features       ExperimentalFeatures
 }
 
-func NewVM() *VM {
-	return &VM{store: NewStore(), stack: newValueStack()}
+func newVm() *vm {
+	return &vm{store: NewStore(), stack: newValueStack()}
 }
 
-func (vm *VM) Instantiate(
+func (vm *vm) instantiate(
 	module *Module,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
@@ -166,7 +166,7 @@ func (vm *VM) Instantiate(
 	if module.StartIndex != nil {
 		storeFunctionIndex := moduleInstance.FuncAddrs[*module.StartIndex]
 		function := vm.store.funcs[storeFunctionIndex]
-		if _, err := vm.invoke(function); err != nil {
+		if _, err := vm.invokeFunction(function); err != nil {
 			return nil, err
 		}
 	}
@@ -176,15 +176,7 @@ func (vm *VM) Instantiate(
 	return moduleInstance, nil
 }
 
-func (vm *VM) Get(module *ModuleInstance, name string) (any, error) {
-	export, err := getExport(module, name, GlobalExportKind)
-	if err != nil {
-		return nil, err
-	}
-	return export.(*Global).Value, nil
-}
-
-func (vm *VM) Invoke(
+func (vm *vm) invoke(
 	module *ModuleInstance,
 	name string,
 	args ...any,
@@ -195,10 +187,10 @@ func (vm *VM) Invoke(
 	}
 
 	vm.stack.pushAll(args)
-	return vm.invoke(export.(FunctionInstance))
+	return vm.invokeFunction(export.(FunctionInstance))
 }
 
-func (vm *VM) invoke(function FunctionInstance) ([]any, error) {
+func (vm *vm) invokeFunction(function FunctionInstance) ([]any, error) {
 	switch f := function.(type) {
 	case *WasmFunction:
 		return vm.invokeWasmFunction(f)
@@ -209,7 +201,7 @@ func (vm *VM) invoke(function FunctionInstance) ([]any, error) {
 	}
 }
 
-func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
+func (vm *vm) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	if vm.callStackDepth >= maxCallStackDepth {
 		return nil, errCallStackExhausted
 	}
@@ -255,7 +247,7 @@ func (vm *VM) invokeWasmFunction(function *WasmFunction) ([]any, error) {
 	return values, nil
 }
 
-func (vm *VM) handleInstruction(instruction Instruction) error {
+func (vm *vm) handleInstruction(instruction Instruction) error {
 	var err error
 	// Using a switch instead of a map of Opcode -> Handler is significantly
 	// faster.
@@ -1138,15 +1130,15 @@ func (vm *VM) handleInstruction(instruction Instruction) error {
 	return err
 }
 
-func (vm *VM) currentCallFrame() *callFrame {
+func (vm *vm) currentCallFrame() *callFrame {
 	return vm.callStack[len(vm.callStack)-1]
 }
 
-func (vm *VM) currentModuleInstance() *ModuleInstance {
+func (vm *vm) currentModuleInstance() *ModuleInstance {
 	return vm.currentCallFrame().function.Module
 }
 
-func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
+func (vm *vm) pushBlockFrame(opcode Opcode, blockType int32) error {
 	callFrame := vm.currentCallFrame()
 	originalPc := callFrame.decoder.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
@@ -1179,12 +1171,12 @@ func (vm *VM) pushBlockFrame(opcode Opcode, blockType int32) error {
 	return nil
 }
 
-func (vm *VM) handleStructured(instruction Instruction) error {
+func (vm *vm) handleStructured(instruction Instruction) error {
 	blockType := int32(instruction.Immediates[0])
 	return vm.pushBlockFrame(instruction.Opcode, blockType)
 }
 
-func (vm *VM) handleIf(instruction Instruction) error {
+func (vm *vm) handleIf(instruction Instruction) error {
 	frame := vm.currentCallFrame()
 	blockType := int32(instruction.Immediates[0])
 	originalPc := frame.decoder.pc
@@ -1223,7 +1215,7 @@ func (vm *VM) handleIf(instruction Instruction) error {
 	return nil
 }
 
-func (vm *VM) handleElse() {
+func (vm *vm) handleElse() {
 	callFrame := vm.currentCallFrame()
 	// When we encounter an 'else' instruction, it means we have just finished
 	// executing the 'then' block of an 'if' statement. We need to jump to the
@@ -1232,17 +1224,17 @@ func (vm *VM) handleElse() {
 	callFrame.decoder.pc = ifFrame.continuationPc
 }
 
-func (vm *VM) handleEnd() {
+func (vm *vm) handleEnd() {
 	frame := vm.popControlFrame()
 	vm.stack.unwind(frame.stackHeight, frame.outputCount)
 }
 
-func (vm *VM) handleBr(instruction Instruction) {
+func (vm *vm) handleBr(instruction Instruction) {
 	labelIndex := uint32(instruction.Immediates[0])
 	vm.brToLabel(labelIndex)
 }
 
-func (vm *VM) handleBrIf(instruction Instruction) {
+func (vm *vm) handleBrIf(instruction Instruction) {
 	labelIndex := uint32(instruction.Immediates[0])
 	val := vm.stack.popInt32()
 	if val == 0 {
@@ -1251,7 +1243,7 @@ func (vm *VM) handleBrIf(instruction Instruction) {
 	vm.brToLabel(labelIndex)
 }
 
-func (vm *VM) handleBrTable(instruction Instruction) {
+func (vm *vm) handleBrTable(instruction Instruction) {
 	immediates := instruction.Immediates
 	table := immediates[:len(immediates)-1]
 	defaultTarget := uint32(immediates[len(immediates)-1])
@@ -1263,7 +1255,7 @@ func (vm *VM) handleBrTable(instruction Instruction) {
 	}
 }
 
-func (vm *VM) brToLabel(labelIndex uint32) {
+func (vm *vm) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
 	var targetFrame *controlFrame
@@ -1286,10 +1278,10 @@ func (vm *VM) brToLabel(labelIndex uint32) {
 	callFrame.decoder.pc = targetFrame.continuationPc
 }
 
-func (vm *VM) handleCall(instruction Instruction) error {
+func (vm *vm) handleCall(instruction Instruction) error {
 	localIndex := uint32(instruction.Immediates[0])
 	function := vm.getFunction(localIndex)
-	res, err := vm.invoke(function)
+	res, err := vm.invokeFunction(function)
 	if err != nil {
 		return err
 	}
@@ -1297,7 +1289,7 @@ func (vm *VM) handleCall(instruction Instruction) error {
 	return nil
 }
 
-func (vm *VM) handleCallIndirect(instruction Instruction) error {
+func (vm *vm) handleCallIndirect(instruction Instruction) error {
 	typeIndex := uint32(instruction.Immediates[0])
 	tableIndex := uint32(instruction.Immediates[1])
 
@@ -1319,7 +1311,7 @@ func (vm *VM) handleCallIndirect(instruction Instruction) error {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 
-	res, err := vm.invoke(function)
+	res, err := vm.invokeFunction(function)
 	if err != nil {
 		return err
 	}
@@ -1327,7 +1319,7 @@ func (vm *VM) handleCallIndirect(instruction Instruction) error {
 	return nil
 }
 
-func (vm *VM) handleSelect() {
+func (vm *vm) handleSelect() {
 	condition := vm.stack.popInt32()
 	val2 := vm.stack.pop()
 	val1 := vm.stack.pop()
@@ -1338,20 +1330,20 @@ func (vm *VM) handleSelect() {
 	}
 }
 
-func (vm *VM) handleLocalGet(instruction Instruction) {
+func (vm *vm) handleLocalGet(instruction Instruction) {
 	callFrame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
 	vm.stack.push(callFrame.locals[localIndex])
 }
 
-func (vm *VM) handleLocalSet(instruction Instruction) {
+func (vm *vm) handleLocalSet(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
 	// We know, due to validation, the top of the stack is always the right type.
 	frame.locals[localIndex] = vm.stack.pop()
 }
 
-func (vm *VM) handleLocalTee(instruction Instruction) {
+func (vm *vm) handleLocalTee(instruction Instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.Immediates[0])
 	// We know, due to validation, the top of the stack is always the right type.
@@ -1360,19 +1352,19 @@ func (vm *VM) handleLocalTee(instruction Instruction) {
 	vm.stack.push(val)
 }
 
-func (vm *VM) handleGlobalGet(instruction Instruction) {
+func (vm *vm) handleGlobalGet(instruction Instruction) {
 	localIndex := uint32(instruction.Immediates[0])
 	global := vm.getGlobal(localIndex)
 	vm.stack.push(global.Value)
 }
 
-func (vm *VM) handleGlobalSet(instruction Instruction) {
+func (vm *vm) handleGlobalSet(instruction Instruction) {
 	localIndex := uint32(instruction.Immediates[0])
 	global := vm.getGlobal(localIndex)
 	global.Value = vm.stack.pop()
 }
 
-func (vm *VM) handleTableGet(instruction Instruction) error {
+func (vm *vm) handleTableGet(instruction Instruction) error {
 	tableIndex := uint32(instruction.Immediates[0])
 	table := vm.getTable(tableIndex)
 	index := vm.stack.popInt32()
@@ -1385,7 +1377,7 @@ func (vm *VM) handleTableGet(instruction Instruction) error {
 	return nil
 }
 
-func (vm *VM) handleTableSet(instruction Instruction) error {
+func (vm *vm) handleTableSet(instruction Instruction) error {
 	tableIndex := uint32(instruction.Immediates[0])
 	table := vm.getTable(tableIndex)
 	reference := vm.stack.pop()
@@ -1393,56 +1385,56 @@ func (vm *VM) handleTableSet(instruction Instruction) error {
 	return table.Set(index, reference)
 }
 
-func (vm *VM) handleMemorySize(instruction Instruction) {
+func (vm *vm) handleMemorySize(instruction Instruction) {
 	memory := vm.getMemory(uint32(instruction.Immediates[0]))
 	vm.stack.push(memory.Size())
 }
 
-func (vm *VM) handleMemoryGrow(instruction Instruction) {
+func (vm *vm) handleMemoryGrow(instruction Instruction) {
 	memory := vm.getMemory(uint32(instruction.Immediates[0]))
 	pages := vm.stack.popInt32()
 	oldSize := memory.Grow(pages)
 	vm.stack.push(oldSize)
 }
 
-func (vm *VM) handleRefFunc(instruction Instruction) {
+func (vm *vm) handleRefFunc(instruction Instruction) {
 	funcIndex := uint32(instruction.Immediates[0])
 	storeIndex := vm.currentModuleInstance().FuncAddrs[funcIndex]
 	vm.stack.push(int32(storeIndex))
 }
 
-func (vm *VM) handleRefIsNull() {
+func (vm *vm) handleRefIsNull() {
 	top := vm.stack.pop()
 	_, topIsNull := top.(Null)
 	vm.stack.push(boolToInt32(topIsNull))
 }
 
-func (vm *VM) handleMemoryInit(instruction Instruction) error {
+func (vm *vm) handleMemoryInit(instruction Instruction) error {
 	data := vm.getData(uint32(instruction.Immediates[0]))
 	memory := vm.getMemory(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
 	return memory.Init(uint32(n), uint32(s), uint32(d), data.Content)
 }
 
-func (vm *VM) handleDataDrop(instruction Instruction) {
+func (vm *vm) handleDataDrop(instruction Instruction) {
 	dataSegment := vm.getData(uint32(instruction.Immediates[0]))
 	dataSegment.Content = nil
 }
 
-func (vm *VM) handleMemoryCopy(instruction Instruction) error {
+func (vm *vm) handleMemoryCopy(instruction Instruction) error {
 	destMemory := vm.getMemory(uint32(instruction.Immediates[0]))
 	srcMemory := vm.getMemory(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
 	return srcMemory.Copy(destMemory, uint32(n), uint32(s), uint32(d))
 }
 
-func (vm *VM) handleMemoryFill(instruction Instruction) error {
+func (vm *vm) handleMemoryFill(instruction Instruction) error {
 	memory := vm.getMemory(uint32(instruction.Immediates[0]))
 	n, val, offset := vm.stack.pop3Int32()
 	return memory.Fill(uint32(n), uint32(offset), byte(val))
 }
 
-func (vm *VM) handleTableInit(instruction Instruction) error {
+func (vm *vm) handleTableInit(instruction Instruction) error {
 	element := vm.getElement(uint32(instruction.Immediates[0]))
 	table := vm.getTable(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
@@ -1464,32 +1456,32 @@ func (vm *VM) handleTableInit(instruction Instruction) error {
 	}
 }
 
-func (vm *VM) handleElemDrop(instruction Instruction) {
+func (vm *vm) handleElemDrop(instruction Instruction) {
 	element := vm.getElement(uint32(instruction.Immediates[0]))
 	element.FuncIndexes = nil
 	element.FuncIndexesExpressions = nil
 }
 
-func (vm *VM) handleTableCopy(instruction Instruction) error {
+func (vm *vm) handleTableCopy(instruction Instruction) error {
 	destTable := vm.getTable(uint32(instruction.Immediates[0]))
 	srcTable := vm.getTable(uint32(instruction.Immediates[1]))
 	n, s, d := vm.stack.pop3Int32()
 	return srcTable.Copy(destTable, n, s, d)
 }
 
-func (vm *VM) handleTableGrow(instruction Instruction) {
+func (vm *vm) handleTableGrow(instruction Instruction) {
 	table := vm.getTable(uint32(instruction.Immediates[0]))
 	n := vm.stack.popInt32()
 	val := vm.stack.pop()
 	vm.stack.push(table.Grow(n, val))
 }
 
-func (vm *VM) handleTableSize(instruction Instruction) {
+func (vm *vm) handleTableSize(instruction Instruction) {
 	table := vm.getTable(uint32(instruction.Immediates[0]))
 	vm.stack.push(table.Size())
 }
 
-func (vm *VM) handleTableFill(instruction Instruction) error {
+func (vm *vm) handleTableFill(instruction Instruction) error {
 	table := vm.getTable(uint32(instruction.Immediates[0]))
 	n := vm.stack.popInt32()
 	val := vm.stack.pop()
@@ -1497,7 +1489,7 @@ func (vm *VM) handleTableFill(instruction Instruction) error {
 	return table.Fill(n, i, val)
 }
 
-func (vm *VM) handleI8x16Shuffle(instruction Instruction) {
+func (vm *vm) handleI8x16Shuffle(instruction Instruction) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
 
@@ -1510,7 +1502,7 @@ func (vm *VM) handleI8x16Shuffle(instruction Instruction) {
 }
 
 func handleBinary[T WasmNumber | V128Value, R WasmNumber | V128Value](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a, b T) R,
 ) {
@@ -1520,7 +1512,7 @@ func handleBinary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 }
 
 func handleBinarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a, b T) (R, error),
 ) error {
@@ -1535,7 +1527,7 @@ func handleBinarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
 }
 
 func handleBinaryBool[T WasmNumber](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a, b T) bool,
 ) {
@@ -1545,7 +1537,7 @@ func handleBinaryBool[T WasmNumber](
 }
 
 func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a T) R,
 ) {
@@ -1553,7 +1545,7 @@ func handleUnary[T WasmNumber | V128Value, R WasmNumber | V128Value](
 }
 
 func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a T) (R, error),
 ) error {
@@ -1567,20 +1559,20 @@ func handleUnarySafe[T WasmNumber | V128Value, R WasmNumber | V128Value](
 }
 
 func handleUnaryBool[T WasmNumber | V128Value](
-	vm *VM,
+	vm *vm,
 	pop func() T,
 	op func(a T) bool,
 ) {
 	vm.stack.push(boolToInt32(op(pop())))
 }
 
-func (vm *VM) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
+func (vm *vm) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
 	shift := vm.stack.popInt32()
 	v := vm.stack.popV128()
 	vm.stack.push(op(v, shift))
 }
 
-func (vm *VM) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
+func (vm *vm) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 	v3 := vm.stack.popV128()
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
@@ -1588,7 +1580,7 @@ func (vm *VM) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 }
 
 func handleSimdExtractLane[R WasmNumber](
-	vm *VM,
+	vm *vm,
 	instruction Instruction,
 	op func(v V128Value, laneIndex uint32) R,
 ) {
@@ -1598,7 +1590,7 @@ func handleSimdExtractLane[R WasmNumber](
 }
 
 func handleStore[T any](
-	vm *VM,
+	vm *vm,
 	instruction Instruction,
 	val T,
 	store func(*Memory, uint32, uint32, T) error,
@@ -1610,7 +1602,7 @@ func handleStore[T any](
 }
 
 func handleLoad[T any, R any](
-	vm *VM,
+	vm *vm,
 	instruction Instruction,
 	load func(*Memory, uint32, uint32) (T, error),
 	convert func(T) R,
@@ -1626,7 +1618,7 @@ func handleLoad[T any, R any](
 	return nil
 }
 
-func (vm *VM) handleLoadV128FromBytes(
+func (vm *vm) handleLoadV128FromBytes(
 	instruction Instruction,
 	fromBytes func(bytes []byte) V128Value,
 	sizeBytes uint32,
@@ -1643,7 +1635,7 @@ func (vm *VM) handleLoadV128FromBytes(
 	return nil
 }
 
-func (vm *VM) handleSimdConst(instruction Instruction) {
+func (vm *vm) handleSimdConst(instruction Instruction) {
 	v := V128Value{
 		Low:  instruction.Immediates[0],
 		High: instruction.Immediates[1],
@@ -1651,7 +1643,7 @@ func (vm *VM) handleSimdConst(instruction Instruction) {
 	vm.stack.push(v)
 }
 
-func (vm *VM) handleSimdLoadLane(
+func (vm *vm) handleSimdLoadLane(
 	instruction Instruction,
 	laneSize uint32,
 ) error {
@@ -1670,7 +1662,7 @@ func (vm *VM) handleSimdLoadLane(
 	return nil
 }
 
-func (vm *VM) handleSimdStoreLane(
+func (vm *vm) handleSimdStoreLane(
 	instruction Instruction,
 	laneSize uint32,
 ) error {
@@ -1685,7 +1677,7 @@ func (vm *VM) handleSimdStoreLane(
 }
 
 func handleSimdReplaceLane[T WasmNumber](
-	vm *VM,
+	vm *vm,
 	instruction Instruction,
 	pop func() T,
 	replaceLane func(V128Value, uint32, T) V128Value,
@@ -1696,7 +1688,7 @@ func handleSimdReplaceLane[T WasmNumber](
 	vm.stack.push(replaceLane(vector, laneIndex, laneValue))
 }
 
-func (vm *VM) getBlockInputOutputCount(blockType int32) (uint, uint) {
+func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	if blockType == -0x40 { // empty block type.
 		return 0, 0
 	}
@@ -1752,12 +1744,12 @@ func getExport(
 	return nil, fmt.Errorf("failed to find export with name: %s", name)
 }
 
-func (vm *VM) pushControlFrame(frame *controlFrame) {
+func (vm *vm) pushControlFrame(frame *controlFrame) {
 	callFrame := vm.currentCallFrame()
 	callFrame.controlStack = append(callFrame.controlStack, frame)
 }
 
-func (vm *VM) popControlFrame() *controlFrame {
+func (vm *vm) popControlFrame() *controlFrame {
 	callFrame := vm.currentCallFrame()
 	// Validation guarantees the control stack is never empty.
 	index := len(callFrame.controlStack) - 1
@@ -1766,7 +1758,7 @@ func (vm *VM) popControlFrame() *controlFrame {
 	return frame
 }
 
-func (vm *VM) initActiveElements(
+func (vm *vm) initActiveElements(
 	module *Module,
 	moduleInstance *ModuleInstance,
 ) error {
@@ -1818,7 +1810,7 @@ func (vm *VM) initActiveElements(
 	return nil
 }
 
-func (vm *VM) initActiveDatas(
+func (vm *vm) initActiveDatas(
 	module *Module,
 	moduleInstance *ModuleInstance,
 ) error {
@@ -1843,7 +1835,7 @@ func (vm *VM) initActiveDatas(
 	return nil
 }
 
-func (vm *VM) resolveExports(
+func (vm *vm) resolveExports(
 	module *Module,
 	instance *ModuleInstance,
 ) []ExportInstance {
@@ -1869,7 +1861,7 @@ func (vm *VM) resolveExports(
 	return exports
 }
 
-func (vm *VM) invokeHostFunction(fun *HostFunction) (res []any, err error) {
+func (vm *vm) invokeHostFunction(fun *HostFunction) (res []any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var panicErr error
@@ -1888,7 +1880,7 @@ func (vm *VM) invokeHostFunction(fun *HostFunction) (res []any, err error) {
 	return res, nil
 }
 
-func (vm *VM) invokeInitExpression(
+func (vm *vm) invokeInitExpression(
 	expression []byte,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
@@ -1921,32 +1913,32 @@ func toStoreFuncIndexes(
 	return storeIndices
 }
 
-func (vm *VM) getFunction(localIndex uint32) FunctionInstance {
+func (vm *vm) getFunction(localIndex uint32) FunctionInstance {
 	functionIndex := vm.currentModuleInstance().FuncAddrs[localIndex]
 	return vm.store.funcs[functionIndex]
 }
 
-func (vm *VM) getTable(localIndex uint32) *Table {
+func (vm *vm) getTable(localIndex uint32) *Table {
 	tableIndex := vm.currentModuleInstance().TableAddrs[localIndex]
 	return vm.store.tables[tableIndex]
 }
 
-func (vm *VM) getMemory(localIndex uint32) *Memory {
+func (vm *vm) getMemory(localIndex uint32) *Memory {
 	memoryIndex := vm.currentModuleInstance().MemAddrs[localIndex]
 	return vm.store.memories[memoryIndex]
 }
 
-func (vm *VM) getGlobal(localIndex uint32) *Global {
+func (vm *vm) getGlobal(localIndex uint32) *Global {
 	globalIndex := vm.currentModuleInstance().GlobalAddrs[localIndex]
 	return vm.store.globals[globalIndex]
 }
 
-func (vm *VM) getElement(localIndex uint32) *ElementSegment {
+func (vm *vm) getElement(localIndex uint32) *ElementSegment {
 	elementIndex := vm.currentModuleInstance().ElemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 
-func (vm *VM) getData(localIndex uint32) *DataSegment {
+func (vm *vm) getData(localIndex uint32) *DataSegment {
 	dataIndex := vm.currentModuleInstance().DataAddrs[localIndex]
 	return &vm.store.datas[dataIndex]
 }

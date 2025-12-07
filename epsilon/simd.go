@@ -467,8 +467,8 @@ func simdI16x8LeU(v1, v2 V128Value) V128Value {
 	})
 }
 
-// simdI16x8GeS performs a signed greater-than-or-equal comparison on each 16-bit
-// lane.
+// simdI16x8GeS performs a signed greater-than-or-equal comparison on each
+// 16-bit lane.
 func simdI16x8GeS(v1, v2 V128Value) V128Value {
 	return binaryOpI16x8(v1, v2, func(a, b int16) int16 {
 		if a >= b {

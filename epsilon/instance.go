@@ -30,7 +30,7 @@ type ModuleInstance struct {
 	ElemAddrs   []uint32
 	DataAddrs   []uint32
 	Exports     []ExportInstance
-	vm          *VM // Internal reference to resolve exports
+	vm          *vm // Internal reference to resolve exports
 }
 
 // Invoke calls an exported function by name with the given arguments.
@@ -38,7 +38,7 @@ type ModuleInstance struct {
 // Args can be int32, int64, float32, or float64. The function returns a slice
 // of results as []any, which can be type-asserted to the appropriate types.
 func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
-	return m.vm.Invoke(m, name, args...)
+	return m.vm.invoke(m, name, args...)
 }
 
 // GetMemory returns an exported memory by name.
