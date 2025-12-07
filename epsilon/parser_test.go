@@ -27,7 +27,7 @@ func parseModule(wat string) (Module, error) {
 	if err != nil {
 		return Module{}, err
 	}
-	module, err := NewParser(bytes.NewReader(wasm)).Parse()
+	module, err := newParser(bytes.NewReader(wasm)).parse()
 	if err != nil {
 		return Module{}, err
 	}

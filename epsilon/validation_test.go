@@ -26,7 +26,7 @@ func getModule(wat string) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewParser(bytes.NewReader(wasm)).Parse()
+	return newParser(bytes.NewReader(wasm)).parse()
 }
 
 func TestInvalidDataUnknownGlobal(t *testing.T) {

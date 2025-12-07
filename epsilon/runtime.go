@@ -47,7 +47,7 @@ func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	module, err := NewParser(wasm).Parse()
+	module, err := newParser(wasm).parse()
 	if err != nil {
 		return nil, err
 	}

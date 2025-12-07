@@ -33,24 +33,24 @@ const (
 	defaultTableIndex    = 0
 )
 
-// SectionId represents the different sections of a WebAssembly module.
+// sectionId represents the different sections of a WebAssembly module.
 // See https://webassembly.github.io/spec/core/binary/modules.html#sections
-type SectionId byte
+type sectionId byte
 
 const (
-	CustomSectionId SectionId = iota
-	TypeSectionId
-	ImportSectionId
-	FunctionSectionId
-	TableSectionId
-	MemorySectionId
-	GlobalSectionId
-	ExportSectionId
-	StartSectionId
-	ElementSectionId
-	CodeSectionId
-	DataSectionId
-	DataCountSectionId
+	customSectionId sectionId = iota
+	typeSectionId
+	importSectionId
+	functionSectionId
+	tableSectionId
+	memorySectionId
+	globalSectionId
+	exportSectionId
+	startSectionId
+	elementSectionId
+	codeSectionId
+	dataSectionId
+	dataCountSectionId
 )
 
 type localEntry struct {
@@ -58,17 +58,17 @@ type localEntry struct {
 	typ   ValueType
 }
 
-// Parser is a parser for WASM modules.
-type Parser struct {
+// parser is a parser for WASM modules.
+type parser struct {
 	reader *bufio.Reader
 }
 
-func NewParser(reader io.Reader) *Parser {
-	return &Parser{reader: bufio.NewReader(reader)}
+func newParser(reader io.Reader) *parser {
+	return &parser{reader: bufio.NewReader(reader)}
 }
 
-// Parse takes a byte slice and returns a Module.
-func (p *Parser) Parse() (*Module, error) {
+// parse takes a byte slice and returns a Module.
+func (p *parser) parse() (*Module, error) {
 	if err := p.parseHeader(); err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func (p *Parser) Parse() (*Module, error) {
 
 	// We initialize lastSection to CustomSectionId since custom sections
 	// can be in any order.
-	lastSection := CustomSectionId
+	lastSection := customSectionId
 
 	for {
 		sectionIdByte, err := p.reader.ReadByte()
@@ -100,11 +100,11 @@ func (p *Parser) Parse() (*Module, error) {
 			return nil, fmt.Errorf("failed to read section ID: %w", err)
 		}
 
-		sectionId := SectionId(sectionIdByte)
+		sectionId := sectionId(sectionIdByte)
 		if err := validateSectionOrder(lastSection, sectionId); err != nil {
 			return nil, err
 		}
-		if sectionId != CustomSectionId {
+		if sectionId != customSectionId {
 			lastSection = sectionId
 		}
 
@@ -113,67 +113,67 @@ func (p *Parser) Parse() (*Module, error) {
 			return nil, fmt.Errorf("failed to read payload length: %w", err)
 		}
 		switch sectionId {
-		case CustomSectionId:
+		case customSectionId:
 			if err := p.parseCustomSection(payloadLen); err != nil {
 				return nil, err
 			}
-		case TypeSectionId:
+		case typeSectionId:
 			types, err = parseVector(p, p.parseFunctionType)
 			if err != nil {
 				return nil, err
 			}
-		case ImportSectionId:
+		case importSectionId:
 			imports, err = parseVector(p, p.parseImport)
 			if err != nil {
 				return nil, err
 			}
-		case FunctionSectionId:
+		case functionSectionId:
 			functionTypeIndexes, err = parseVector(p, p.parseUint32)
 			if err != nil {
 				return nil, err
 			}
-		case TableSectionId:
+		case tableSectionId:
 			tables, err = parseVector(p, p.parseTableType)
 			if err != nil {
 				return nil, err
 			}
-		case MemorySectionId:
+		case memorySectionId:
 			memories, err = parseVector(p, p.parseMemoryType)
 			if err != nil {
 				return nil, err
 			}
-		case GlobalSectionId:
+		case globalSectionId:
 			globals, err = parseVector(p, p.parseGlobalVariable)
 			if err != nil {
 				return nil, err
 			}
-		case ExportSectionId:
+		case exportSectionId:
 			exports, err = parseVector(p, p.parseExport)
 			if err != nil {
 				return nil, err
 			}
-		case StartSectionId:
+		case startSectionId:
 			index, err := p.parseUint32()
 			if err != nil {
 				return nil, err
 			}
 			startIndex = &index
-		case ElementSectionId:
+		case elementSectionId:
 			elementSegments, err = parseVector(p, p.parseElementSegment)
 			if err != nil {
 				return nil, err
 			}
-		case CodeSectionId:
+		case codeSectionId:
 			functions, err = parseVector(p, p.parseFunction)
 			if err != nil {
 				return nil, err
 			}
-		case DataSectionId:
+		case dataSectionId:
 			dataSegments, err = parseVector(p, p.parseDataSegment)
 			if err != nil {
 				return nil, err
 			}
-		case DataCountSectionId:
+		case dataCountSectionId:
 			count, err := p.parseUint64()
 			if err != nil {
 				return nil, err
@@ -212,7 +212,7 @@ func (p *Parser) Parse() (*Module, error) {
 	}, nil
 }
 
-func (p *Parser) parseHeader() error {
+func (p *parser) parseHeader() error {
 	header := make([]byte, 8)
 	if _, err := io.ReadFull(p.reader, header); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -231,7 +231,7 @@ func (p *Parser) parseHeader() error {
 	return nil
 }
 
-func (p *Parser) parseCustomSection(payloadLen uint32) error {
+func (p *parser) parseCustomSection(payloadLen uint32) error {
 	// Custom section is ignored, but we still parse it to return parsing errors
 	// if it's not valid.
 	nameLength, bytesRead, err := p.parseUleb128(5)
@@ -256,7 +256,7 @@ func (p *Parser) parseCustomSection(payloadLen uint32) error {
 	return nil
 }
 
-func (p *Parser) parseFunction() (Function, error) {
+func (p *parser) parseFunction() (Function, error) {
 	size, err := p.parseUint32()
 	if err != nil {
 		return Function{}, fmt.Errorf("failed to read function size: %w", err)
@@ -301,7 +301,7 @@ func (p *Parser) parseFunction() (Function, error) {
 	return Function{Locals: locals, Body: body[:len(body)-1]}, nil
 }
 
-func (p *Parser) parseLocalVariables() (localEntry, error) {
+func (p *parser) parseLocalVariables() (localEntry, error) {
 	count, err := p.parseUint64()
 	if err != nil {
 		return localEntry{}, err
@@ -317,7 +317,7 @@ func (p *Parser) parseLocalVariables() (localEntry, error) {
 	return localEntry{count: count, typ: valueType}, nil
 }
 
-func (p *Parser) parseImport() (Import, error) {
+func (p *parser) parseImport() (Import, error) {
 	moduleName, err := p.parseUtf8String()
 	if err != nil {
 		return Import{}, err
@@ -360,7 +360,7 @@ func (p *Parser) parseImport() (Import, error) {
 	return Import{ModuleName: moduleName, Name: name, Type: importType}, nil
 }
 
-func (p *Parser) parseExport() (Export, error) {
+func (p *parser) parseExport() (Export, error) {
 	name, err := p.parseUtf8String()
 	if err != nil {
 		return Export{}, err
@@ -376,7 +376,7 @@ func (p *Parser) parseExport() (Export, error) {
 	return Export{Name: name, IndexType: ExportIndexKind(b), Index: index}, nil
 }
 
-func (p *Parser) parseDataSegment() (DataSegment, error) {
+func (p *parser) parseDataSegment() (DataSegment, error) {
 	dataMode, err := p.parseUint32()
 	if err != nil {
 		return DataSegment{}, err
@@ -427,7 +427,7 @@ func (p *Parser) parseDataSegment() (DataSegment, error) {
 	}
 }
 
-func (p *Parser) parseFunctionType() (FunctionType, error) {
+func (p *parser) parseFunctionType() (FunctionType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return FunctionType{}, err
@@ -449,7 +449,7 @@ func (p *Parser) parseFunctionType() (FunctionType, error) {
 	return FunctionType{ParamTypes: paramTypes, ResultTypes: resultTypes}, nil
 }
 
-func (p *Parser) parseValueType() (ValueType, error) {
+func (p *parser) parseValueType() (ValueType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return nil, err
@@ -466,7 +466,7 @@ func (p *Parser) parseValueType() (ValueType, error) {
 	}
 }
 
-func (p *Parser) parseTableType() (TableType, error) {
+func (p *parser) parseTableType() (TableType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return TableType{}, err
@@ -478,7 +478,7 @@ func (p *Parser) parseTableType() (TableType, error) {
 	return TableType{ReferenceType: ReferenceType(b), Limits: limits}, nil
 }
 
-func (p *Parser) parseMemoryType() (MemoryType, error) {
+func (p *parser) parseMemoryType() (MemoryType, error) {
 	limits, err := p.parseLimits()
 	if err != nil {
 		return MemoryType{}, err
@@ -486,7 +486,7 @@ func (p *Parser) parseMemoryType() (MemoryType, error) {
 	return MemoryType{Limits: limits}, nil
 }
 
-func (p *Parser) parseGlobalVariable() (GlobalVariable, error) {
+func (p *parser) parseGlobalVariable() (GlobalVariable, error) {
 	globalType, err := p.parseGlobalType()
 	if err != nil {
 		return GlobalVariable{}, err
@@ -498,7 +498,7 @@ func (p *Parser) parseGlobalVariable() (GlobalVariable, error) {
 	return GlobalVariable{GlobalType: globalType, InitExpression: init}, nil
 }
 
-func (p *Parser) parseGlobalType() (GlobalType, error) {
+func (p *parser) parseGlobalType() (GlobalType, error) {
 	valueType, err := p.parseValueType()
 	if err != nil {
 		return GlobalType{}, err
@@ -513,7 +513,7 @@ func (p *Parser) parseGlobalType() (GlobalType, error) {
 	return GlobalType{ValueType: valueType, IsMutable: isMutable == 1}, nil
 }
 
-func (p *Parser) parseElementSegment() (ElementSegment, error) {
+func (p *parser) parseElementSegment() (ElementSegment, error) {
 	flags, err := p.parseUint32()
 	if err != nil {
 		return ElementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
@@ -673,7 +673,7 @@ func (p *Parser) parseElementSegment() (ElementSegment, error) {
 	}
 }
 
-func (p *Parser) parseExpression() ([]byte, error) {
+func (p *parser) parseExpression() ([]byte, error) {
 	// This is a horrible implementation. Basically, we use a decoder instace to
 	// parse the expression. But decoder expects a []byte, which we don't have. So
 	// we create one, adding one byte at a time until the decoder stops failing.
@@ -711,7 +711,7 @@ func (p *Parser) parseExpression() ([]byte, error) {
 	}
 }
 
-func (p *Parser) parseLimits() (Limits, error) {
+func (p *parser) parseLimits() (Limits, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return Limits{}, err
@@ -734,7 +734,7 @@ func (p *Parser) parseLimits() (Limits, error) {
 	}
 }
 
-func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
+func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 	count, err := parser.parseUint32()
 	if err != nil {
 		return nil, err
@@ -750,7 +750,7 @@ func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
 	return items, nil
 }
 
-func (p *Parser) parseUint32() (uint32, error) {
+func (p *parser) parseUint32() (uint32, error) {
 	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
@@ -761,12 +761,12 @@ func (p *Parser) parseUint32() (uint32, error) {
 	return uint32(val), nil
 }
 
-func (p *Parser) parseUint64() (uint64, error) {
+func (p *parser) parseUint64() (uint64, error) {
 	val, _, err := p.parseUleb128(9)
 	return val, err
 }
 
-func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
+func (p *parser) parseUleb128(maxBytes int) (uint64, int, error) {
 	bytesRead := 0
 
 	var value uint64
@@ -791,7 +791,7 @@ func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
 	return value, bytesRead, nil
 }
 
-func (p *Parser) parseUtf8String() (string, error) {
+func (p *parser) parseUtf8String() (string, error) {
 	length, err := p.parseUint32()
 	if err != nil {
 		return "", err
@@ -811,8 +811,8 @@ func uint64SliceToInt32(slice []uint64) []int32 {
 	return result
 }
 
-func validateSectionOrder(last SectionId, current SectionId) error {
-	if current == CustomSectionId {
+func validateSectionOrder(last sectionId, current sectionId) error {
+	if current == customSectionId {
 		// Custom sections can be in any order.
 		return nil
 	}
@@ -827,16 +827,16 @@ func validateSectionOrder(last SectionId, current SectionId) error {
 	return nil
 }
 
-func getSectionOrder(id SectionId) int {
+func getSectionOrder(id sectionId) int {
 	switch id {
-	case DataCountSectionId:
+	case dataCountSectionId:
 		return 10
-	case CodeSectionId:
+	case codeSectionId:
 		return 11
-	case DataSectionId:
+	case dataSectionId:
 		return 12
 	default:
-		if id > DataCountSectionId {
+		if id > dataCountSectionId {
 			return 0
 		}
 		return int(id)
