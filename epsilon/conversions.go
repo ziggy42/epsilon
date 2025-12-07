@@ -84,25 +84,26 @@ func BytesFromFloat64(v float64) []byte {
 	return b
 }
 
-func Uint64ToInt32(v uint64) int32 {
-	return int32(v)
-}
-
-func Uint64ToInt64(v uint64) int64 {
-	return int64(v)
-}
-
-func Uint64ToFloat32(v uint64) float32 {
-	return math.Float32frombits(uint32(v))
-}
-
-func Uint64ToFloat64(v uint64) float64 {
-	return math.Float64frombits(v)
-}
-
 func BoolToInt32(v bool) int32 {
 	if v {
 		return 1
 	}
 	return 0
 }
+
+func U32ToI32(v uint32) int32 { return int32(v) }
+func U64ToI64(v uint64) int64 { return int64(v) }
+
+func SignExtend8To32(v byte) int32    { return int32(int8(v)) }
+func ZeroExtend8To32(v byte) int32    { return int32(v) }
+func SignExtend16To32(v uint16) int32 { return int32(int16(v)) }
+func ZeroExtend16To32(v uint16) int32 { return int32(v) }
+
+func SignExtend8To64(v byte) int64    { return int64(int8(v)) }
+func ZeroExtend8To64(v byte) int64    { return int64(v) }
+func SignExtend16To64(v uint16) int64 { return int64(int16(v)) }
+func ZeroExtend16To64(v uint16) int64 { return int64(v) }
+func SignExtend32To64(v uint32) int64 { return int64(int32(v)) }
+func ZeroExtend32To64(v uint32) int64 { return int64(v) }
+
+func IdentityV128(v V128Value) V128Value { return v }

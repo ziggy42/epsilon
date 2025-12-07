@@ -14,7 +14,10 @@
 
 package epsilon
 
-import "errors"
+import (
+	"encoding/binary"
+	"errors"
+)
 
 const (
 	// pageSize defines the size of a WebAssembly page in bytes (64KiB).
@@ -26,7 +29,6 @@ const (
 var ErrMemoryOutOfBounds = errors.New("out of bounds memory access")
 
 // Memory represents a linear memory instance.
-// https://webassembly.github.io/spec/core/exec/runtime.html#memory-instances
 type Memory struct {
 	Limits Limits
 	data   []byte
@@ -62,70 +64,154 @@ func (m *Memory) Size() int32 {
 	return int32(len(m.data) / pageSize)
 }
 
-// bytesSize returns the size of the memory in bytes.
-func (m *Memory) bytesSize() uint64 {
-	return uint64(len(m.data))
-}
-
-// Set writes the given byte slice into memory starting at the specified index.
-// It returns an ErrOutOfBounds if the write goes beyond the memory bounds.
+// Set writes the given byte slice into memory.
 func (m *Memory) Set(offset, index uint32, values []byte) error {
-	// Perform the addition using uint64 to correctly handle potential overflow.
-	startIndex := uint64(index) + uint64(offset)
-	if startIndex+uint64(len(values)) > m.bytesSize() {
-		return ErrMemoryOutOfBounds
+	dst, err := m.getRange(offset, index, uint32(len(values)))
+	if err != nil {
+		return err
 	}
-	copy(m.data[startIndex:], values)
+	copy(dst, values)
 	return nil
 }
 
-// Get reads data from memory between the start and end indices (exclusive).
-// It returns a copy of the data or an ErrOutOfBounds if the read is invalid.
+// Get reads data from memory.
 func (m *Memory) Get(offset, index, length uint32) ([]byte, error) {
-	// Perform the addition using uint64 to correctly handle potential overflow.
-	startIndex := uint64(index) + uint64(offset)
-	endIndex := startIndex + uint64(length)
-	if endIndex > m.bytesSize() {
-		return nil, ErrMemoryOutOfBounds
-	}
-	return m.data[startIndex:endIndex], nil
+	return m.getRange(offset, index, length)
 }
 
 // Init copies n bytes from a data segment to the memory.
 func (m *Memory) Init(n, srcOffset, destOffset uint32, content []byte) error {
-	if uint64(srcOffset)+uint64(n) > uint64(len(content)) ||
-		uint64(destOffset)+uint64(n) > m.bytesSize() {
+	if uint64(srcOffset)+uint64(n) > uint64(len(content)) {
 		return ErrMemoryOutOfBounds
 	}
-	copy(m.data[destOffset:destOffset+n], content[srcOffset:srcOffset+n])
+	dst, err := m.getRange(destOffset, 0, n)
+	if err != nil {
+		return err
+	}
+	copy(dst, content[srcOffset:srcOffset+n])
 	return nil
 }
 
 // Copy copies n elements from a source memory to a destination memory.
-func (m *Memory) Copy(
-	destMemory *Memory,
-	n, srcOffset, destOffset uint32,
-) error {
-	if uint64(srcOffset)+uint64(n) > m.bytesSize() ||
-		uint64(destOffset)+uint64(n) > destMemory.bytesSize() {
-		return ErrMemoryOutOfBounds
+func (m *Memory) Copy(dest *Memory, n, srcOffset, destOffset uint32) error {
+	src, err := m.getRange(srcOffset, 0, n)
+	if err != nil {
+		return err
 	}
-
-	copy(
-		destMemory.data[destOffset:destOffset+n],
-		m.data[srcOffset:srcOffset+n],
-	)
+	dst, err := dest.getRange(destOffset, 0, n)
+	if err != nil {
+		return err
+	}
+	copy(dst, src)
 	return nil
 }
 
-// Fill sets n elements to a given value, starting from an index.
+// Fill sets n elements to a given value.
 func (m *Memory) Fill(n, offset uint32, val byte) error {
-	if uint64(offset)+uint64(n) > m.bytesSize() {
-		return ErrMemoryOutOfBounds
+	mem, err := m.getRange(offset, 0, n)
+	if err != nil {
+		return err
 	}
-
-	for i := range n {
-		m.data[offset+i] = val
+	for i := range mem {
+		mem[i] = val
 	}
 	return nil
+}
+
+func (m *Memory) LoadByte(offset, index uint32) (byte, error) {
+	addr := uint64(index) + uint64(offset)
+	if addr >= uint64(len(m.data)) {
+		return 0, ErrMemoryOutOfBounds
+	}
+	return m.data[addr], nil
+}
+
+func (m *Memory) LoadUint16(offset, index uint32) (uint16, error) {
+	buf, err := m.getRange(offset, index, 2)
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint16(buf), nil
+}
+
+func (m *Memory) LoadUint32(offset, index uint32) (uint32, error) {
+	buf, err := m.getRange(offset, index, 4)
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(buf), nil
+}
+
+func (m *Memory) LoadUint64(offset, index uint32) (uint64, error) {
+	buf, err := m.getRange(offset, index, 8)
+	if err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint64(buf), nil
+}
+
+func (m *Memory) LoadV128(offset, index uint32) (V128Value, error) {
+	buf, err := m.getRange(offset, index, 16)
+	if err != nil {
+		return V128Value{}, err
+	}
+	return V128Value{
+		Low:  binary.LittleEndian.Uint64(buf[:8]),
+		High: binary.LittleEndian.Uint64(buf[8:]),
+	}, nil
+}
+
+func (m *Memory) StoreByte(offset, index uint32, val byte) error {
+	addr := uint64(index) + uint64(offset)
+	if addr >= uint64(len(m.data)) {
+		return ErrMemoryOutOfBounds
+	}
+	m.data[addr] = val
+	return nil
+}
+
+func (m *Memory) StoreUint16(offset, index uint32, val uint16) error {
+	buf, err := m.getRange(offset, index, 2)
+	if err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint16(buf, val)
+	return nil
+}
+
+func (m *Memory) StoreUint32(offset, index uint32, val uint32) error {
+	buf, err := m.getRange(offset, index, 4)
+	if err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint32(buf, val)
+	return nil
+}
+
+func (m *Memory) StoreUint64(offset, index uint32, val uint64) error {
+	buf, err := m.getRange(offset, index, 8)
+	if err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint64(buf, val)
+	return nil
+}
+
+func (m *Memory) StoreV128(offset, index uint32, val V128Value) error {
+	buf, err := m.getRange(offset, index, 16)
+	if err != nil {
+		return err
+	}
+	binary.LittleEndian.PutUint64(buf[:8], val.Low)
+	binary.LittleEndian.PutUint64(buf[8:], val.High)
+	return nil
+}
+
+func (m *Memory) getRange(offset, index, length uint32) ([]byte, error) {
+	start := uint64(index) + uint64(offset)
+	end := start + uint64(length)
+	if end > uint64(len(m.data)) {
+		return nil, ErrMemoryOutOfBounds
+	}
+	return m.data[start:end], nil
 }
