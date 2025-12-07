@@ -70,11 +70,6 @@ func (s *ValueStack) Pop() any {
 	return element
 }
 
-func (s *ValueStack) PeekN(n uint) []any {
-	start := s.Size() - n
-	return s.data[start:]
-}
-
 func (s *ValueStack) PopValueType(vt ValueType) any {
 	switch vt {
 	case I32:
