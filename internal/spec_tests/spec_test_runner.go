@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -34,58 +35,64 @@ type specTestRunner struct {
 	runtime            *epsilon.Runtime
 	moduleInstanceMap  map[string]*epsilon.ModuleInstance
 	lastModuleInstance *epsilon.ModuleInstance
-	spectestImports    map[string]any
+	spectestImports    map[string]map[string]any
 }
 
 func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
-	limits := epsilon.Limits{Min: 1, Max: &importMemoryLimitMax}
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: limits})
 	tableLimitMax := uint32(20)
-	table := epsilon.NewTable(epsilon.TableType{
-		Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
-		ReferenceType: epsilon.FuncRefType,
-	})
-	spectestImports := map[string]any{
-		"global_i32": int32(666),
-		"global_i64": int64(666),
-		"global_f32": float32(666.6),
-		"global_f64": float64(666.6),
-		"table":      table,
-		"memory":     memory,
-		"print_i32": func(args ...any) []any {
+
+	spectestImports := epsilon.NewImportBuilder().
+		AddGlobal("spectest", "global_i32", int32(666), false, epsilon.I32).
+		AddGlobal("spectest", "global_i64", int64(666), false, epsilon.I64).
+		AddGlobal("spectest", "global_f32", float32(666.6), false, epsilon.F32).
+		AddGlobal("spectest", "global_f64", float64(666.6), false, epsilon.F64).
+		AddTable("spectest", "table", epsilon.NewTable(epsilon.TableType{
+			Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
+			ReferenceType: epsilon.FuncRefType,
+		})).
+		AddMemory(
+			"spectest",
+			"memory",
+			epsilon.NewMemory(
+				epsilon.MemoryType{
+					Limits: epsilon.Limits{Min: 1, Max: &importMemoryLimitMax},
+				},
+			),
+		).
+		AddHostFunc("spectest", "print_i32", func(args ...any) []any {
 			fmt.Printf("%d", args[0].(int32))
 			return nil
-		},
-		"print_i64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i64", func(args ...any) []any {
 			fmt.Printf("%d", args[0].(int64))
 			return nil
-		},
-		"print_f32": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f32", func(args ...any) []any {
 			fmt.Printf("%f", args[0].(float32))
 			return nil
-		},
-		"print_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f64", func(args ...any) []any {
 			fmt.Printf("%f", args[0].(float64))
 			return nil
-		},
-		"print_i32_f32": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i32_f32", func(args ...any) []any {
 			fmt.Printf("%d %f", args[0].(int32), args[1].(float32))
 			return nil
-		},
-		"print_i64_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i64_f64", func(args ...any) []any {
 			fmt.Printf("%d %f", args[0].(int64), args[1].(float64))
 			return nil
-		},
-		"print_f64_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f64_f64", func(args ...any) []any {
 			fmt.Printf("%f %f", args[0].(float64), args[1].(float64))
 			return nil
-		},
-		"print": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print", func(args ...any) []any {
 			fmt.Printf("Print called!")
 			return nil
-		},
-	}
+		}).
+		Build()
 
 	return &specTestRunner{
 		t:                 t,
@@ -146,16 +153,12 @@ func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 
 func (r *specTestRunner) buildImports() map[string]map[string]any {
 	builder := epsilon.NewImportBuilder()
-
-	for name, value := range r.spectestImports {
-		builder.AddHostFunc("spectest", name, value)
-	}
-
 	for regName, moduleInstance := range r.moduleInstanceMap {
 		builder.AddModuleExports(regName, moduleInstance)
 	}
-
-	return builder.Build()
+	imports := builder.Build()
+	maps.Copy(imports, r.spectestImports)
+	return imports
 }
 
 func (r *specTestRunner) handleModule(cmd wabt.Command) {
