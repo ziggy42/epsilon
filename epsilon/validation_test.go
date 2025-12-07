@@ -21,12 +21,12 @@ import (
 	"github.com/ziggy42/epsilon/internal/wabt"
 )
 
-func getModule(wat string) (*Module, error) {
+func getModule(wat string) (*moduleDefinition, error) {
 	wasm, err := wabt.Wat2Wasm(wat)
 	if err != nil {
 		return nil, err
 	}
-	return NewParser(bytes.NewReader(wasm)).Parse()
+	return newParser(bytes.NewReader(wasm)).parse()
 }
 
 func TestInvalidDataUnknownGlobal(t *testing.T) {
@@ -39,7 +39,7 @@ func TestInvalidDataUnknownGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := NewValidator(ExperimentalFeatures{})
+	validator := newValidator(ExperimentalFeatures{})
 
 	err = validator.validateModule(module)
 
@@ -54,7 +54,7 @@ func TestInvalidDataUnknownMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := NewValidator(ExperimentalFeatures{})
+	validator := newValidator(ExperimentalFeatures{})
 
 	err = validator.validateModule(module)
 
@@ -69,7 +69,7 @@ func TestValidDataMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := NewValidator(ExperimentalFeatures{})
+	validator := newValidator(ExperimentalFeatures{})
 
 	err = validator.validateModule(module)
 

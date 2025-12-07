@@ -23,9 +23,9 @@ import (
 )
 
 var (
-	ErrIntRepresentationTooLong = errors.New("integer representation too long")
-	ErrIntegerTooLarge          = errors.New("integer too large")
-	ErrMalformedMemopFlags      = errors.New("malformed memop flags")
+	errIntRepresentationTooLong = errors.New("integer representation too long")
+	errIntegerTooLarge          = errors.New("integer too large")
+	errMalformedMemopFlags      = errors.New("malformed memop flags")
 )
 
 const (
@@ -41,93 +41,93 @@ const (
 // in between Decode calls since their values will be corrupted.
 var immediatesBuffer []uint64 = make([]uint64, 16)
 
-type Decoder struct {
-	Code []byte
-	Pc   uint
+type decoder struct {
+	code []byte
+	pc   uint
 }
 
-func NewDecoder(code []byte) *Decoder {
-	return &Decoder{Code: code, Pc: 0}
+func newDecoder(code []byte) *decoder {
+	return &decoder{code: code, pc: 0}
 }
 
-func (d *Decoder) HasMore() bool {
-	return d.Pc < uint(len(d.Code))
+func (d *decoder) hasMore() bool {
+	return d.pc < uint(len(d.code))
 }
 
-func (d *Decoder) Decode() (Instruction, error) {
+func (d *decoder) decode() (instruction, error) {
 	opcode, err := d.readOpcode()
 	if err != nil {
-		return Instruction{}, err
+		return instruction{}, err
 	}
 	immediates, err := d.readOpcodeImmediates(opcode)
 	if err != nil {
-		return Instruction{}, err
+		return instruction{}, err
 	}
-	return Instruction{Opcode: opcode, Immediates: immediates}, nil
+	return instruction{opcode: opcode, immediates: immediates}, nil
 }
 
-func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
+func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 	switch opcode {
-	case Block, Loop, If:
+	case block, loop, ifOp:
 		immediate, err := d.readBlockType()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case I32Const:
+	case i32Const:
 		immediate, err := d.readInt32()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case Br,
-		BrIf,
-		Call,
-		LocalGet,
-		LocalSet,
-		LocalTee,
-		GlobalGet,
-		GlobalSet,
-		TableGet,
-		TableSet,
-		MemoryFill,
-		DataDrop,
-		ElemDrop,
-		TableGrow,
-		TableSize,
-		TableFill,
-		RefNull,
-		RefFunc,
-		I8x16ExtractLaneS,
-		I8x16ExtractLaneU,
-		I16x8ExtractLaneS,
-		I16x8ExtractLaneU,
-		I32x4ExtractLane,
-		I64x2ExtractLane,
-		F32x4ExtractLane,
-		F64x2ExtractLane,
-		I8x16ReplaceLane,
-		I16x8ReplaceLane,
-		I32x4ReplaceLane,
-		I64x2ReplaceLane,
-		F32x4ReplaceLane,
-		F64x2ReplaceLane:
+	case br,
+		brIf,
+		call,
+		localGet,
+		localSet,
+		localTee,
+		globalGet,
+		globalSet,
+		tableGet,
+		tableSet,
+		memoryFill,
+		dataDrop,
+		elemDrop,
+		tableGrow,
+		tableSize,
+		tableFill,
+		refNull,
+		refFunc,
+		i8x16ExtractLaneS,
+		i8x16ExtractLaneU,
+		i16x8ExtractLaneS,
+		i16x8ExtractLaneU,
+		i32x4ExtractLane,
+		i64x2ExtractLane,
+		f32x4ExtractLane,
+		f64x2ExtractLane,
+		i8x16ReplaceLane,
+		i16x8ReplaceLane,
+		i32x4ReplaceLane,
+		i64x2ReplaceLane,
+		f32x4ReplaceLane,
+		f64x2ReplaceLane:
 		immediate, err := d.readUint32()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case MemorySize, MemoryGrow:
+	case memorySize, memoryGrow:
 		immediate, err := d.readByte()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = uint64(immediate)
 		return immediatesBuffer[:1], nil
-	case BrTable:
+	case brTable:
 		vector, err := d.readImmediateVector()
 		if err != nil {
 			return nil, err
@@ -137,11 +137,11 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 			return nil, err
 		}
 		return append(vector, immediate), nil
-	case CallIndirect,
-		MemoryInit,
-		MemoryCopy,
-		TableInit,
-		TableCopy:
+	case callIndirect,
+		memoryInit,
+		memoryCopy,
+		tableInit,
+		tableCopy:
 		immediate1, err := d.readUint32()
 		if err != nil {
 			return nil, err
@@ -153,43 +153,43 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		immediatesBuffer[0] = immediate1
 		immediatesBuffer[1] = immediate2
 		return immediatesBuffer[:2], nil
-	case I32Load,
-		I64Load,
-		F32Load,
-		F64Load,
-		I32Load8S,
-		I32Load8U,
-		I32Load16S,
-		I32Load16U,
-		I64Load8S,
-		I64Load8U,
-		I64Load16S,
-		I64Load16U,
-		I64Load32S,
-		I64Load32U,
-		I32Store,
-		I64Store,
-		F32Store,
-		F64Store,
-		I32Store8,
-		I32Store16,
-		I64Store8,
-		I64Store16,
-		I64Store32,
-		V128Load,
-		V128Load32Zero,
-		V128Load64Zero,
-		V128Load8Splat,
-		V128Load16Splat,
-		V128Load32Splat,
-		V128Load64Splat,
-		V128Load8x8S,
-		V128Load8x8U,
-		V128Load16x4S,
-		V128Load16x4U,
-		V128Load32x2S,
-		V128Load32x2U,
-		V128Store:
+	case i32Load,
+		i64Load,
+		f32Load,
+		f64Load,
+		i32Load8S,
+		i32Load8U,
+		i32Load16S,
+		i32Load16U,
+		i64Load8S,
+		i64Load8U,
+		i64Load16S,
+		i64Load16U,
+		i64Load32S,
+		i64Load32U,
+		i32Store,
+		i64Store,
+		f32Store,
+		f64Store,
+		i32Store8,
+		i32Store16,
+		i64Store8,
+		i64Store16,
+		i64Store32,
+		v128Load,
+		v128Load32Zero,
+		v128Load64Zero,
+		v128Load8Splat,
+		v128Load16Splat,
+		v128Load32Splat,
+		v128Load64Splat,
+		v128Load8x8S,
+		v128Load8x8U,
+		v128Load16x4S,
+		v128Load16x4U,
+		v128Load32x2S,
+		v128Load32x2U,
+		v128Store:
 		align, memoryIndex, offset, err := d.readMemArg()
 		if err != nil {
 			return nil, err
@@ -199,30 +199,30 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		immediatesBuffer[1] = memoryIndex
 		immediatesBuffer[2] = offset
 		return immediatesBuffer[:3], nil
-	case SelectT:
+	case selectT:
 		return d.readImmediateVector()
-	case I64Const:
+	case i64Const:
 		immediate, err := d.readSleb128(10)
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case F32Const:
+	case f32Const:
 		immediate, err := d.readFloat32()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case F64Const:
+	case f64Const:
 		immediate, err := d.readFloat64()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
-	case V128Const:
+	case v128Const:
 		bytes, err := d.readBytes(16)
 		if err != nil {
 			return nil, err
@@ -231,14 +231,14 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		immediatesBuffer[0] = binary.LittleEndian.Uint64(bytes[0:8])
 		immediatesBuffer[1] = binary.LittleEndian.Uint64(bytes[8:16])
 		return immediatesBuffer[:2], nil
-	case V128Load8Lane,
-		V128Load16Lane,
-		V128Load32Lane,
-		V128Load64Lane,
-		V128Store8Lane,
-		V128Store16Lane,
-		V128Store32Lane,
-		V128Store64Lane:
+	case v128Load8Lane,
+		v128Load16Lane,
+		v128Load32Lane,
+		v128Load64Lane,
+		v128Store8Lane,
+		v128Store16Lane,
+		v128Store32Lane,
+		v128Store64Lane:
 		align, memoryIndex, offset, err := d.readMemArg()
 		if err != nil {
 			return nil, err
@@ -253,7 +253,7 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 		immediatesBuffer[2] = offset
 		immediatesBuffer[3] = laneIndex
 		return immediatesBuffer[:4], nil
-	case I8x16Shuffle:
+	case i8x16Shuffle:
 		for i := range 16 {
 			val, err := d.readUint8()
 			if err != nil {
@@ -268,15 +268,15 @@ func (d *Decoder) readOpcodeImmediates(opcode Opcode) ([]uint64, error) {
 }
 
 // readOpcode reads the next Opcode from the byte stream.
-func (d *Decoder) readOpcode() (Opcode, error) {
-	opcode, err := d.readByte()
+func (d *decoder) readOpcode() (opcode, error) {
+	opcodeByte, err := d.readByte()
 	if err != nil {
 		return 0, err
 	}
 
 	// Standard single-byte opcode.
-	if opcode < 0xFC {
-		return Opcode(opcode), nil
+	if opcodeByte < 0xFC {
+		return opcode(opcodeByte), nil
 	}
 
 	// Multi-byte opcode (prefixed with 0xFC or 0xFD).
@@ -286,7 +286,7 @@ func (d *Decoder) readOpcode() (Opcode, error) {
 	}
 
 	var compositeOpcode uint32
-	switch opcode {
+	switch opcodeByte {
 	case 0xFC:
 		compositeOpcode = 0xFC00 + uint32(val)
 	case 0xFD:
@@ -294,13 +294,13 @@ func (d *Decoder) readOpcode() (Opcode, error) {
 	default:
 		// This case should ideally not be reached if opcodeByte is guaranteed to be
 		// < 0xFC or 0xFD. However, as a safeguard, we can return an error.
-		return 0, fmt.Errorf("unrecognized multi-byte opcode prefix: 0x%X", opcode)
+		return 0, fmt.Errorf("unrecognized opcode prefix: 0x%X", opcodeByte)
 	}
 
-	return Opcode(compositeOpcode), nil
+	return opcode(compositeOpcode), nil
 }
 
-func (d *Decoder) readImmediateVector() ([]uint64, error) {
+func (d *decoder) readImmediateVector() ([]uint64, error) {
 	size, err := d.readUint32()
 	if err != nil {
 		return nil, err
@@ -323,7 +323,7 @@ func (d *Decoder) readImmediateVector() ([]uint64, error) {
 	return immediates, nil
 }
 
-func (d *Decoder) readFloat32() (uint64, error) {
+func (d *decoder) readFloat32() (uint64, error) {
 	bytes, err := d.readBytes(4)
 	if err != nil {
 		return 0, err
@@ -331,7 +331,7 @@ func (d *Decoder) readFloat32() (uint64, error) {
 	return uint64(binary.LittleEndian.Uint32(bytes)), nil
 }
 
-func (d *Decoder) readFloat64() (uint64, error) {
+func (d *decoder) readFloat64() (uint64, error) {
 	bytes, err := d.readBytes(8)
 	if err != nil {
 		return 0, err
@@ -339,7 +339,7 @@ func (d *Decoder) readFloat64() (uint64, error) {
 	return binary.LittleEndian.Uint64(bytes), nil
 }
 
-func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
+func (d *decoder) readMemArg() (uint64, uint64, uint64, error) {
 	align, err := d.readUint32()
 	if err != nil {
 		return 0, 0, 0, err
@@ -348,7 +348,7 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 	// The alignment exponent must be < 32.
 	// We also have to remove bit 6, used for multi memory.
 	if (align & ^sixthBitMask) >= 32 {
-		return 0, 0, 0, ErrMalformedMemopFlags
+		return 0, 0, 0, errMalformedMemopFlags
 	}
 
 	memoryIndex := uint64(0)
@@ -369,7 +369,7 @@ func (d *Decoder) readMemArg() (uint64, uint64, uint64, error) {
 	return align, memoryIndex, offset, nil
 }
 
-func (d *Decoder) readBlockType() (uint64, error) {
+func (d *decoder) readBlockType() (uint64, error) {
 	blockType, err := d.readSleb128(5)
 	if err != nil {
 		return 0, err
@@ -379,13 +379,13 @@ func (d *Decoder) readBlockType() (uint64, error) {
 	const minS33 = -1 << 32
 	const maxS33 = (1 << 32) - 1
 	if val < minS33 || val > maxS33 {
-		return 0, ErrIntegerTooLarge
+		return 0, errIntegerTooLarge
 	}
 	return blockType, nil
 }
 
 // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
-func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
+func (d *decoder) readSleb128(maxBytes int) (uint64, error) {
 	var result int64
 	var shift uint
 	var b byte
@@ -399,7 +399,7 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 		}
 		bytesRead++
 		if bytesRead > maxBytes {
-			return 0, ErrIntRepresentationTooLong
+			return 0, errIntRepresentationTooLong
 		}
 
 		// Each byte read contains 7 bits of "integer" and 1 bit to signal if the
@@ -413,9 +413,9 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 			sign := b & 1
 			remainingBits := (b & 0x7E) >> 1
 			if sign == 0 && remainingBits != 0 {
-				return 0, ErrIntegerTooLarge
+				return 0, errIntegerTooLarge
 			} else if sign == 1 && remainingBits != 0x3F {
-				return 0, ErrIntegerTooLarge
+				return 0, errIntegerTooLarge
 			}
 		}
 
@@ -438,43 +438,43 @@ func (d *Decoder) readSleb128(maxBytes int) (uint64, error) {
 
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
-func (d *Decoder) readUint32() (uint64, error) {
+func (d *decoder) readUint32() (uint64, error) {
 	val, err := d.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
 	if val > math.MaxUint32 {
-		return 0, ErrIntegerTooLarge
+		return 0, errIntegerTooLarge
 	}
 	return val, nil
 }
 
-func (d *Decoder) readInt32() (uint64, error) {
+func (d *decoder) readInt32() (uint64, error) {
 	val, err := d.readSleb128(5)
 	if err != nil {
 		return 0, err
 	}
 	if int64(val) < math.MinInt32 || int64(val) > math.MaxInt32 {
-		return 0, ErrIntegerTooLarge
+		return 0, errIntegerTooLarge
 	}
 	return val, nil
 }
 
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
-func (d *Decoder) readUint8() (uint64, error) {
+func (d *decoder) readUint8() (uint64, error) {
 	val, err := d.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
 	if val > math.MaxUint8 {
-		return 0, ErrIntegerTooLarge
+		return 0, errIntegerTooLarge
 	}
 	return val, nil
 }
 
 // readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
+func (d *decoder) readUleb128(maxBytes int) (uint64, error) {
 	var result uint64
 	var shift uint
 	bytesRead := 0
@@ -486,7 +486,7 @@ func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
 		}
 		bytesRead++
 		if bytesRead > maxBytes {
-			return 0, ErrIntRepresentationTooLong
+			return 0, errIntRepresentationTooLong
 		}
 
 		group := uint64(b & payloadMask)
@@ -501,74 +501,74 @@ func (d *Decoder) readUleb128(maxBytes int) (uint64, error) {
 	}
 }
 
-func (d *Decoder) readByte() (byte, error) {
-	if !d.HasMore() {
+func (d *decoder) readByte() (byte, error) {
+	if !d.hasMore() {
 		return 0, io.EOF
 	}
-	b := d.Code[d.Pc]
-	d.Pc++
+	b := d.code[d.pc]
+	d.pc++
 	return b, nil
 }
 
-func (d *Decoder) readBytes(n uint) ([]byte, error) {
-	if d.Pc+n > uint(len(d.Code)) {
+func (d *decoder) readBytes(n uint) ([]byte, error) {
+	if d.pc+n > uint(len(d.code)) {
 		return nil, io.EOF
 	}
-	bytes := d.Code[d.Pc : d.Pc+n]
-	d.Pc += n
+	bytes := d.code[d.pc : d.pc+n]
+	d.pc += n
 	return bytes, nil
 }
 
-// DecodeUntilMatchingEnd continues decoding instructions until the matching
+// decodeUntilMatchingEnd continues decoding instructions until the matching
 // 'end' of the current block is found. The next instruction to be decoded will
 // be the one AFTER the 'end' instruction.
-func (d *Decoder) DecodeUntilMatchingEnd() error {
+func (d *decoder) decodeUntilMatchingEnd() error {
 	nesting := 1
 	for nesting > 0 {
-		instruction, err := d.Decode()
+		instruction, err := d.decode()
 		if err != nil {
 			return err
 		}
-		opcode := instruction.Opcode
+		opcode := instruction.opcode
 		switch opcode {
-		case End:
+		case end:
 			nesting--
-		case If, Block, Loop:
+		case ifOp, block, loop:
 			nesting++
 		}
 	}
 	return nil
 }
 
-// DecodeUntilMatchingElseOrEnd continues decoding instructions until the
+// decodeUntilMatchingElseOrEnd continues decoding instructions until the
 // matching 'else' or 'end' of the current block is found. It returns the opcode
 // found (either Else or End). The next instruction to be decoded will be the
 // found instruction itself.
-func (d *Decoder) DecodeUntilMatchingElseOrEnd() (Opcode, error) {
+func (d *decoder) decodeUntilMatchingElseOrEnd() (opcode, error) {
 	nesting := 1
 	var lastPc uint
-	var lastOpcode Opcode
+	var lastOpcode opcode
 	for nesting > 0 {
-		lastPc = d.Pc
-		instruction, err := d.Decode()
+		lastPc = d.pc
+		instruction, err := d.decode()
 		if err != nil {
 			return 0, err
 		}
-		lastOpcode = instruction.Opcode
+		lastOpcode = instruction.opcode
 		switch lastOpcode {
-		case Else:
+		case elseOp:
 			// Only decrement nesting for an 'else' if it matches the 'if' we are
 			// currently scanning for.
 			if nesting == 1 {
 				nesting--
 			}
-		case End:
+		case end:
 			nesting--
-		case If, Block, Loop:
+		case ifOp, block, loop:
 			nesting++
 		}
 	}
 	// We rewind the PC to the last instruction parsed.
-	d.Pc = lastPc
+	d.pc = lastPc
 	return lastOpcode, nil
 }

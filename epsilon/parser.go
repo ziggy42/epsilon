@@ -17,6 +17,7 @@ package epsilon
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,10 @@ import (
 	"unicode/utf8"
 )
 
-var ErrElementKindNotZero = errors.New("element kind for passive element segment must be 0x00")
+var (
+	errElementKindNotZero                = errors.New("element kind for passive element segment must be 0x00")
+	errIncompatibleNumberOfFunctionTypes = errors.New("incompatible number of function types")
+)
 
 const (
 	wasmMagicNumber      = "\x00asm"
@@ -32,24 +36,24 @@ const (
 	defaultTableIndex    = 0
 )
 
-// SectionId represents the different sections of a WebAssembly module.
+// sectionId represents the different sections of a WebAssembly module.
 // See https://webassembly.github.io/spec/core/binary/modules.html#sections
-type SectionId byte
+type sectionId byte
 
 const (
-	CustomSectionId SectionId = iota
-	TypeSectionId
-	ImportSectionId
-	FunctionSectionId
-	TableSectionId
-	MemorySectionId
-	GlobalSectionId
-	ExportSectionId
-	StartSectionId
-	ElementSectionId
-	CodeSectionId
-	DataSectionId
-	DataCountSectionId
+	customSectionId sectionId = iota
+	typeSectionId
+	importSectionId
+	functionSectionId
+	tableSectionId
+	memorySectionId
+	globalSectionId
+	exportSectionId
+	startSectionId
+	elementSectionId
+	codeSectionId
+	dataSectionId
+	dataCountSectionId
 )
 
 type localEntry struct {
@@ -57,37 +61,37 @@ type localEntry struct {
 	typ   ValueType
 }
 
-// Parser is a parser for WASM modules.
-type Parser struct {
+// parser is a parser for WASM modules.
+type parser struct {
 	reader *bufio.Reader
 }
 
-func NewParser(reader io.Reader) *Parser {
-	return &Parser{reader: bufio.NewReader(reader)}
+func newParser(reader io.Reader) *parser {
+	return &parser{reader: bufio.NewReader(reader)}
 }
 
-// Parse takes a byte slice and returns a Module.
-func (p *Parser) Parse() (*Module, error) {
+// parse takes a byte slice and returns a Module.
+func (p *parser) parse() (*moduleDefinition, error) {
 	if err := p.parseHeader(); err != nil {
 		return nil, err
 	}
 
 	var types []FunctionType
 	var functionTypeIndexes []uint32
-	var imports []Import
-	var exports []Export
+	var imports []moduleImport
+	var exports []export
 	var startIndex *uint32
 	var tables []TableType
 	var memories []MemoryType
-	var functions []Function
-	var elementSegments []ElementSegment
-	var globals []GlobalVariable
-	var dataSegments []DataSegment
+	var functions []function
+	var elementSegments []elementSegment
+	var globals []globalVariable
+	var dataSegments []dataSegment
 	var dataCount *uint64
 
 	// We initialize lastSection to CustomSectionId since custom sections
 	// can be in any order.
-	lastSection := CustomSectionId
+	lastSection := customSectionId
 
 	for {
 		sectionIdByte, err := p.reader.ReadByte()
@@ -99,11 +103,11 @@ func (p *Parser) Parse() (*Module, error) {
 			return nil, fmt.Errorf("failed to read section ID: %w", err)
 		}
 
-		sectionId := SectionId(sectionIdByte)
+		sectionId := sectionId(sectionIdByte)
 		if err := validateSectionOrder(lastSection, sectionId); err != nil {
 			return nil, err
 		}
-		if sectionId != CustomSectionId {
+		if sectionId != customSectionId {
 			lastSection = sectionId
 		}
 
@@ -112,67 +116,67 @@ func (p *Parser) Parse() (*Module, error) {
 			return nil, fmt.Errorf("failed to read payload length: %w", err)
 		}
 		switch sectionId {
-		case CustomSectionId:
+		case customSectionId:
 			if err := p.parseCustomSection(payloadLen); err != nil {
 				return nil, err
 			}
-		case TypeSectionId:
+		case typeSectionId:
 			types, err = parseVector(p, p.parseFunctionType)
 			if err != nil {
 				return nil, err
 			}
-		case ImportSectionId:
+		case importSectionId:
 			imports, err = parseVector(p, p.parseImport)
 			if err != nil {
 				return nil, err
 			}
-		case FunctionSectionId:
+		case functionSectionId:
 			functionTypeIndexes, err = parseVector(p, p.parseUint32)
 			if err != nil {
 				return nil, err
 			}
-		case TableSectionId:
+		case tableSectionId:
 			tables, err = parseVector(p, p.parseTableType)
 			if err != nil {
 				return nil, err
 			}
-		case MemorySectionId:
+		case memorySectionId:
 			memories, err = parseVector(p, p.parseMemoryType)
 			if err != nil {
 				return nil, err
 			}
-		case GlobalSectionId:
+		case globalSectionId:
 			globals, err = parseVector(p, p.parseGlobalVariable)
 			if err != nil {
 				return nil, err
 			}
-		case ExportSectionId:
+		case exportSectionId:
 			exports, err = parseVector(p, p.parseExport)
 			if err != nil {
 				return nil, err
 			}
-		case StartSectionId:
+		case startSectionId:
 			index, err := p.parseUint32()
 			if err != nil {
 				return nil, err
 			}
 			startIndex = &index
-		case ElementSectionId:
+		case elementSectionId:
 			elementSegments, err = parseVector(p, p.parseElementSegment)
 			if err != nil {
 				return nil, err
 			}
-		case CodeSectionId:
+		case codeSectionId:
 			functions, err = parseVector(p, p.parseFunction)
 			if err != nil {
 				return nil, err
 			}
-		case DataSectionId:
+		case dataSectionId:
 			dataSegments, err = parseVector(p, p.parseDataSegment)
 			if err != nil {
 				return nil, err
 			}
-		case DataCountSectionId:
+		case dataCountSectionId:
 			count, err := p.parseUint64()
 			if err != nil {
 				return nil, err
@@ -189,29 +193,29 @@ func (p *Parser) Parse() (*Module, error) {
 	}
 
 	if len(functionTypeIndexes) != len(functions) {
-		return &Module{}, fmt.Errorf("incompatible number of func indexes/bodies")
+		return nil, errIncompatibleNumberOfFunctionTypes
 	}
 
 	for i := range functions {
-		functions[i].TypeIndex = functionTypeIndexes[i]
+		functions[i].typeIndex = functionTypeIndexes[i]
 	}
 
-	return &Module{
-		Types:           types,
-		Imports:         imports,
-		Exports:         exports,
-		StartIndex:      startIndex,
-		Tables:          tables,
-		Memories:        memories,
-		Funcs:           functions,
-		ElementSegments: elementSegments,
-		GlobalVariables: globals,
-		DataSegments:    dataSegments,
-		DataCount:       dataCount,
+	return &moduleDefinition{
+		types:           types,
+		imports:         imports,
+		exports:         exports,
+		startIndex:      startIndex,
+		tables:          tables,
+		memories:        memories,
+		funcs:           functions,
+		elementSegments: elementSegments,
+		globalVariables: globals,
+		dataSegments:    dataSegments,
+		dataCount:       dataCount,
 	}, nil
 }
 
-func (p *Parser) parseHeader() error {
+func (p *parser) parseHeader() error {
 	header := make([]byte, 8)
 	if _, err := io.ReadFull(p.reader, header); err != nil {
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -223,15 +227,14 @@ func (p *Parser) parseHeader() error {
 	if !bytes.HasPrefix(header, []byte(wasmMagicNumber)) {
 		return fmt.Errorf("invalid WASM: does not start with magic number")
 	}
-
-	version := Int32From4Bytes(header[4:8])
+	version := int32(binary.LittleEndian.Uint32(header[4:8]))
 	if version != supportedWasmVersion {
 		return fmt.Errorf("unsupported WASM version: %d", version)
 	}
 	return nil
 }
 
-func (p *Parser) parseCustomSection(payloadLen uint32) error {
+func (p *parser) parseCustomSection(payloadLen uint32) error {
 	// Custom section is ignored, but we still parse it to return parsing errors
 	// if it's not valid.
 	nameLength, bytesRead, err := p.parseUleb128(5)
@@ -256,10 +259,10 @@ func (p *Parser) parseCustomSection(payloadLen uint32) error {
 	return nil
 }
 
-func (p *Parser) parseFunction() (Function, error) {
+func (p *parser) parseFunction() (function, error) {
 	size, err := p.parseUint32()
 	if err != nil {
-		return Function{}, fmt.Errorf("failed to read function size: %w", err)
+		return function{}, fmt.Errorf("failed to read function size: %w", err)
 	}
 
 	originalReader := p.reader
@@ -271,7 +274,7 @@ func (p *Parser) parseFunction() (Function, error) {
 
 	localEntries, err := parseVector(p, p.parseLocalVariables)
 	if err != nil {
-		return Function{}, fmt.Errorf("failed to parse locals: %w", err)
+		return function{}, fmt.Errorf("failed to parse locals: %w", err)
 	}
 
 	var totalLocalsCount uint64
@@ -279,7 +282,7 @@ func (p *Parser) parseFunction() (Function, error) {
 		totalLocalsCount += entry.count
 	}
 	if totalLocalsCount > math.MaxInt32 {
-		return Function{}, fmt.Errorf("too many locals: %d", totalLocalsCount)
+		return function{}, fmt.Errorf("too many locals: %d", totalLocalsCount)
 	}
 
 	locals := make([]ValueType, 0, totalLocalsCount)
@@ -291,17 +294,17 @@ func (p *Parser) parseFunction() (Function, error) {
 
 	body, err := io.ReadAll(p.reader)
 	if err != nil {
-		return Function{}, fmt.Errorf("failed to read function body: %w", err)
+		return function{}, fmt.Errorf("failed to read function body: %w", err)
 	}
 
-	if len(body) == 0 || body[len(body)-1] != byte(End) {
-		return Function{}, fmt.Errorf("function body must end with End opcode")
+	if len(body) == 0 || body[len(body)-1] != byte(end) {
+		return function{}, fmt.Errorf("function body must end with End opcode")
 	}
 
-	return Function{Locals: locals, Body: body[:len(body)-1]}, nil
+	return function{locals: locals, body: body[:len(body)-1]}, nil
 }
 
-func (p *Parser) parseLocalVariables() (localEntry, error) {
+func (p *parser) parseLocalVariables() (localEntry, error) {
 	count, err := p.parseUint64()
 	if err != nil {
 		return localEntry{}, err
@@ -317,117 +320,121 @@ func (p *Parser) parseLocalVariables() (localEntry, error) {
 	return localEntry{count: count, typ: valueType}, nil
 }
 
-func (p *Parser) parseImport() (Import, error) {
+func (p *parser) parseImport() (moduleImport, error) {
 	moduleName, err := p.parseUtf8String()
 	if err != nil {
-		return Import{}, err
+		return moduleImport{}, err
 	}
 	name, err := p.parseUtf8String()
 	if err != nil {
-		return Import{}, err
+		return moduleImport{}, err
 	}
 	b, err := p.reader.ReadByte()
 	if err != nil {
-		return Import{}, err
+		return moduleImport{}, err
 	}
 
-	var importType ImportType
+	var importType importType
 	switch b {
 	case 0:
 		index, err := p.parseUint32()
 		if err != nil {
-			return Import{}, err
+			return moduleImport{}, err
 		}
-		importType = FunctionTypeIndex(index)
+		importType = functionTypeIndex(index)
 	case 1:
 		importType, err = p.parseTableType()
 		if err != nil {
-			return Import{}, err
+			return moduleImport{}, err
 		}
 	case 2:
 		importType, err = p.parseMemoryType()
 		if err != nil {
-			return Import{}, err
+			return moduleImport{}, err
 		}
 	case 3:
 		importType, err = p.parseGlobalType()
 		if err != nil {
-			return Import{}, err
+			return moduleImport{}, err
 		}
 	default:
-		return Import{}, fmt.Errorf("failed to parse import description")
+		return moduleImport{}, fmt.Errorf("failed to parse import description")
 	}
-	return Import{ModuleName: moduleName, Name: name, Type: importType}, nil
+	return moduleImport{
+		moduleName: moduleName,
+		name:       name,
+		importType: importType,
+	}, nil
 }
 
-func (p *Parser) parseExport() (Export, error) {
+func (p *parser) parseExport() (export, error) {
 	name, err := p.parseUtf8String()
 	if err != nil {
-		return Export{}, err
+		return export{}, err
 	}
 	b, err := p.reader.ReadByte()
 	if err != nil {
-		return Export{}, err
+		return export{}, err
 	}
 	index, err := p.parseUint32()
 	if err != nil {
-		return Export{}, err
+		return export{}, err
 	}
-	return Export{Name: name, IndexType: ExportIndexKind(b), Index: index}, nil
+	return export{name: name, indexType: exportIndexKind(b), index: index}, nil
 }
 
-func (p *Parser) parseDataSegment() (DataSegment, error) {
+func (p *parser) parseDataSegment() (dataSegment, error) {
 	dataMode, err := p.parseUint32()
 	if err != nil {
-		return DataSegment{}, err
+		return dataSegment{}, err
 	}
 
 	switch dataMode {
 	case 0:
 		offsetExpression, err := p.parseExpression()
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
 		content, err := parseVector(p, p.reader.ReadByte)
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
-		return DataSegment{
-			Mode:             ActiveDataMode,
-			Content:          content,
-			OffsetExpression: offsetExpression,
+		return dataSegment{
+			mode:             activeDataMode,
+			content:          content,
+			offsetExpression: offsetExpression,
 		}, nil
 	case 1:
 		content, err := parseVector(p, p.reader.ReadByte)
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
-		return DataSegment{Mode: PassiveDataMode, Content: content}, nil
+		return dataSegment{mode: passiveDataMode, content: content}, nil
 	case 2:
 		memoryIndex, err := p.parseUint32()
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
 		offsetExpression, err := p.parseExpression()
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
 		content, err := parseVector(p, p.reader.ReadByte)
 		if err != nil {
-			return DataSegment{}, err
+			return dataSegment{}, err
 		}
-		return DataSegment{
-			Mode:             ActiveDataMode,
-			Content:          content,
-			MemoryIndex:      memoryIndex,
-			OffsetExpression: offsetExpression,
+		return dataSegment{
+			mode:             activeDataMode,
+			content:          content,
+			memoryIndex:      memoryIndex,
+			offsetExpression: offsetExpression,
 		}, nil
 	default:
-		return DataSegment{}, fmt.Errorf("invalid data mode: %d", dataMode)
+		return dataSegment{}, fmt.Errorf("invalid data mode: %d", dataMode)
 	}
 }
 
-func (p *Parser) parseFunctionType() (FunctionType, error) {
+func (p *parser) parseFunctionType() (FunctionType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return FunctionType{}, err
@@ -449,7 +456,7 @@ func (p *Parser) parseFunctionType() (FunctionType, error) {
 	return FunctionType{ParamTypes: paramTypes, ResultTypes: resultTypes}, nil
 }
 
-func (p *Parser) parseValueType() (ValueType, error) {
+func (p *parser) parseValueType() (ValueType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return nil, err
@@ -466,7 +473,7 @@ func (p *Parser) parseValueType() (ValueType, error) {
 	}
 }
 
-func (p *Parser) parseTableType() (TableType, error) {
+func (p *parser) parseTableType() (TableType, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return TableType{}, err
@@ -478,7 +485,7 @@ func (p *Parser) parseTableType() (TableType, error) {
 	return TableType{ReferenceType: ReferenceType(b), Limits: limits}, nil
 }
 
-func (p *Parser) parseMemoryType() (MemoryType, error) {
+func (p *parser) parseMemoryType() (MemoryType, error) {
 	limits, err := p.parseLimits()
 	if err != nil {
 		return MemoryType{}, err
@@ -486,19 +493,19 @@ func (p *Parser) parseMemoryType() (MemoryType, error) {
 	return MemoryType{Limits: limits}, nil
 }
 
-func (p *Parser) parseGlobalVariable() (GlobalVariable, error) {
+func (p *parser) parseGlobalVariable() (globalVariable, error) {
 	globalType, err := p.parseGlobalType()
 	if err != nil {
-		return GlobalVariable{}, err
+		return globalVariable{}, err
 	}
 	init, err := p.parseExpression()
 	if err != nil {
-		return GlobalVariable{}, err
+		return globalVariable{}, err
 	}
-	return GlobalVariable{GlobalType: globalType, InitExpression: init}, nil
+	return globalVariable{globalType: globalType, initExpression: init}, nil
 }
 
-func (p *Parser) parseGlobalType() (GlobalType, error) {
+func (p *parser) parseGlobalType() (GlobalType, error) {
 	valueType, err := p.parseValueType()
 	if err != nil {
 		return GlobalType{}, err
@@ -513,167 +520,167 @@ func (p *Parser) parseGlobalType() (GlobalType, error) {
 	return GlobalType{ValueType: valueType, IsMutable: isMutable == 1}, nil
 }
 
-func (p *Parser) parseElementSegment() (ElementSegment, error) {
+func (p *parser) parseElementSegment() (elementSegment, error) {
 	flags, err := p.parseUint32()
 	if err != nil {
-		return ElementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
+		return elementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
 	}
 
 	switch flags {
 	case 0: // Active element with func indexes.
 		offset, err := p.parseExpression()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:             ActiveElementMode,
-			Kind:             FuncRefType,
-			FuncIndexes:      uint64SliceToInt32(indexes),
-			TableIndex:       defaultTableIndex,
-			OffsetExpression: offset,
+		return elementSegment{
+			mode:             activeElementMode,
+			kind:             FuncRefType,
+			functionIndexes:  uint64SliceToInt32(indexes),
+			tableIndex:       defaultTableIndex,
+			offsetExpression: offset,
 		}, nil
 	case 1: // Passive element with func indexes.
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return elementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:        PassiveElementMode,
-			Kind:        FuncRefType,
-			FuncIndexes: uint64SliceToInt32(indexes),
+		return elementSegment{
+			mode:            passiveElementMode,
+			kind:            FuncRefType,
+			functionIndexes: uint64SliceToInt32(indexes),
 		}, nil
 	case 2: // Active element with explicit table index and func indexes.
 		tableIdx, err := p.parseUint64()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		offset, err := p.parseExpression()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return elementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:             ActiveElementMode,
-			Kind:             FuncRefType,
-			FuncIndexes:      uint64SliceToInt32(indexes),
-			TableIndex:       uint32(tableIdx),
-			OffsetExpression: offset,
+		return elementSegment{
+			mode:             activeElementMode,
+			kind:             FuncRefType,
+			functionIndexes:  uint64SliceToInt32(indexes),
+			tableIndex:       uint32(tableIdx),
+			offsetExpression: offset,
 		}, nil
 	case 3: // Declarative element with func indexes.
 		elemkind, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return ElementSegment{}, ErrElementKindNotZero
+			return elementSegment{}, errElementKindNotZero
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:        DeclarativeElementMode,
-			Kind:        FuncRefType,
-			FuncIndexes: uint64SliceToInt32(indexes),
+		return elementSegment{
+			mode:            declarativeElementMode,
+			kind:            FuncRefType,
+			functionIndexes: uint64SliceToInt32(indexes),
 		}, nil
 	case 4: // Active element with expressions.
 		offset, err := p.parseExpression()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:                   ActiveElementMode,
-			Kind:                   FuncRefType,
-			FuncIndexesExpressions: exprs,
-			TableIndex:             defaultTableIndex,
-			OffsetExpression:       offset,
+		return elementSegment{
+			mode:                       activeElementMode,
+			kind:                       FuncRefType,
+			functionIndexesExpressions: exprs,
+			tableIndex:                 defaultTableIndex,
+			offsetExpression:           offset,
 		}, nil
 	case 5: // Passive element with expressions.
 		b, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		kind := ReferenceType(b)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:                   PassiveElementMode,
-			Kind:                   kind,
-			FuncIndexesExpressions: exprs,
+		return elementSegment{
+			mode:                       passiveElementMode,
+			kind:                       kind,
+			functionIndexesExpressions: exprs,
 		}, nil
 	case 6: // Active element with explicit table index and expressions.
 		tableIdx, err := p.parseUint64()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		offset, err := p.parseExpression()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		refTypeByte, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:                   ActiveElementMode,
-			Kind:                   kind,
-			FuncIndexesExpressions: exprs,
-			TableIndex:             uint32(tableIdx),
-			OffsetExpression:       offset,
+		return elementSegment{
+			mode:                       activeElementMode,
+			kind:                       kind,
+			functionIndexesExpressions: exprs,
+			tableIndex:                 uint32(tableIdx),
+			offsetExpression:           offset,
 		}, nil
 	case 7: // Declarative element with expressions.
 		refTypeByte, err := p.reader.ReadByte()
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
 		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
-			return ElementSegment{}, err
+			return elementSegment{}, err
 		}
-		return ElementSegment{
-			Mode:                   DeclarativeElementMode,
-			Kind:                   kind,
-			FuncIndexesExpressions: exprs,
+		return elementSegment{
+			mode:                       declarativeElementMode,
+			kind:                       kind,
+			functionIndexesExpressions: exprs,
 		}, nil
 	default:
-		return ElementSegment{}, fmt.Errorf("invalid element flags: %d", flags)
+		return elementSegment{}, fmt.Errorf("invalid element flags: %d", flags)
 	}
 }
 
-func (p *Parser) parseExpression() ([]byte, error) {
+func (p *parser) parseExpression() ([]byte, error) {
 	// This is a horrible implementation. Basically, we use a decoder instace to
 	// parse the expression. But decoder expects a []byte, which we don't have. So
 	// we create one, adding one byte at a time until the decoder stops failing.
@@ -689,18 +696,18 @@ func (p *Parser) parseExpression() ([]byte, error) {
 
 		// Create a decoder for the bytes we have so far.
 		code := buf.Bytes()
-		decoder := NewDecoder(code)
+		decoder := newDecoder(code)
 
 		// Try to decode instructions.
-		for decoder.HasMore() {
+		for decoder.hasMore() {
 			// If the next byte is the end opcode, we are done.
-			if Opcode(code[decoder.Pc]) == End {
+			if opcode(code[decoder.pc]) == end {
 				// The expression is the content of the buffer *before* the End opcode.
-				return code[:decoder.Pc], nil
+				return code[:decoder.pc], nil
 			}
 
 			// Try to decode one instruction.
-			_, err := decoder.Decode()
+			_, err := decoder.decode()
 			if err != nil {
 				// Decoding failed. This is expected if we are in the middle of an
 				// immediate. We break the inner loop and read more bytes.
@@ -711,7 +718,7 @@ func (p *Parser) parseExpression() ([]byte, error) {
 	}
 }
 
-func (p *Parser) parseLimits() (Limits, error) {
+func (p *parser) parseLimits() (Limits, error) {
 	b, err := p.reader.ReadByte()
 	if err != nil {
 		return Limits{}, err
@@ -734,7 +741,7 @@ func (p *Parser) parseLimits() (Limits, error) {
 	}
 }
 
-func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
+func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 	count, err := parser.parseUint32()
 	if err != nil {
 		return nil, err
@@ -750,7 +757,7 @@ func parseVector[T any](parser *Parser, parse func() (T, error)) ([]T, error) {
 	return items, nil
 }
 
-func (p *Parser) parseUint32() (uint32, error) {
+func (p *parser) parseUint32() (uint32, error) {
 	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
@@ -761,12 +768,12 @@ func (p *Parser) parseUint32() (uint32, error) {
 	return uint32(val), nil
 }
 
-func (p *Parser) parseUint64() (uint64, error) {
+func (p *parser) parseUint64() (uint64, error) {
 	val, _, err := p.parseUleb128(9)
 	return val, err
 }
 
-func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
+func (p *parser) parseUleb128(maxBytes int) (uint64, int, error) {
 	bytesRead := 0
 
 	var value uint64
@@ -791,7 +798,7 @@ func (p *Parser) parseUleb128(maxBytes int) (uint64, int, error) {
 	return value, bytesRead, nil
 }
 
-func (p *Parser) parseUtf8String() (string, error) {
+func (p *parser) parseUtf8String() (string, error) {
 	length, err := p.parseUint32()
 	if err != nil {
 		return "", err
@@ -811,8 +818,8 @@ func uint64SliceToInt32(slice []uint64) []int32 {
 	return result
 }
 
-func validateSectionOrder(last SectionId, current SectionId) error {
-	if current == CustomSectionId {
+func validateSectionOrder(last sectionId, current sectionId) error {
+	if current == customSectionId {
 		// Custom sections can be in any order.
 		return nil
 	}
@@ -827,16 +834,16 @@ func validateSectionOrder(last SectionId, current SectionId) error {
 	return nil
 }
 
-func getSectionOrder(id SectionId) int {
+func getSectionOrder(id sectionId) int {
 	switch id {
-	case DataCountSectionId:
+	case dataCountSectionId:
 		return 10
-	case CodeSectionId:
+	case codeSectionId:
 		return 11
-	case DataSectionId:
+	case dataSectionId:
 		return 12
 	default:
-		if id > DataCountSectionId {
+		if id > dataCountSectionId {
 			return 0
 		}
 		return int(id)

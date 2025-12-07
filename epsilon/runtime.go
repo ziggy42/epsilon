@@ -22,18 +22,17 @@ import (
 // Runtime provides the main API for instantiating and interacting with WASM
 // modules.
 type Runtime struct {
-	vm *VM
+	vm *vm
 }
 
 // NewRuntime creates a new Runtime with default settings.
 func NewRuntime() *Runtime {
-	return &Runtime{vm: NewVM()}
+	return &Runtime{vm: newVm()}
 }
 
-// NewRuntimeWithFeatures creates a Runtime with specific experimental features
-// enabled.
-func NewRuntimeWithFeatures(features ExperimentalFeatures) *Runtime {
-	return &Runtime{vm: NewVMWithFeatures(features)}
+func (r *Runtime) WithFeatures(features ExperimentalFeatures) *Runtime {
+	r.vm.features = features
+	return r
 }
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
@@ -47,17 +46,19 @@ func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	module, err := NewParser(wasm).Parse()
+	module, err := newParser(wasm).parse()
 	if err != nil {
 		return nil, err
 	}
 
-	return r.vm.Instantiate(module, imports)
+	return r.vm.instantiate(module, imports)
 }
 
-// InstantiateModuleFromBytes is a convenience method to instantiate
-// a WASM module from a byte slice.
-func (r *Runtime) InstantiateModuleFromBytes(data []byte) (*ModuleInstance, error) {
+// InstantiateModuleFromBytes is a convenience method to instantiate a WASM
+// module from a byte slice.
+func (r *Runtime) InstantiateModuleFromBytes(
+	data []byte,
+) (*ModuleInstance, error) {
 	return r.InstantiateModule(bytes.NewReader(data))
 }
 
@@ -126,6 +127,20 @@ func (b *ImportBuilder) AddGlobal(
 		Value:   value,
 		Mutable: mutable,
 		Type:    valueType,
+	}
+	return b
+}
+
+// AddModuleExports adds all exports from a ModuleInstance as imports.
+// This is useful when you want to import functions, memories, tables, or
+// globals from one module into another.
+func (b *ImportBuilder) AddModuleExports(
+	module string,
+	instance *ModuleInstance,
+) *ImportBuilder {
+	b.ensureModule(module)
+	for _, export := range instance.exports {
+		b.imports[module][export.name] = export.value
 	}
 	return b
 }

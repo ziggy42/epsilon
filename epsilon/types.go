@@ -64,6 +64,23 @@ type V128Value struct {
 	Low, High uint64
 }
 
+type TableType struct {
+	ReferenceType ReferenceType
+	Limits        Limits
+}
+
+type MemoryType struct {
+	Limits Limits
+}
+
+// GlobalType defines the type of a global variable, which includes its value
+// type and whether it is mutable.
+// See https://webassembly.github.io/spec/core/syntax/modules.html#globals
+type GlobalType struct {
+	ValueType ValueType
+	IsMutable bool
+}
+
 // Limits define min/max constraints for tables and memories.
 // See https://webassembly.github.io/spec/core/binary/types.html#limits
 type Limits struct {
@@ -95,24 +112,3 @@ type Null struct{}
 
 // NullVal is a convenient, reusable instance of the Null type.
 var NullVal = Null{}
-
-// DefaultValueForType returns the default value for a given ValueType.
-func DefaultValueForType(vt ValueType) any {
-	switch vt {
-	case I32:
-		return int32(0)
-	case I64:
-		return int64(0)
-	case F32:
-		return float32(0)
-	case F64:
-		return float64(0)
-	case V128:
-		return V128Value{}
-	case FuncRefType, ExternRefType:
-		return NullVal
-	default:
-		// Should ideally not be reached with a valid module.
-		return nil
-	}
-}

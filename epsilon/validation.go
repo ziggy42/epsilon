@@ -21,53 +21,53 @@ import (
 )
 
 var (
-	ErrBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
-	ErrTypesDoNotMatch                  = errors.New("types do not match")
-	ErrLocalIndexOutOfBounds            = errors.New("local index out of bounds")
-	ErrGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
-	ErrTableIndexOutOfBounds            = errors.New("table index out of bounds")
-	ErrMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
-	ErrAlignmentTooLarge                = errors.New("alignment too large")
-	ErrControlStackEmpty                = errors.New("control stack is empty")
-	ErrElementIndexOutOfBounds          = errors.New("element index out of bounds")
-	ErrDataIndexOutOfBounds             = errors.New("data index out of bounds")
-	ErrFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
-	ErrValueStackUnderflow              = errors.New("value stack underflow")
-	ErrValueStackHeightMismatch         = errors.New("value stack height mismatch")
-	ErrReturnTypeNotSet                 = errors.New("return type not set")
-	ErrElseMustMatchIf                  = errors.New("else must match if")
-	ErrTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
-	ErrCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
-	ErrGlobalIsImmutable                = errors.New("global is immutable")
-	ErrRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
-	ErrSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
-	ErrInvalidConstantExpression        = errors.New("invalid constant expression")
-	ErrInvalidLimits                    = errors.New("invalid limits")
-	ErrDuplicateExport                  = errors.New("duplicate export")
-	ErrInvalidStartFunction             = errors.New("invalid start function")
-	ErrUndeclaredFunctionReference      = errors.New("undeclared function reference")
-	ErrMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
-	ErrDataCountNotSet                  = errors.New("data count not set")
+	errBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
+	errTypesDoNotMatch                  = errors.New("types do not match")
+	errLocalIndexOutOfBounds            = errors.New("local index out of bounds")
+	errGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
+	errTableIndexOutOfBounds            = errors.New("table index out of bounds")
+	errMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
+	errAlignmentTooLarge                = errors.New("alignment too large")
+	errControlStackEmpty                = errors.New("control stack is empty")
+	errElementIndexOutOfBounds          = errors.New("element index out of bounds")
+	errDataIndexOutOfBounds             = errors.New("data index out of bounds")
+	errFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
+	errValueStackUnderflow              = errors.New("value stack underflow")
+	errValueStackHeightMismatch         = errors.New("value stack height mismatch")
+	errReturnTypeNotSet                 = errors.New("return type not set")
+	errElseMustMatchIf                  = errors.New("else must match if")
+	errTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
+	errCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
+	errGlobalIsImmutable                = errors.New("global is immutable")
+	errRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
+	errSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
+	errInvalidConstantExpression        = errors.New("invalid constant expression")
+	errInvalidLimits                    = errors.New("invalid limits")
+	errDuplicateExport                  = errors.New("duplicate export")
+	errInvalidStartFunction             = errors.New("invalid start function")
+	errUndeclaredFunctionReference      = errors.New("undeclared function reference")
+	errMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
+	errDataCountNotSet                  = errors.New("data count not set")
 )
 
 type bottomType struct{}
 
 func (bottomType) isValueType() {}
 
-var Bottom ValueType = bottomType{}
+var bottom ValueType = bottomType{}
 
 func isNumber(vt ValueType) bool {
 	_, ok := vt.(NumberType)
-	return ok || vt == Bottom
+	return ok || vt == bottom
 }
 
 func isVector(vt ValueType) bool {
 	_, ok := vt.(VectorType)
-	return ok || vt == Bottom
+	return ok || vt == bottom
 }
 
-type controlFrame struct {
-	opcode      Opcode
+type validationControlFrame struct {
+	opcode      opcode
 	startTypes  []ValueType
 	endTypes    []ValueType
 	height      int // The height of valueStack when the frame was pushed.
@@ -76,7 +76,7 @@ type controlFrame struct {
 
 type validator struct {
 	valueStack          []ValueType
-	controlStack        []controlFrame
+	controlStack        []validationControlFrame
 	locals              []ValueType
 	returnType          []ValueType
 	typeDefs            []FunctionType
@@ -91,10 +91,10 @@ type validator struct {
 	features            ExperimentalFeatures
 }
 
-func NewValidator(features ExperimentalFeatures) *validator {
+func newValidator(features ExperimentalFeatures) *validator {
 	return &validator{
 		valueStack:          make([]ValueType, 0),
-		controlStack:        make([]controlFrame, 0),
+		controlStack:        make([]validationControlFrame, 0),
 		locals:              make([]ValueType, 0),
 		returnType:          make([]ValueType, 0),
 		referencedFunctions: make(map[uint32]bool),
@@ -102,26 +102,26 @@ func NewValidator(features ExperimentalFeatures) *validator {
 	}
 }
 
-func (v *validator) validateModule(module *Module) error {
-	v.typeDefs = module.Types
-	v.funcTypes = make([]FunctionType, 0, len(module.Imports)+len(module.Funcs))
-	v.tableTypes = make([]TableType, 0, len(module.Imports)+len(module.Tables))
-	v.memTypes = make([]MemoryType, 0, len(module.Imports)+len(module.Memories))
+func (v *validator) validateModule(module *moduleDefinition) error {
+	v.typeDefs = module.types
+	v.funcTypes = make([]FunctionType, 0, len(module.imports)+len(module.funcs))
+	v.tableTypes = make([]TableType, 0, len(module.imports)+len(module.tables))
+	v.memTypes = make([]MemoryType, 0, len(module.imports)+len(module.memories))
 	v.globalTypes = make(
 		[]GlobalType,
 		0,
-		len(module.Imports)+len(module.GlobalVariables),
+		len(module.imports)+len(module.globalVariables),
 	)
-	v.importedTypes = make([]GlobalType, 0, len(module.Imports))
+	v.importedTypes = make([]GlobalType, 0, len(module.imports))
 
-	for _, imp := range module.Imports {
-		switch t := imp.Type.(type) {
-		case FunctionTypeIndex:
+	for _, imp := range module.imports {
+		switch t := imp.importType.(type) {
+		case functionTypeIndex:
 			if uint32(t) >= uint32(len(v.typeDefs)) {
-				return ErrTypesDoNotMatch
+				return errTypesDoNotMatch
 			}
 
-			v.funcTypes = append(v.funcTypes, module.Types[t])
+			v.funcTypes = append(v.funcTypes, module.types[t])
 		case TableType:
 			v.tableTypes = append(v.tableTypes, t)
 		case MemoryType:
@@ -132,21 +132,21 @@ func (v *validator) validateModule(module *Module) error {
 		}
 	}
 
-	for _, function := range module.Funcs {
-		if function.TypeIndex >= uint32(len(module.Types)) {
-			return ErrFunctionIndexOutOfBounds
+	for _, function := range module.funcs {
+		if function.typeIndex >= uint32(len(module.types)) {
+			return errFunctionIndexOutOfBounds
 		}
-		v.funcTypes = append(v.funcTypes, module.Types[function.TypeIndex])
+		v.funcTypes = append(v.funcTypes, module.types[function.typeIndex])
 	}
 
-	for _, table := range module.Tables {
+	for _, table := range module.tables {
 		if err := validateLimits(table.Limits, math.MaxUint32); err != nil {
 			return err
 		}
 		v.tableTypes = append(v.tableTypes, table)
 	}
 
-	for _, memoryType := range module.Memories {
+	for _, memoryType := range module.memories {
 		if err := validateLimits(memoryType.Limits, uint32(1)<<16); err != nil {
 			return err
 		}
@@ -154,47 +154,47 @@ func (v *validator) validateModule(module *Module) error {
 	}
 
 	if !v.features.MultipleMemories && len(v.memTypes) > 1 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
-	for _, globalVariable := range module.GlobalVariables {
+	for _, globalVariable := range module.globalVariables {
 		if err := v.validateGlobal(&globalVariable); err != nil {
 			return err
 		}
-		v.globalTypes = append(v.globalTypes, globalVariable.GlobalType)
+		v.globalTypes = append(v.globalTypes, globalVariable.globalType)
 	}
 
-	exportNamesSet := make(map[string]struct{}, len(module.Exports))
-	for _, export := range module.Exports {
-		if _, ok := exportNamesSet[export.Name]; ok {
-			return ErrDuplicateExport
+	exportNamesSet := make(map[string]struct{}, len(module.exports))
+	for _, export := range module.exports {
+		if _, ok := exportNamesSet[export.name]; ok {
+			return errDuplicateExport
 		}
-		exportNamesSet[export.Name] = struct{}{}
+		exportNamesSet[export.name] = struct{}{}
 		if err := v.validateExport(&export); err != nil {
 			return err
 		}
 	}
 
-	if err := v.validateStartIndex(module.StartIndex); err != nil {
+	if err := v.validateStartIndex(module.startIndex); err != nil {
 		return err
 	}
 
-	v.elemTypes = make([]ReferenceType, len(module.ElementSegments))
-	for i, elem := range module.ElementSegments {
+	v.elemTypes = make([]ReferenceType, len(module.elementSegments))
+	for i, elem := range module.elementSegments {
 		if err := v.validateElementSegment(&elem); err != nil {
 			return err
 		}
-		v.elemTypes[i] = elem.Kind
+		v.elemTypes[i] = elem.kind
 	}
 
-	v.dataCount = module.DataCount
-	for _, data := range module.DataSegments {
+	v.dataCount = module.dataCount
+	for _, data := range module.dataSegments {
 		if err := v.validateDataSegment(&data); err != nil {
 			return err
 		}
 	}
 
-	for _, function := range module.Funcs {
+	for _, function := range module.funcs {
 		if err := v.validateFunction(&function); err != nil {
 			return err
 		}
@@ -203,29 +203,29 @@ func (v *validator) validateModule(module *Module) error {
 	return nil
 }
 
-func (v *validator) validateGlobal(global *GlobalVariable) error {
-	globalType := global.GlobalType
-	initExpr := global.InitExpression
+func (v *validator) validateGlobal(global *globalVariable) error {
+	globalType := global.globalType
+	initExpr := global.initExpression
 	return v.validateConstExpression(initExpr, globalType.ValueType)
 }
 
-func (v *validator) validateExport(export *Export) error {
-	switch export.IndexType {
-	case FunctionExportKind:
-		if err := v.validateFunctionTypeExists(export.Index); err != nil {
+func (v *validator) validateExport(export *export) error {
+	switch export.indexType {
+	case functionExportKind:
+		if err := v.validateFunctionTypeExists(export.index); err != nil {
 			return err
 		}
-		v.referencedFunctions[export.Index] = true
-	case TableExportKind:
-		if err := v.validateTableExists(export.Index); err != nil {
+		v.referencedFunctions[export.index] = true
+	case tableExportKind:
+		if err := v.validateTableExists(export.index); err != nil {
 			return err
 		}
-	case MemoryExportKind:
-		if err := v.validateMemoryExists(export.Index); err != nil {
+	case memoryExportKind:
+		if err := v.validateMemoryExists(export.index); err != nil {
 			return err
 		}
-	case GlobalExportKind:
-		if err := v.validateGlobalExists(export.Index); err != nil {
+	case globalExportKind:
+		if err := v.validateGlobalExists(export.index); err != nil {
 			return err
 		}
 	}
@@ -242,41 +242,41 @@ func (v *validator) validateStartIndex(index *uint32) error {
 
 	startFunctionType := v.funcTypes[*index]
 	if len(startFunctionType.ParamTypes) != 0 {
-		return ErrInvalidStartFunction
+		return errInvalidStartFunction
 	}
 	if len(startFunctionType.ResultTypes) != 0 {
-		return ErrInvalidStartFunction
+		return errInvalidStartFunction
 	}
 
 	return nil
 }
 
-func (v *validator) validateElementSegment(elem *ElementSegment) error {
-	if elem.Mode == ActiveElementMode {
-		if err := v.validateTableExists(elem.TableIndex); err != nil {
+func (v *validator) validateElementSegment(elem *elementSegment) error {
+	if elem.mode == activeElementMode {
+		if err := v.validateTableExists(elem.tableIndex); err != nil {
 			return err
 		}
 
-		expression := elem.OffsetExpression
+		expression := elem.offsetExpression
 		if err := v.validateConstExpression(expression, I32); err != nil {
 			return err
 		}
 
-		if v.tableTypes[elem.TableIndex].ReferenceType != elem.Kind {
-			return ErrTypesDoNotMatch
+		if v.tableTypes[elem.tableIndex].ReferenceType != elem.kind {
+			return errTypesDoNotMatch
 		}
 	}
 
-	for _, expr := range elem.FuncIndexesExpressions {
-		if err := v.validateConstExpression(expr, elem.Kind); err != nil {
+	for _, expr := range elem.functionIndexesExpressions {
+		if err := v.validateConstExpression(expr, elem.kind); err != nil {
 			return err
 		}
 	}
 
-	for _, funcIndex := range elem.FuncIndexes {
+	for _, funcIndex := range elem.functionIndexes {
 		v.referencedFunctions[uint32(funcIndex)] = true
-		if elem.Kind != FuncRefType {
-			return ErrTypesDoNotMatch
+		if elem.kind != FuncRefType {
+			return errTypesDoNotMatch
 		}
 		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
 			return err
@@ -285,31 +285,31 @@ func (v *validator) validateElementSegment(elem *ElementSegment) error {
 	return nil
 }
 
-func (v *validator) validateDataSegment(data *DataSegment) error {
-	if data.Mode != ActiveDataMode {
+func (v *validator) validateDataSegment(data *dataSegment) error {
+	if data.mode != activeDataMode {
 		return nil
 	}
-	if err := v.validateMemoryExists(data.MemoryIndex); err != nil {
+	if err := v.validateMemoryExists(data.memoryIndex); err != nil {
 		return err
 	}
-	if err := v.validateConstExpression(data.OffsetExpression, I32); err != nil {
+	if err := v.validateConstExpression(data.offsetExpression, I32); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (v *validator) validateFunction(function *Function) error {
-	functionType := v.typeDefs[function.TypeIndex]
-	v.locals = append(functionType.ParamTypes, function.Locals...)
+func (v *validator) validateFunction(function *function) error {
+	functionType := v.typeDefs[function.typeIndex]
+	v.locals = append(functionType.ParamTypes, function.locals...)
 	v.returnType = functionType.ResultTypes
 	v.valueStack = v.valueStack[:0]
 	v.controlStack = v.controlStack[:0]
 
-	v.pushControlFrame(Block, []ValueType{}, functionType.ResultTypes)
+	v.pushControlFrame(block, []ValueType{}, functionType.ResultTypes)
 
-	decoder := NewDecoder(function.Body)
-	for decoder.HasMore() {
-		instruction, err := decoder.Decode()
+	decoder := newDecoder(function.body)
+	for decoder.hasMore() {
+		instruction, err := decoder.decode()
 		if err != nil {
 			return err
 		}
@@ -341,25 +341,25 @@ func (v *validator) validateConstExpression(
 	v.valueStack = v.valueStack[:0]
 	v.controlStack = v.controlStack[:0]
 
-	v.pushControlFrame(Block, []ValueType{}, []ValueType{expectedReturnType})
+	v.pushControlFrame(block, []ValueType{}, []ValueType{expectedReturnType})
 
-	decoder := NewDecoder(data)
-	for decoder.HasMore() {
-		instruction, err := decoder.Decode()
+	decoder := newDecoder(data)
+	for decoder.hasMore() {
+		instruction, err := decoder.decode()
 		if err != nil {
 			return err
 		}
 
-		if !v.isConstantInstruction(instruction) {
-			return ErrInvalidConstantExpression
+		if !v.isConstantinstruction(instruction) {
+			return errInvalidConstantExpression
 		}
 
 		// The order of the statements is important here. The validation for RefFunc
 		// checks whether the function index is referenced. Therefore, we must add
 		// the function index to the referencedFunctions map before validating the
 		// instruction.
-		if instruction.Opcode == RefFunc {
-			v.referencedFunctions[uint32(instruction.Immediates[0])] = true
+		if instruction.opcode == refFunc {
+			v.referencedFunctions[uint32(instruction.immediates[0])] = true
 		}
 
 		if err := v.validate(instruction); err != nil {
@@ -373,10 +373,10 @@ func (v *validator) validateConstExpression(
 	return err
 }
 
-func (v *validator) isConstantInstruction(instruction Instruction) bool {
-	opcode := instruction.Opcode
-	if opcode == GlobalGet {
-		globalIndex := instruction.Immediates[0]
+func (v *validator) isConstantinstruction(instruction instruction) bool {
+	opcode := instruction.opcode
+	if opcode == globalGet {
+		globalIndex := instruction.immediates[0]
 		if globalIndex >= uint64(len(v.importedTypes)) {
 			return false
 		}
@@ -384,311 +384,311 @@ func (v *validator) isConstantInstruction(instruction Instruction) bool {
 		return !v.importedTypes[globalIndex].IsMutable
 	}
 
-	return opcode == I32Const ||
-		opcode == I64Const ||
-		opcode == F32Const ||
-		opcode == F64Const ||
-		opcode == V128Const ||
-		opcode == RefNull ||
-		opcode == RefFunc
+	return opcode == i32Const ||
+		opcode == i64Const ||
+		opcode == f32Const ||
+		opcode == f64Const ||
+		opcode == v128Const ||
+		opcode == refNull ||
+		opcode == refFunc
 }
 
-func (v *validator) validate(instruction Instruction) error {
-	switch instruction.Opcode {
-	case Unreachable:
+func (v *validator) validate(instruction instruction) error {
+	switch instruction.opcode {
+	case unreachable:
 		return v.markFrameUnreachable()
-	case Nop:
+	case nop:
 		return nil
-	case Block, Loop:
+	case block, loop:
 		return v.validateBlock(instruction)
-	case If:
+	case ifOp:
 		return v.validateIf(instruction)
-	case Else:
+	case elseOp:
 		return v.validateElse()
-	case End:
+	case end:
 		return v.validateEnd()
-	case Br:
+	case br:
 		return v.validateBr(instruction)
-	case BrIf:
+	case brIf:
 		return v.validateBrIf(instruction)
-	case BrTable:
+	case brTable:
 		return v.validateBrTable(instruction)
-	case Return:
+	case returnOp:
 		return v.validateReturn()
-	case Call:
+	case call:
 		return v.validateCall(instruction)
-	case CallIndirect:
+	case callIndirect:
 		return v.validateCallIndirect(instruction)
-	case Drop:
+	case drop:
 		return v.validateDrop()
-	case Select:
-		return v.validateSelect(Bottom)
-	case SelectT:
-		return v.validateSelect(toValueType(instruction.Immediates[0]))
-	case LocalGet:
+	case selectOp:
+		return v.validateSelect(bottom)
+	case selectT:
+		return v.validateSelect(toValueType(instruction.immediates[0]))
+	case localGet:
 		return v.validateLocalGet(instruction)
-	case LocalSet:
+	case localSet:
 		return v.validateLocalSet(instruction)
-	case MemorySize:
+	case memorySize:
 		return v.validateMemorySize(instruction)
-	case MemoryGrow:
+	case memoryGrow:
 		return v.validateMemoryGrow(instruction)
-	case I32Const:
+	case i32Const:
 		return v.validateConst(I32)
-	case I64Const:
+	case i64Const:
 		return v.validateConst(I64)
-	case F32Const:
+	case f32Const:
 		return v.validateConst(F32)
-	case F64Const:
+	case f64Const:
 		return v.validateConst(F64)
-	case I32Eq, I32Ne, I32LtS, I32LtU, I32GtS, I32GtU, I32LeS, I32LeU, I32GeS,
-		I32GeU, I32Add, I32Sub, I32Mul, I32DivS, I32DivU, I32RemS, I32RemU, I32And,
-		I32Or, I32Xor, I32Shl, I32ShrS, I32ShrU, I32Rotl, I32Rotr:
+	case i32Eq, i32Ne, i32LtS, i32LtU, i32GtS, i32GtU, i32LeS, i32LeU, i32GeS,
+		i32GeU, i32Add, i32Sub, i32Mul, i32DivS, i32DivU, i32RemS, i32RemU, i32And,
+		i32Or, i32Xor, i32Shl, i32ShrS, i32ShrU, i32Rotl, i32Rotr:
 		return v.validateBinaryOp(I32, I32)
-	case I64Eq, I64Ne, I64LtS, I64LtU, I64GtS, I64GtU, I64LeS, I64LeU, I64GeS,
-		I64GeU:
+	case i64Eq, i64Ne, i64LtS, i64LtU, i64GtS, i64GtU, i64LeS, i64LeU, i64GeS,
+		i64GeU:
 		return v.validateBinaryOp(I64, I32)
-	case F32Eq, F32Ne, F32Lt, F32Gt, F32Le, F32Ge:
+	case f32Eq, f32Ne, f32Lt, f32Gt, f32Le, f32Ge:
 		return v.validateBinaryOp(F32, I32)
-	case F64Eq, F64Ne, F64Lt, F64Gt, F64Le, F64Ge:
+	case f64Eq, f64Ne, f64Lt, f64Gt, f64Le, f64Ge:
 		return v.validateBinaryOp(F64, I32)
-	case I64Add, I64Sub, I64Mul, I64DivS, I64DivU, I64RemS, I64RemU, I64And,
-		I64Or, I64Xor, I64Shl, I64ShrS, I64ShrU, I64Rotl, I64Rotr:
+	case i64Add, i64Sub, i64Mul, i64DivS, i64DivU, i64RemS, i64RemU, i64And,
+		i64Or, i64Xor, i64Shl, i64ShrS, i64ShrU, i64Rotl, i64Rotr:
 		return v.validateBinaryOp(I64, I64)
-	case F32Add, F32Sub, F32Mul, F32Div, F32Min, F32Max, F32Copysign:
+	case f32Add, f32Sub, f32Mul, f32Div, f32Min, f32Max, f32Copysign:
 		return v.validateBinaryOp(F32, F32)
-	case F64Add, F64Sub, F64Mul, F64Div, F64Min, F64Max, F64Copysign:
+	case f64Add, f64Sub, f64Mul, f64Div, f64Min, f64Max, f64Copysign:
 		return v.validateBinaryOp(F64, F64)
-	case I32Eqz, I32Clz, I32Ctz, I32Popcnt, I32Extend8S, I32Extend16S:
+	case i32Eqz, i32Clz, i32Ctz, i32Popcnt, i32Extend8S, i32Extend16S:
 		return v.validateUnaryOp(I32, I32)
-	case I64Eqz, I32WrapI64:
+	case i64Eqz, i32WrapI64:
 		return v.validateUnaryOp(I64, I32)
-	case I64Clz, I64Ctz, I64Popcnt, I64Extend8S, I64Extend16S, I64Extend32S:
+	case i64Clz, i64Ctz, i64Popcnt, i64Extend8S, i64Extend16S, i64Extend32S:
 		return v.validateUnaryOp(I64, I64)
-	case F32Abs, F32Neg, F32Ceil, F32Floor, F32Trunc, F32Nearest, F32Sqrt:
+	case f32Abs, f32Neg, f32Ceil, f32Floor, f32Trunc, f32Nearest, f32Sqrt:
 		return v.validateUnaryOp(F32, F32)
-	case F64Abs, F64Neg, F64Ceil, F64Floor, F64Trunc, F64Nearest, F64Sqrt:
+	case f64Abs, f64Neg, f64Ceil, f64Floor, f64Trunc, f64Nearest, f64Sqrt:
 		return v.validateUnaryOp(F64, F64)
-	case I32TruncF32S, I32TruncF32U, I32ReinterpretF32, I32TruncSatF32S,
-		I32TruncSatF32U:
+	case i32TruncF32S, i32TruncF32U, i32ReinterpretF32, i32TruncSatF32S,
+		i32TruncSatF32U:
 		return v.validateUnaryOp(F32, I32)
-	case I32TruncF64S, I32TruncF64U, I32TruncSatF64S, I32TruncSatF64U:
+	case i32TruncF64S, i32TruncF64U, i32TruncSatF64S, i32TruncSatF64U:
 		return v.validateUnaryOp(F64, I32)
-	case I64ExtendI32S, I64ExtendI32U:
+	case i64ExtendI32S, i64ExtendI32U:
 		return v.validateUnaryOp(I32, I64)
-	case I64TruncF32S, I64TruncF32U, I64TruncSatF32S, I64TruncSatF32U:
+	case i64TruncF32S, i64TruncF32U, i64TruncSatF32S, i64TruncSatF32U:
 		return v.validateUnaryOp(F32, I64)
-	case I64TruncF64S, I64TruncF64U, I64ReinterpretF64, I64TruncSatF64S,
-		I64TruncSatF64U:
+	case i64TruncF64S, i64TruncF64U, i64ReinterpretF64, i64TruncSatF64S,
+		i64TruncSatF64U:
 		return v.validateUnaryOp(F64, I64)
-	case F32ConvertI32S, F32ConvertI32U, F32ReinterpretI32:
+	case f32ConvertI32S, f32ConvertI32U, f32ReinterpretI32:
 		return v.validateUnaryOp(I32, F32)
-	case F32ConvertI64S, F32ConvertI64U:
+	case f32ConvertI64S, f32ConvertI64U:
 		return v.validateUnaryOp(I64, F32)
-	case F32DemoteF64:
+	case f32DemoteF64:
 		return v.validateUnaryOp(F64, F32)
-	case F64ConvertI32S, F64ConvertI32U:
+	case f64ConvertI32S, f64ConvertI32U:
 		return v.validateUnaryOp(I32, F64)
-	case F64ConvertI64S, F64ConvertI64U, F64ReinterpretI64:
+	case f64ConvertI64S, f64ConvertI64U, f64ReinterpretI64:
 		return v.validateUnaryOp(I64, F64)
-	case F64PromoteF32:
+	case f64PromoteF32:
 		return v.validateUnaryOp(F32, F64)
-	case RefNull:
+	case refNull:
 		return v.validateRefNull(instruction)
-	case RefIsNull:
+	case refIsNull:
 		return v.validateRefIsNull()
-	case RefFunc:
+	case refFunc:
 		return v.validateRefFunc(instruction)
-	case TableGet:
+	case tableGet:
 		return v.validateTableGet(instruction)
-	case TableSet:
+	case tableSet:
 		return v.validateTableSet(instruction)
-	case TableInit:
+	case tableInit:
 		return v.validateTableInit(instruction)
-	case TableCopy:
+	case tableCopy:
 		return v.validateTableCopy(instruction)
-	case TableGrow:
+	case tableGrow:
 		return v.validateTableGrow(instruction)
-	case TableSize:
+	case tableSize:
 		return v.validateTableSize(instruction)
-	case TableFill:
+	case tableFill:
 		return v.validateTableFill(instruction)
-	case ElemDrop:
+	case elemDrop:
 		return v.validateElemDrop(instruction)
-	case DataDrop:
+	case dataDrop:
 		return v.validateDataDrop(instruction)
-	case LocalTee:
+	case localTee:
 		return v.validateLocalTee(instruction)
-	case GlobalGet:
+	case globalGet:
 		return v.validateGlobalGet(instruction)
-	case GlobalSet:
+	case globalSet:
 		return v.validateGlobalSet(instruction)
-	case I32Load:
+	case i32Load:
 		return v.validateLoadN(instruction, I32, 4)
-	case I32Load8S, I32Load8U:
+	case i32Load8S, i32Load8U:
 		return v.validateLoadN(instruction, I32, 1)
-	case I32Load16S, I32Load16U:
+	case i32Load16S, i32Load16U:
 		return v.validateLoadN(instruction, I32, 2)
-	case I64Load:
+	case i64Load:
 		return v.validateLoadN(instruction, I64, 8)
-	case I64Load8S, I64Load8U:
+	case i64Load8S, i64Load8U:
 		return v.validateLoadN(instruction, I64, 1)
-	case I64Load16S, I64Load16U:
+	case i64Load16S, i64Load16U:
 		return v.validateLoadN(instruction, I64, 2)
-	case I64Load32S, I64Load32U:
+	case i64Load32S, i64Load32U:
 		return v.validateLoadN(instruction, I64, 4)
-	case F32Load:
+	case f32Load:
 		return v.validateLoadN(instruction, F32, 4)
-	case F64Load:
+	case f64Load:
 		return v.validateLoadN(instruction, F64, 8)
-	case I32Store:
+	case i32Store:
 		return v.validateStoreN(instruction, I32, 4)
-	case I32Store8:
+	case i32Store8:
 		return v.validateStoreN(instruction, I32, 1)
-	case I32Store16:
+	case i32Store16:
 		return v.validateStoreN(instruction, I32, 2)
-	case I64Store:
+	case i64Store:
 		return v.validateStoreN(instruction, I64, 8)
-	case I64Store8:
+	case i64Store8:
 		return v.validateStoreN(instruction, I64, 1)
-	case I64Store16:
+	case i64Store16:
 		return v.validateStoreN(instruction, I64, 2)
-	case I64Store32:
+	case i64Store32:
 		return v.validateStoreN(instruction, I64, 4)
-	case F32Store:
+	case f32Store:
 		return v.validateStoreN(instruction, F32, 4)
-	case F64Store:
+	case f64Store:
 		return v.validateStoreN(instruction, F64, 8)
-	case V128Load:
+	case v128Load:
 		return v.validateLoadN(instruction, V128, 16)
-	case V128Load8x8S, V128Load8x8U, V128Load16x4S, V128Load16x4U, V128Load32x2S,
-		V128Load32x2U, V128Load64Splat, V128Load64Zero:
+	case v128Load8x8S, v128Load8x8U, v128Load16x4S, v128Load16x4U, v128Load32x2S,
+		v128Load32x2U, v128Load64Splat, v128Load64Zero:
 		return v.validateLoadN(instruction, V128, 8)
-	case V128Load8Splat:
+	case v128Load8Splat:
 		return v.validateLoadN(instruction, V128, 1)
-	case V128Load16Splat:
+	case v128Load16Splat:
 		return v.validateLoadN(instruction, V128, 2)
-	case V128Load32Splat, V128Load32Zero:
+	case v128Load32Splat, v128Load32Zero:
 		return v.validateLoadN(instruction, V128, 4)
-	case V128Store:
+	case v128Store:
 		return v.validateStoreN(instruction, V128, 16)
-	case V128Const:
+	case v128Const:
 		return v.validateConst(V128)
-	case V128Load8Lane:
+	case v128Load8Lane:
 		return v.validateSimdLoadLane(instruction, 1)
-	case V128Load16Lane:
+	case v128Load16Lane:
 		return v.validateSimdLoadLane(instruction, 2)
-	case V128Load32Lane:
+	case v128Load32Lane:
 		return v.validateSimdLoadLane(instruction, 4)
-	case V128Load64Lane:
+	case v128Load64Lane:
 		return v.validateSimdLoadLane(instruction, 8)
-	case V128Store8Lane:
+	case v128Store8Lane:
 		return v.validateSimdStoreLane(instruction, 1)
-	case V128Store16Lane:
+	case v128Store16Lane:
 		return v.validateSimdStoreLane(instruction, 2)
-	case V128Store32Lane:
+	case v128Store32Lane:
 		return v.validateSimdStoreLane(instruction, 4)
-	case V128Store64Lane:
+	case v128Store64Lane:
 		return v.validateSimdStoreLane(instruction, 8)
-	case I8x16ExtractLaneS, I8x16ExtractLaneU:
+	case i8x16ExtractLaneS, i8x16ExtractLaneU:
 		return v.validateSimdLaneOp(instruction, 16, I32, false)
-	case I16x8ExtractLaneS, I16x8ExtractLaneU:
+	case i16x8ExtractLaneS, i16x8ExtractLaneU:
 		return v.validateSimdLaneOp(instruction, 8, I32, false)
-	case I32x4ExtractLane:
+	case i32x4ExtractLane:
 		return v.validateSimdLaneOp(instruction, 4, I32, false)
-	case I64x2ExtractLane:
+	case i64x2ExtractLane:
 		return v.validateSimdLaneOp(instruction, 2, I64, false)
-	case F32x4ExtractLane:
+	case f32x4ExtractLane:
 		return v.validateSimdLaneOp(instruction, 4, F32, false)
-	case F64x2ExtractLane:
+	case f64x2ExtractLane:
 		return v.validateSimdLaneOp(instruction, 2, F64, false)
-	case V128AnyTrue, I8x16AllTrue,
-		I8x16Bitmask, I16x8AllTrue, I16x8Bitmask, I32x4AllTrue, I32x4Bitmask,
-		I64x2AllTrue, I64x2Bitmask:
+	case v128AnyTrue, i8x16AllTrue,
+		i8x16Bitmask, i16x8AllTrue, i16x8Bitmask, i32x4AllTrue, i32x4Bitmask,
+		i64x2AllTrue, i64x2Bitmask:
 		return v.validateUnaryOp(V128, I32)
-	case V128Not, I8x16Abs, I8x16Neg, I8x16Popcnt, I16x8Abs, I16x8Neg,
-		I16x8ExtaddPairwiseI8x16S, I16x8ExtaddPairwiseI8x16U, I32x4Abs, I32x4Neg,
-		I32x4ExtaddPairwiseI16x8S, I32x4ExtaddPairwiseI16x8U, I64x2Abs, I64x2Neg,
-		F32x4Abs, F32x4Neg, F32x4Sqrt, F32x4Ceil, F32x4Floor, F32x4Trunc,
-		F32x4Nearest, F64x2Abs, F64x2Neg, F64x2Sqrt, F64x2Ceil, F64x2Floor,
-		F64x2Trunc, F64x2Nearest, I32x4TruncSatF32x4S, I32x4TruncSatF32x4U,
-		F32x4ConvertI32x4S, F32x4ConvertI32x4U, I16x8ExtendLowI8x16S,
-		I16x8ExtendHighI8x16S, I16x8ExtendLowI8x16U, I16x8ExtendHighI8x16U,
-		I32x4ExtendLowI16x8S, I32x4ExtendHighI16x8S, I32x4ExtendLowI16x8U,
-		I32x4ExtendHighI16x8U, I64x2ExtendLowI32x4S, I64x2ExtendHighI32x4S,
-		I64x2ExtendLowI32x4U, I64x2ExtendHighI32x4U, F64x2PromoteLowF32x4,
-		F32x4DemoteF64x2Zero, I32x4TruncSatF64x2SZero, I32x4TruncSatF64x2UZero,
-		F64x2ConvertLowI32x4S, F64x2ConvertLowI32x4U:
+	case v128Not, i8x16Abs, i8x16Neg, i8x16Popcnt, i16x8Abs, i16x8Neg,
+		i16x8ExtaddPairwiseI8x16S, i16x8ExtaddPairwiseI8x16U, i32x4Abs, i32x4Neg,
+		i32x4ExtaddPairwiseI16x8S, i32x4ExtaddPairwiseI16x8U, i64x2Abs, i64x2Neg,
+		f32x4Abs, f32x4Neg, f32x4Sqrt, f32x4Ceil, f32x4Floor, f32x4Trunc,
+		f32x4Nearest, f64x2Abs, f64x2Neg, f64x2Sqrt, f64x2Ceil, f64x2Floor,
+		f64x2Trunc, f64x2Nearest, i32x4TruncSatF32x4S, i32x4TruncSatF32x4U,
+		f32x4ConvertI32x4S, f32x4ConvertI32x4U, i16x8ExtendLowI8x16S,
+		i16x8ExtendHighI8x16S, i16x8ExtendLowI8x16U, i16x8ExtendHighI8x16U,
+		i32x4ExtendLowI16x8S, i32x4ExtendHighI16x8S, i32x4ExtendLowI16x8U,
+		i32x4ExtendHighI16x8U, i64x2ExtendLowI32x4S, i64x2ExtendHighI32x4S,
+		i64x2ExtendLowI32x4U, i64x2ExtendHighI32x4U, f64x2PromoteLowF32x4,
+		f32x4DemoteF64x2Zero, i32x4TruncSatF64x2SZero, i32x4TruncSatF64x2UZero,
+		f64x2ConvertLowI32x4S, f64x2ConvertLowI32x4U:
 		return v.validateUnaryOp(V128, V128)
-	case V128And, V128Andnot, V128Or, V128Xor, I8x16Shuffle, I8x16Swizzle,
-		I8x16Eq, I8x16Ne, I8x16LtS, I8x16LtU, I8x16GtS, I8x16GtU, I8x16LeS,
-		I8x16LeU, I8x16GeS, I8x16GeU, I16x8Eq, I16x8Ne, I16x8LtS, I16x8LtU,
-		I16x8GtS, I16x8GtU, I16x8LeS, I16x8LeU, I16x8GeS, I16x8GeU, I32x4Eq,
-		I32x4Ne, I32x4LtS, I32x4LtU, I32x4GtS, I32x4GtU, I32x4LeS, I32x4LeU,
-		I32x4GeS, I32x4GeU, I64x2Eq, I64x2Ne, I64x2LtS, I64x2GtS, I64x2LeS,
-		I64x2GeS, F32x4Eq, F32x4Ne, F32x4Lt, F32x4Gt, F32x4Le, F32x4Ge, F64x2Eq,
-		F64x2Ne, F64x2Lt, F64x2Gt, F64x2Le, F64x2Ge, I8x16Add, I8x16AddSatS,
-		I8x16AddSatU, I8x16Sub, I8x16SubSatS, I8x16SubSatU, I8x16MinS, I8x16MinU,
-		I8x16MaxS, I8x16MaxU, I8x16AvgrU, I16x8Add, I16x8AddSatS, I16x8AddSatU,
-		I16x8Sub, I16x8SubSatS, I16x8SubSatU, I16x8Mul, I16x8MinS, I16x8MinU,
-		I16x8MaxS, I16x8MaxU, I16x8AvgrU, I16x8Q15mulrSatS, I32x4Add, I32x4Sub,
-		I32x4Mul, I32x4MinS, I32x4MinU, I32x4MaxS, I32x4MaxU, I32x4DotI16x8S,
-		I64x2Add, I64x2Sub, I64x2Mul, F32x4Add, F32x4Sub, F32x4Mul, F32x4Div,
-		F32x4Min, F32x4Max, F32x4Pmin, F32x4Pmax, F64x2Add, F64x2Sub, F64x2Mul,
-		F64x2Div, F64x2Min, F64x2Max, F64x2Pmin, F64x2Pmax, I8x16NarrowI16x8S,
-		I8x16NarrowI16x8U, I16x8NarrowI32x4S, I16x8NarrowI32x4U,
-		I16x8ExtmulLowI8x16S, I16x8ExtmulHighI8x16S, I16x8ExtmulLowI8x16U,
-		I16x8ExtmulHighI8x16U, I32x4ExtmulLowI16x8S, I32x4ExtmulHighI16x8S,
-		I32x4ExtmulLowI16x8U, I32x4ExtmulHighI16x8U, I64x2ExtmulLowI32x4S,
-		I64x2ExtmulHighI32x4S, I64x2ExtmulLowI32x4U, I64x2ExtmulHighI32x4U:
+	case v128And, v128Andnot, v128Or, v128Xor, i8x16Shuffle, i8x16Swizzle,
+		i8x16Eq, i8x16Ne, i8x16LtS, i8x16LtU, i8x16GtS, i8x16GtU, i8x16LeS,
+		i8x16LeU, i8x16GeS, i8x16GeU, i16x8Eq, i16x8Ne, i16x8LtS, i16x8LtU,
+		i16x8GtS, i16x8GtU, i16x8LeS, i16x8LeU, i16x8GeS, i16x8GeU, i32x4Eq,
+		i32x4Ne, i32x4LtS, i32x4LtU, i32x4GtS, i32x4GtU, i32x4LeS, i32x4LeU,
+		i32x4GeS, i32x4GeU, i64x2Eq, i64x2Ne, i64x2LtS, i64x2GtS, i64x2LeS,
+		i64x2GeS, f32x4Eq, f32x4Ne, f32x4Lt, f32x4Gt, f32x4Le, f32x4Ge, f64x2Eq,
+		f64x2Ne, f64x2Lt, f64x2Gt, f64x2Le, f64x2Ge, i8x16Add, i8x16AddSatS,
+		i8x16AddSatU, i8x16Sub, i8x16SubSatS, i8x16SubSatU, i8x16MinS, i8x16MinU,
+		i8x16MaxS, i8x16MaxU, i8x16AvgrU, i16x8Add, i16x8AddSatS, i16x8AddSatU,
+		i16x8Sub, i16x8SubSatS, i16x8SubSatU, i16x8Mul, i16x8MinS, i16x8MinU,
+		i16x8MaxS, i16x8MaxU, i16x8AvgrU, i16x8Q15mulrSatS, i32x4Add, i32x4Sub,
+		i32x4Mul, i32x4MinS, i32x4MinU, i32x4MaxS, i32x4MaxU, i32x4DotI16x8S,
+		i64x2Add, i64x2Sub, i64x2Mul, f32x4Add, f32x4Sub, f32x4Mul, f32x4Div,
+		f32x4Min, f32x4Max, f32x4Pmin, f32x4Pmax, f64x2Add, f64x2Sub, f64x2Mul,
+		f64x2Div, f64x2Min, f64x2Max, f64x2Pmin, f64x2Pmax, i8x16NarrowI16x8S,
+		i8x16NarrowI16x8U, i16x8NarrowI32x4S, i16x8NarrowI32x4U,
+		i16x8ExtmulLowI8x16S, i16x8ExtmulHighI8x16S, i16x8ExtmulLowI8x16U,
+		i16x8ExtmulHighI8x16U, i32x4ExtmulLowI16x8S, i32x4ExtmulHighI16x8S,
+		i32x4ExtmulLowI16x8U, i32x4ExtmulHighI16x8U, i64x2ExtmulLowI32x4S,
+		i64x2ExtmulHighI32x4S, i64x2ExtmulLowI32x4U, i64x2ExtmulHighI32x4U:
 		return v.validateBinaryOp(V128, V128)
-	case V128Bitselect:
+	case v128Bitselect:
 		return v.validateBitselect()
-	case I8x16Splat, I16x8Splat, I32x4Splat:
+	case i8x16Splat, i16x8Splat, i32x4Splat:
 		return v.validateUnaryOp(I32, V128)
-	case I64x2Splat:
+	case i64x2Splat:
 		return v.validateUnaryOp(I64, V128)
-	case F32x4Splat:
+	case f32x4Splat:
 		return v.validateUnaryOp(F32, V128)
-	case F64x2Splat:
+	case f64x2Splat:
 		return v.validateUnaryOp(F64, V128)
-	case I8x16ReplaceLane:
+	case i8x16ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 16, I32, true)
-	case I16x8ReplaceLane:
+	case i16x8ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 8, I32, true)
-	case I32x4ReplaceLane:
+	case i32x4ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 4, I32, true)
-	case I64x2ReplaceLane:
+	case i64x2ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 2, I64, true)
-	case F32x4ReplaceLane:
+	case f32x4ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 4, F32, true)
-	case F64x2ReplaceLane:
+	case f64x2ReplaceLane:
 		return v.validateSimdLaneOp(instruction, 2, F64, true)
-	case I8x16Shl, I8x16ShrS, I8x16ShrU, I16x8Shl, I16x8ShrS, I16x8ShrU,
-		I32x4Shl, I32x4ShrS, I32x4ShrU, I64x2Shl, I64x2ShrS, I64x2ShrU:
+	case i8x16Shl, i8x16ShrS, i8x16ShrU, i16x8Shl, i16x8ShrS, i16x8ShrU,
+		i32x4Shl, i32x4ShrS, i32x4ShrU, i64x2Shl, i64x2ShrS, i64x2ShrU:
 		return v.validateVectorScalar(I32)
-	case MemoryInit:
+	case memoryInit:
 		return v.validateMemoryInit(instruction)
-	case MemoryCopy:
+	case memoryCopy:
 		return v.validateMemoryCopy(instruction)
-	case MemoryFill:
+	case memoryFill:
 		return v.validateMemoryFill()
 	default:
-		return fmt.Errorf("unknown opcode %d", instruction.Opcode)
+		return fmt.Errorf("unknown opcode %d", instruction.opcode)
 	}
 }
 
-func (v *validator) validateBlock(instruction Instruction) error {
-	startTypes, endTypes := v.getBlockTypes(int32(instruction.Immediates[0]))
+func (v *validator) validateBlock(instruction instruction) error {
+	startTypes, endTypes := v.getBlockTypes(int32(instruction.immediates[0]))
 	if _, err := v.popExpectedValues(startTypes); err != nil {
 		return err
 	}
 
-	v.pushControlFrame(instruction.Opcode, startTypes, endTypes)
+	v.pushControlFrame(instruction.opcode, startTypes, endTypes)
 	return nil
 }
 
-func (v *validator) validateIf(instruction Instruction) error {
+func (v *validator) validateIf(instruction instruction) error {
 	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
@@ -701,11 +701,11 @@ func (v *validator) validateElse() error {
 		return err
 	}
 
-	if frame.opcode != If {
-		return ErrElseMustMatchIf
+	if frame.opcode != ifOp {
+		return errElseMustMatchIf
 	}
 
-	v.pushControlFrame(Else, frame.startTypes, frame.endTypes)
+	v.pushControlFrame(elseOp, frame.startTypes, frame.endTypes)
 	return nil
 }
 
@@ -715,15 +715,15 @@ func (v *validator) validateEnd() error {
 		return err
 	}
 
-	if frame.opcode == If {
+	if frame.opcode == ifOp {
 		// This is the end of an if without an else, therefore the end types
 		// should match the start types.
 		if len(frame.startTypes) != len(frame.endTypes) {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
 		for i := range frame.startTypes {
 			if frame.startTypes[i] != frame.endTypes[i] {
-				return ErrTypesDoNotMatch
+				return errTypesDoNotMatch
 			}
 		}
 	}
@@ -732,10 +732,10 @@ func (v *validator) validateEnd() error {
 	return nil
 }
 
-func (v *validator) validateBr(instruction Instruction) error {
-	labelIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateBr(instruction instruction) error {
+	labelIndex := uint32(instruction.immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -747,10 +747,10 @@ func (v *validator) validateBr(instruction Instruction) error {
 	return v.markFrameUnreachable()
 }
 
-func (v *validator) validateBrIf(instruction Instruction) error {
-	labelIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateBrIf(instruction instruction) error {
+	labelIndex := uint32(instruction.immediates[0])
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	if _, err := v.popExpectedValue(I32); err != nil {
@@ -767,8 +767,8 @@ func (v *validator) validateBrIf(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateBrTable(instruction Instruction) error {
-	immediates := instruction.Immediates
+func (v *validator) validateBrTable(instruction instruction) error {
+	immediates := instruction.immediates
 	table := immediates[:len(immediates)-1]
 	labelIndex := uint32(immediates[len(immediates)-1])
 
@@ -777,7 +777,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 	}
 
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return ErrBrLabelIndexOutOfBounds
+		return errBrLabelIndexOutOfBounds
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -786,7 +786,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 	for _, index := range table {
 		if index >= uint64(len(v.controlStack)) {
-			return ErrBrLabelIndexOutOfBounds
+			return errBrLabelIndexOutOfBounds
 		}
 
 		frameIndex := len(v.controlStack) - 1 - int(index)
@@ -810,7 +810,7 @@ func (v *validator) validateBrTable(instruction Instruction) error {
 
 func (v *validator) validateReturn() error {
 	if v.returnType == nil {
-		return ErrReturnTypeNotSet
+		return errReturnTypeNotSet
 	}
 	if _, err := v.popExpectedValues(v.returnType); err != nil {
 		return err
@@ -818,8 +818,8 @@ func (v *validator) validateReturn() error {
 	return v.markFrameUnreachable()
 }
 
-func (v *validator) validateCall(instruction Instruction) error {
-	functionIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateCall(instruction instruction) error {
+	functionIndex := uint32(instruction.immediates[0])
 	if err := v.validateFunctionTypeExists(functionIndex); err != nil {
 		return err
 	}
@@ -831,20 +831,20 @@ func (v *validator) validateCall(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateCallIndirect(instruction Instruction) error {
-	typeIndex := uint32(instruction.Immediates[0])
-	tableIndex := uint32(instruction.Immediates[1])
+func (v *validator) validateCallIndirect(instruction instruction) error {
+	typeIndex := uint32(instruction.immediates[0])
+	tableIndex := uint32(instruction.immediates[1])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
 
 	tableType := v.tableTypes[tableIndex]
 	if tableType.ReferenceType != FuncRefType {
-		return ErrTableTypeMustBeFuncRef
+		return errTableTypeMustBeFuncRef
 	}
 
 	if typeIndex >= uint32(len(v.typeDefs)) {
-		return ErrCallIndirectTypeIndexOutOfBounds
+		return errCallIndirectTypeIndexOutOfBounds
 	}
 	functionType := v.typeDefs[typeIndex]
 
@@ -876,17 +876,17 @@ func (v *validator) validateSelect(t ValueType) error {
 		return err
 	}
 
-	if t == Bottom {
+	if t == bottom {
 		if !((isNumber(type1) && isNumber(type2)) ||
 			(isVector(type1) && isVector(type2))) {
-			return ErrTypesDoNotMatch
+			return errTypesDoNotMatch
 		}
-		if type1 != type2 && type1 != Bottom && type2 != Bottom {
-			return ErrTypesDoNotMatch
+		if type1 != type2 && type1 != bottom && type2 != bottom {
+			return errTypesDoNotMatch
 		}
 	}
 
-	if type1 == Bottom {
+	if type1 == bottom {
 		v.pushValue(type2)
 	} else {
 		v.pushValue(type1)
@@ -895,16 +895,16 @@ func (v *validator) validateSelect(t ValueType) error {
 	return nil
 }
 
-func (v *validator) validateLocalTee(instruction Instruction) error {
-	localType, err := v.getLocalType(instruction.Immediates[0])
+func (v *validator) validateLocalTee(instruction instruction) error {
+	localType, err := v.getLocalType(instruction.immediates[0])
 	if err != nil {
 		return err
 	}
 	return v.validateUnaryOp(localType, localType)
 }
 
-func (v *validator) validateLocalGet(instruction Instruction) error {
-	localType, err := v.getLocalType(instruction.Immediates[0])
+func (v *validator) validateLocalGet(instruction instruction) error {
+	localType, err := v.getLocalType(instruction.immediates[0])
 	if err != nil {
 		return err
 	}
@@ -912,8 +912,8 @@ func (v *validator) validateLocalGet(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateLocalSet(instruction Instruction) error {
-	localType, err := v.getLocalType(instruction.Immediates[0])
+func (v *validator) validateLocalSet(instruction instruction) error {
+	localType, err := v.getLocalType(instruction.immediates[0])
 	if err != nil {
 		return err
 	}
@@ -921,23 +921,23 @@ func (v *validator) validateLocalSet(instruction Instruction) error {
 	return err
 }
 
-func (v *validator) validateGlobalGet(instruction Instruction) error {
-	globalIndex := instruction.Immediates[0]
+func (v *validator) validateGlobalGet(instruction instruction) error {
+	globalIndex := instruction.immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 	return v.validateConst(v.globalTypes[globalIndex].ValueType)
 }
 
-func (v *validator) validateGlobalSet(instruction Instruction) error {
-	globalIndex := instruction.Immediates[0]
+func (v *validator) validateGlobalSet(instruction instruction) error {
+	globalIndex := instruction.immediates[0]
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 
 	globalType := v.globalTypes[globalIndex]
 	if !globalType.IsMutable {
-		return ErrGlobalIsImmutable
+		return errGlobalIsImmutable
 	}
 
 	_, err := v.popExpectedValue(globalType.ValueType)
@@ -945,7 +945,7 @@ func (v *validator) validateGlobalSet(instruction Instruction) error {
 }
 
 func (v *validator) validateLoadN(
-	instruction Instruction,
+	instruction instruction,
 	valueType ValueType,
 	sizeBytes uint32,
 ) error {
@@ -961,7 +961,7 @@ func (v *validator) validateLoadN(
 }
 
 func (v *validator) validateStoreN(
-	instruction Instruction,
+	instruction instruction,
 	valueType ValueType,
 	sizeBytes uint32,
 ) error {
@@ -983,20 +983,20 @@ func (v *validator) validateStoreN(
 }
 
 func (v *validator) validateMemArg(
-	instruction Instruction,
+	instruction instruction,
 	nBytes uint32,
 ) error {
-	align := instruction.Immediates[0]
+	align := instruction.immediates[0]
 	if 1<<align > nBytes {
-		return ErrAlignmentTooLarge
+		return errAlignmentTooLarge
 	}
 	return nil
 }
 
-func (v *validator) validateMemorySize(instruction Instruction) error {
-	memoryIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateMemorySize(instruction instruction) error {
+	memoryIndex := uint32(instruction.immediates[0])
 	if !v.features.MultipleMemories && memoryIndex != 0 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1006,10 +1006,10 @@ func (v *validator) validateMemorySize(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateMemoryGrow(instruction Instruction) error {
-	memoryIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateMemoryGrow(instruction instruction) error {
+	memoryIndex := uint32(instruction.immediates[0])
 	if !v.features.MultipleMemories && memoryIndex != 0 {
-		return ErrMultipleMemoriesNotEnabled
+		return errMultipleMemoriesNotEnabled
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1028,15 +1028,15 @@ func (v *validator) validateMemoryFill() error {
 	return nil
 }
 
-func (v *validator) validateMemoryInit(instruction Instruction) error {
+func (v *validator) validateMemoryInit(instruction instruction) error {
 	if v.dataCount == nil {
-		return ErrDataCountNotSet
+		return errDataCountNotSet
 	}
 
-	dataIndex := uint32(instruction.Immediates[0])
-	memoryIndex := uint32(instruction.Immediates[1])
+	dataIndex := uint32(instruction.immediates[0])
+	memoryIndex := uint32(instruction.immediates[1])
 	if dataIndex >= uint32(*v.dataCount) {
-		return ErrDataIndexOutOfBounds
+		return errDataIndexOutOfBounds
 	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
@@ -1047,9 +1047,9 @@ func (v *validator) validateMemoryInit(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateMemoryCopy(instruction Instruction) error {
-	destMemoryIndex := uint32(instruction.Immediates[0])
-	srcMemoryIndex := uint32(instruction.Immediates[1])
+func (v *validator) validateMemoryCopy(instruction instruction) error {
+	destMemoryIndex := uint32(instruction.immediates[0])
+	srcMemoryIndex := uint32(instruction.immediates[1])
 	if err := v.validateMemoryExists(destMemoryIndex); err != nil {
 		return err
 	}
@@ -1064,28 +1064,28 @@ func (v *validator) validateMemoryCopy(instruction Instruction) error {
 
 func (v *validator) validateFunctionTypeExists(index uint32) error {
 	if index >= uint32(len(v.funcTypes)) {
-		return ErrFunctionIndexOutOfBounds
+		return errFunctionIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
-		return ErrTableIndexOutOfBounds
+		return errTableIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateMemoryExists(memoryIndex uint32) error {
 	if memoryIndex >= uint32(len(v.memTypes)) {
-		return ErrMemoryIndexOutOfBounds
+		return errMemoryIndexOutOfBounds
 	}
 	return nil
 }
 
 func (v *validator) validateGlobalExists(globalIndex uint32) error {
 	if globalIndex >= uint32(len(v.globalTypes)) {
-		return ErrGlobalIndexOutOfBounds
+		return errGlobalIndexOutOfBounds
 	}
 	return nil
 }
@@ -1095,10 +1095,10 @@ func (v *validator) validateConst(valueType ValueType) error {
 	return nil
 }
 
-func (v *validator) validateRefNull(instruction Instruction) error {
-	refType := toValueType(instruction.Immediates[0])
+func (v *validator) validateRefNull(instruction instruction) error {
+	refType := toValueType(instruction.immediates[0])
 	if _, ok := refType.(ReferenceType); !ok {
-		return ErrRefNullRequiresReferenceType
+		return errRefNullRequiresReferenceType
 	}
 	v.pushValue(refType)
 	return nil
@@ -1112,20 +1112,20 @@ func (v *validator) validateRefIsNull() error {
 	return nil
 }
 
-func (v *validator) validateRefFunc(instruction Instruction) error {
-	funcIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateRefFunc(instruction instruction) error {
+	funcIndex := uint32(instruction.immediates[0])
 	if err := v.validateFunctionTypeExists(funcIndex); err != nil {
 		return err
 	}
 	if !v.referencedFunctions[funcIndex] {
-		return ErrUndeclaredFunctionReference
+		return errUndeclaredFunctionReference
 	}
 	v.pushValue(FuncRefType)
 	return nil
 }
 
-func (v *validator) validateTableGet(instruction Instruction) error {
-	tableIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateTableGet(instruction instruction) error {
+	tableIndex := uint32(instruction.immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
@@ -1133,14 +1133,14 @@ func (v *validator) validateTableGet(instruction Instruction) error {
 }
 
 func (v *validator) validateSimdLaneOp(
-	instruction Instruction,
+	instruction instruction,
 	rangeVal uint64,
 	scalarType ValueType,
 	isReplace bool,
 ) error {
-	laneIndex := instruction.Immediates[0]
+	laneIndex := instruction.immediates[0]
 	if laneIndex >= rangeVal {
-		return ErrSimdLaneIndexOutOfBounds
+		return errSimdLaneIndexOutOfBounds
 	}
 	if isReplace {
 		return v.validateVectorScalar(scalarType)
@@ -1148,8 +1148,8 @@ func (v *validator) validateSimdLaneOp(
 	return v.validateUnaryOp(V128, scalarType)
 }
 
-func (v *validator) validateTableSet(instruction Instruction) error {
-	tableIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateTableSet(instruction instruction) error {
+	tableIndex := uint32(instruction.immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
@@ -1163,11 +1163,11 @@ func (v *validator) validateTableSet(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateTableInit(instruction Instruction) error {
-	elemIndex := uint32(instruction.Immediates[0])
-	tableIndex := uint32(instruction.Immediates[1])
+func (v *validator) validateTableInit(instruction instruction) error {
+	elemIndex := uint32(instruction.immediates[0])
+	tableIndex := uint32(instruction.immediates[1])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return ErrElementIndexOutOfBounds
+		return errElementIndexOutOfBounds
 	}
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
@@ -1179,15 +1179,15 @@ func (v *validator) validateTableInit(instruction Instruction) error {
 	tableType := v.tableTypes[tableIndex]
 	elemType := v.elemTypes[elemIndex]
 	if tableType.ReferenceType != elemType {
-		return ErrTypesDoNotMatch
+		return errTypesDoNotMatch
 	}
 
 	return nil
 }
 
-func (v *validator) validateTableCopy(instruction Instruction) error {
-	destTableIndex := uint32(instruction.Immediates[0])
-	srcTableIndex := uint32(instruction.Immediates[1])
+func (v *validator) validateTableCopy(instruction instruction) error {
+	destTableIndex := uint32(instruction.immediates[0])
+	srcTableIndex := uint32(instruction.immediates[1])
 	if err := v.validateTableExists(destTableIndex); err != nil {
 		return err
 	}
@@ -1201,14 +1201,14 @@ func (v *validator) validateTableCopy(instruction Instruction) error {
 	destTableType := v.tableTypes[destTableIndex]
 	srcTableType := v.tableTypes[srcTableIndex]
 	if destTableType.ReferenceType != srcTableType.ReferenceType {
-		return ErrTypesDoNotMatch
+		return errTypesDoNotMatch
 	}
 
 	return nil
 }
 
-func (v *validator) validateTableGrow(instruction Instruction) error {
-	tableIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateTableGrow(instruction instruction) error {
+	tableIndex := uint32(instruction.immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
@@ -1223,8 +1223,8 @@ func (v *validator) validateTableGrow(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateTableSize(instruction Instruction) error {
-	tableIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateTableSize(instruction instruction) error {
+	tableIndex := uint32(instruction.immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
@@ -1232,8 +1232,8 @@ func (v *validator) validateTableSize(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateTableFill(instruction Instruction) error {
-	tableIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateTableFill(instruction instruction) error {
+	tableIndex := uint32(instruction.immediates[0])
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
 	}
@@ -1250,22 +1250,22 @@ func (v *validator) validateTableFill(instruction Instruction) error {
 	return nil
 }
 
-func (v *validator) validateElemDrop(instruction Instruction) error {
-	elemIndex := uint32(instruction.Immediates[0])
+func (v *validator) validateElemDrop(instruction instruction) error {
+	elemIndex := uint32(instruction.immediates[0])
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return ErrElementIndexOutOfBounds
+		return errElementIndexOutOfBounds
 	}
 	return nil
 }
 
-func (v *validator) validateDataDrop(instruction Instruction) error {
+func (v *validator) validateDataDrop(instruction instruction) error {
 	if v.dataCount == nil {
-		return ErrDataCountNotSet
+		return errDataCountNotSet
 	}
 
-	dataIndex := uint32(instruction.Immediates[0])
+	dataIndex := uint32(instruction.immediates[0])
 	if dataIndex >= uint32(*v.dataCount) {
-		return ErrDataIndexOutOfBounds
+		return errDataIndexOutOfBounds
 	}
 	return nil
 }
@@ -1315,7 +1315,7 @@ func (v *validator) validateVectorScalar(scalar ValueType) error {
 }
 
 func (v *validator) validateSimdLoadLane(
-	instruction Instruction,
+	instruction instruction,
 	sizeBytes uint32,
 ) error {
 	if err := v.validateMemoryExists(0); err != nil {
@@ -1324,9 +1324,9 @@ func (v *validator) validateSimdLoadLane(
 	if err := v.validateMemArg(instruction, sizeBytes); err != nil {
 		return err
 	}
-	laneIndex := uint32(instruction.Immediates[3])
+	laneIndex := uint32(instruction.immediates[3])
 	if laneIndex >= 16/sizeBytes {
-		return ErrSimdLaneIndexOutOfBounds
+		return errSimdLaneIndexOutOfBounds
 	}
 	if _, err := v.popExpectedValue(V128); err != nil {
 		return err
@@ -1339,7 +1339,7 @@ func (v *validator) validateSimdLoadLane(
 }
 
 func (v *validator) validateSimdStoreLane(
-	instruction Instruction,
+	instruction instruction,
 	sizeBytes uint32,
 ) error {
 	if err := v.validateMemoryExists(0); err != nil {
@@ -1359,7 +1359,7 @@ func (v *validator) validateSimdStoreLane(
 
 func (v *validator) getLocalType(index uint64) (ValueType, error) {
 	if index >= uint64(len(v.locals)) {
-		return nil, ErrLocalIndexOutOfBounds
+		return nil, errLocalIndexOutOfBounds
 	}
 	return v.locals[index], nil
 }
@@ -1383,11 +1383,11 @@ func (v *validator) popValue() (ValueType, error) {
 	if len(v.valueStack) == currentFrame.height && currentFrame.unreachable {
 		// Special case, can occur after an unconditional branch when the stack is
 		// typed polymorphically.
-		return Bottom, nil
+		return bottom, nil
 	}
 
 	if len(v.valueStack) == currentFrame.height {
-		return nil, ErrValueStackUnderflow
+		return nil, errValueStackUnderflow
 	}
 
 	value := v.valueStack[len(v.valueStack)-1]
@@ -1400,8 +1400,8 @@ func (v *validator) popExpectedValue(expected ValueType) (ValueType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if val != expected && val != Bottom && expected != Bottom {
-		return nil, ErrTypesDoNotMatch
+	if val != expected && val != bottom && expected != bottom {
+		return nil, errTypesDoNotMatch
 	}
 	return val, nil
 }
@@ -1420,15 +1420,15 @@ func (v *validator) popExpectedValues(
 	return values, nil
 }
 
-func (v *validator) peekControlFrame() (*controlFrame, error) {
+func (v *validator) peekControlFrame() (*validationControlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return nil, ErrControlStackEmpty
+		return nil, errControlStackEmpty
 	}
 	return &v.controlStack[len(v.controlStack)-1], nil
 }
 
-func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
-	v.controlStack = append(v.controlStack, controlFrame{
+func (v *validator) pushControlFrame(opcode opcode, start, end []ValueType) {
+	v.controlStack = append(v.controlStack, validationControlFrame{
 		opcode:      opcode,
 		startTypes:  start,
 		endTypes:    end,
@@ -1438,23 +1438,23 @@ func (v *validator) pushControlFrame(opcode Opcode, start, end []ValueType) {
 	v.pushValues(start)
 }
 
-func (v *validator) popControlFrame() (controlFrame, error) {
+func (v *validator) popControlFrame() (validationControlFrame, error) {
 	if len(v.controlStack) == 0 {
-		return controlFrame{}, ErrControlStackEmpty
+		return validationControlFrame{}, errControlStackEmpty
 	}
 	frame := v.controlStack[len(v.controlStack)-1]
 	if _, err := v.popExpectedValues(frame.endTypes); err != nil {
-		return controlFrame{}, err
+		return validationControlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return controlFrame{}, ErrValueStackHeightMismatch
+		return validationControlFrame{}, errValueStackHeightMismatch
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
 }
 
-func (v *validator) labelTypes(frame controlFrame) []ValueType {
-	if frame.opcode == Loop {
+func (v *validator) labelTypes(frame validationControlFrame) []ValueType {
+	if frame.opcode == loop {
 		return frame.startTypes
 	}
 	return frame.endTypes
@@ -1500,13 +1500,13 @@ func toValueType(code uint64) ValueType {
 	case uint64(ExternRefType):
 		return ExternRefType
 	default:
-		return Bottom
+		return bottom
 	}
 }
 
 func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	if limits.Max == nil {
@@ -1514,11 +1514,11 @@ func validateLimits(limits Limits, maximumRange uint32) error {
 	}
 
 	if *limits.Max > maximumRange {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	if limits.Min > *limits.Max {
-		return ErrInvalidLimits
+		return errInvalidLimits
 	}
 
 	return nil

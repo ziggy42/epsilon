@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -34,58 +35,64 @@ type specTestRunner struct {
 	runtime            *epsilon.Runtime
 	moduleInstanceMap  map[string]*epsilon.ModuleInstance
 	lastModuleInstance *epsilon.ModuleInstance
-	spectestImports    map[string]any
+	spectestImports    map[string]map[string]any
 }
 
 func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
-	limits := epsilon.Limits{Min: 1, Max: &importMemoryLimitMax}
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: limits})
 	tableLimitMax := uint32(20)
-	table := epsilon.NewTable(epsilon.TableType{
-		Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
-		ReferenceType: epsilon.FuncRefType,
-	})
-	spectestImports := map[string]any{
-		"global_i32": int32(666),
-		"global_i64": int64(666),
-		"global_f32": float32(666.6),
-		"global_f64": float64(666.6),
-		"table":      table,
-		"memory":     memory,
-		"print_i32": func(args ...any) []any {
+
+	spectestImports := epsilon.NewImportBuilder().
+		AddGlobal("spectest", "global_i32", int32(666), false, epsilon.I32).
+		AddGlobal("spectest", "global_i64", int64(666), false, epsilon.I64).
+		AddGlobal("spectest", "global_f32", float32(666.6), false, epsilon.F32).
+		AddGlobal("spectest", "global_f64", float64(666.6), false, epsilon.F64).
+		AddTable("spectest", "table", epsilon.NewTable(epsilon.TableType{
+			Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
+			ReferenceType: epsilon.FuncRefType,
+		})).
+		AddMemory(
+			"spectest",
+			"memory",
+			epsilon.NewMemory(
+				epsilon.MemoryType{
+					Limits: epsilon.Limits{Min: 1, Max: &importMemoryLimitMax},
+				},
+			),
+		).
+		AddHostFunc("spectest", "print_i32", func(args ...any) []any {
 			fmt.Printf("%d", args[0].(int32))
 			return nil
-		},
-		"print_i64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i64", func(args ...any) []any {
 			fmt.Printf("%d", args[0].(int64))
 			return nil
-		},
-		"print_f32": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f32", func(args ...any) []any {
 			fmt.Printf("%f", args[0].(float32))
 			return nil
-		},
-		"print_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f64", func(args ...any) []any {
 			fmt.Printf("%f", args[0].(float64))
 			return nil
-		},
-		"print_i32_f32": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i32_f32", func(args ...any) []any {
 			fmt.Printf("%d %f", args[0].(int32), args[1].(float32))
 			return nil
-		},
-		"print_i64_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_i64_f64", func(args ...any) []any {
 			fmt.Printf("%d %f", args[0].(int64), args[1].(float64))
 			return nil
-		},
-		"print_f64_f64": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print_f64_f64", func(args ...any) []any {
 			fmt.Printf("%f %f", args[0].(float64), args[1].(float64))
 			return nil
-		},
-		"print": func(args ...any) []any {
+		}).
+		AddHostFunc("spectest", "print", func(args ...any) []any {
 			fmt.Printf("Print called!")
 			return nil
-		},
-	}
+		}).
+		Build()
 
 	return &specTestRunner{
 		t:                 t,
@@ -145,18 +152,12 @@ func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 }
 
 func (r *specTestRunner) buildImports() map[string]map[string]any {
-	imports := map[string]map[string]any{
-		"spectest": r.spectestImports,
-	}
-
+	builder := epsilon.NewImportBuilder()
 	for regName, moduleInstance := range r.moduleInstanceMap {
-		exports := make(map[string]any)
-		for _, export := range moduleInstance.Exports {
-			exports[export.Name] = export.Value
-		}
-		imports[regName] = exports
+		builder.AddModuleExports(regName, moduleInstance)
 	}
-
+	imports := builder.Build()
+	maps.Copy(imports, r.spectestImports)
 	return imports
 }
 
@@ -318,8 +319,8 @@ func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
 	switch laneType {
 	case "f32":
 		for i := range uint32(4) {
-			expLane := epsilon.SimdF32x4ExtractLane(expected, i)
-			actLane := epsilon.SimdF32x4ExtractLane(actual, i)
+			expLane := simdF32x4ExtractLane(expected, i)
+			actLane := simdF32x4ExtractLane(actual, i)
 			if !floatsEqual(expLane, actLane) {
 				return false
 			}
@@ -327,8 +328,8 @@ func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
 		return true
 	case "f64":
 		for i := range uint32(2) {
-			expLane := epsilon.SimdF64x2ExtractLane(expected, i)
-			actLane := epsilon.SimdF64x2ExtractLane(actual, i)
+			expLane := simdF64x2ExtractLane(expected, i)
+			actLane := simdF64x2ExtractLane(actual, i)
 			if !floatsEqual(expLane, actLane) {
 				return false
 			}
@@ -395,7 +396,10 @@ func parseV128(v wabt.Value) (any, error) {
 		binary.Write(buf, binary.LittleEndian, lane)
 	}
 
-	return epsilon.NewV128ValueFromSlice(buf.Bytes()), nil
+	return epsilon.V128Value{
+		Low:  binary.LittleEndian.Uint64(buf.Bytes()[0:8]),
+		High: binary.LittleEndian.Uint64(buf.Bytes()[8:16]),
+	}, nil
 }
 
 func parseScalar(value string, valueType string) (any, error) {
@@ -476,4 +480,22 @@ func parseF64(s string) (float64, error) {
 		return 0, err
 	}
 	return math.Float64frombits(val), nil
+}
+
+func simdF32x4ExtractLane(v epsilon.V128Value, laneIndex uint32) float32 {
+	source := v.Low
+	if laneIndex >= 2 {
+		source = v.High
+	}
+
+	shift := (laneIndex & 1) * 32
+	return math.Float32frombits(uint32(source >> shift))
+}
+
+func simdF64x2ExtractLane(v epsilon.V128Value, laneIndex uint32) float64 {
+	bits := v.Low
+	if laneIndex == 1 {
+		bits = v.High
+	}
+	return math.Float64frombits(bits)
 }

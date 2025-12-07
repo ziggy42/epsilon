@@ -259,8 +259,8 @@ func (r *repl) handleMem(args []string) error {
 func (r *repl) handleList() {
 	for name, module := range r.moduleInstances {
 		fmt.Println(name)
-		for _, export := range module.Exports {
-			fmt.Printf("  %s\n", export.Name)
+		for _, exportName := range module.ExportNames() {
+			fmt.Printf("  %s\n", exportName)
 		}
 	}
 }

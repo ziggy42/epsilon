@@ -16,33 +16,33 @@ package epsilon
 
 import "fmt"
 
-type ResolvedImports struct {
-	Functions []FunctionInstance
-	Tables    []*Table
-	Memories  []*Memory
-	Globals   []*Global
+type resolvedImports struct {
+	functions []FunctionInstance
+	tables    []*Table
+	memories  []*Memory
+	globals   []*Global
 }
 
-// ResolveImports resolves the imports declared in the given module against
+// resolveImports resolves the imports declared in the given module against
 // the provided map of available imports.
-func ResolveImports(
-	module *Module,
+func resolveImports(
+	module *moduleDefinition,
 	imports map[string]map[string]any,
-) (*ResolvedImports, error) {
+) (*resolvedImports, error) {
 	functions := []FunctionInstance{}
 	tables := []*Table{}
 	memories := []*Memory{}
 	globals := []*Global{}
 
-	for _, imp := range module.Imports {
-		obj, err := findImport(imports, imp.ModuleName, imp.Name)
+	for _, imp := range module.imports {
+		obj, err := findImport(imports, imp.moduleName, imp.name)
 		if err != nil {
 			return nil, err
 		}
 
-		switch t := imp.Type.(type) {
-		case FunctionTypeIndex:
-			function, err := resolveFunctionImport(obj, module.Types[t], imp)
+		switch t := imp.importType.(type) {
+		case functionTypeIndex:
+			function, err := resolveFunctionImport(obj, module.types[t], imp)
 			if err != nil {
 				return nil, err
 			}
@@ -67,11 +67,11 @@ func ResolveImports(
 			tables = append(tables, table)
 		}
 	}
-	return &ResolvedImports{
-		Functions: functions,
-		Tables:    tables,
-		Memories:  memories,
-		Globals:   globals,
+	return &resolvedImports{
+		functions: functions,
+		tables:    tables,
+		memories:  memories,
+		globals:   globals,
 	}, nil
 }
 
@@ -90,38 +90,38 @@ func findImport(
 func resolveFunctionImport(
 	obj any,
 	functionType FunctionType,
-	imp Import,
+	imp moduleImport,
 ) (FunctionInstance, error) {
 	if f, ok := obj.(FunctionInstance); ok {
 		if !f.GetType().Equal(&functionType) {
 			return nil, fmt.Errorf(
-				"type mismatch for %s.%s", imp.ModuleName, imp.Name,
+				"type mismatch for %s.%s", imp.moduleName, imp.name,
 			)
 		}
 		return f, nil
 	}
 
 	if f, ok := obj.(func(...any) []any); ok {
-		return &HostFunction{Type: functionType, HostCode: f}, nil
+		return &hostFunction{functionType: functionType, hostCode: f}, nil
 	}
 
-	return nil, fmt.Errorf("%s.%s not a function", imp.ModuleName, imp.Name)
+	return nil, fmt.Errorf("%s.%s not a function", imp.moduleName, imp.name)
 }
 
 func resolveGlobalImport(
 	obj any,
 	globalType GlobalType,
-	imp Import,
+	imp moduleImport,
 ) (*Global, error) {
 	if global, ok := obj.(*Global); ok {
 		if global.Mutable != globalType.IsMutable {
 			return nil, fmt.Errorf(
-				"mutability mismatch for %s.%s", imp.ModuleName, imp.Name,
+				"mutability mismatch for %s.%s", imp.moduleName, imp.name,
 			)
 		}
 		if global.Type != nil && global.Type != globalType.ValueType {
 			return nil, fmt.Errorf(
-				"value type mismatch for %s.%s", imp.ModuleName, imp.Name,
+				"value type mismatch for %s.%s", imp.moduleName, imp.name,
 			)
 		}
 		return global, nil
@@ -129,7 +129,7 @@ func resolveGlobalImport(
 
 	if !valueMatchesType(obj, globalType.ValueType) {
 		return nil, fmt.Errorf(
-			"value type mismatch for %s.%s", imp.ModuleName, imp.Name,
+			"value type mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
 	return &Global{
@@ -142,16 +142,16 @@ func resolveGlobalImport(
 func resolveMemoryImport(
 	obj any,
 	memoryType MemoryType,
-	imp Import,
+	imp moduleImport,
 ) (*Memory, error) {
 	memory, ok := obj.(*Memory)
 	if !ok {
-		return nil, fmt.Errorf("%s.%s not a memory", imp.ModuleName, imp.Name)
+		return nil, fmt.Errorf("%s.%s not a memory", imp.moduleName, imp.name)
 	}
 
 	provided := Limits{Min: uint32(memory.Size()), Max: memory.Limits.Max}
 	if !limitsMatch(provided, memoryType.Limits) {
-		return nil, fmt.Errorf("limit mismatch for %s.%s", imp.ModuleName, imp.Name)
+		return nil, fmt.Errorf("limit mismatch for %s.%s", imp.moduleName, imp.name)
 	}
 	return memory, nil
 }
@@ -159,23 +159,23 @@ func resolveMemoryImport(
 func resolveTableImport(
 	obj any,
 	tableType TableType,
-	imp Import,
+	imp moduleImport,
 ) (*Table, error) {
 	table, ok := obj.(*Table)
 	if !ok {
-		return nil, fmt.Errorf("%s.%s not a table", imp.ModuleName, imp.Name)
+		return nil, fmt.Errorf("%s.%s not a table", imp.moduleName, imp.name)
 	}
 
 	if table.Type.ReferenceType != tableType.ReferenceType {
 		return nil, fmt.Errorf(
-			"reference type mismatch for %s.%s", imp.ModuleName, imp.Name,
+			"reference type mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
 
 	provided := Limits{Min: uint32(table.Size()), Max: table.Type.Limits.Max}
 	if !limitsMatch(provided, tableType.Limits) {
 		return nil, fmt.Errorf(
-			"limit mismatch for %s.%s", imp.ModuleName, imp.Name,
+			"limit mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
 	return table, nil

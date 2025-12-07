@@ -14,144 +14,126 @@
 
 package epsilon
 
-type Function struct {
-	TypeIndex uint32
-	Locals    []ValueType
-	Body      []byte
+type function struct {
+	typeIndex uint32
+	locals    []ValueType
+	body      []byte
 }
 
-type ExportIndexKind int
+type exportIndexKind int
 
 const (
-	FunctionExportKind ExportIndexKind = 0x0
-	TableExportKind    ExportIndexKind = 0x1
-	MemoryExportKind   ExportIndexKind = 0x2
-	GlobalExportKind   ExportIndexKind = 0x3
+	functionExportKind exportIndexKind = iota
+	tableExportKind
+	memoryExportKind
+	globalExportKind
 )
 
-// Import represents a WASM import.
+// moduleImport represents a WASM import.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#imports
-type Import struct {
-	ModuleName string
-	Name       string
-	Type       ImportType
+type moduleImport struct {
+	moduleName string
+	name       string
+	importType importType
 }
 
-// ImportType is a marker interface for the type of an import.
-// It can be a FunctionTypeIndex, TableType, MemoryType, or GlobalType.
-type ImportType interface {
+// importType is a marker interface for the type of an import.
+type importType interface {
 	isImportType()
 }
 
-// FunctionTypeIndex is the type for an imported function, which is represented
+// functionTypeIndex is the type for an imported function, which is represented
 // by its type index.
-type FunctionTypeIndex uint32
+type functionTypeIndex uint32
 
-func (FunctionTypeIndex) isImportType() {}
+func (functionTypeIndex) isImportType() {}
 func (TableType) isImportType()         {}
 func (MemoryType) isImportType()        {}
 func (GlobalType) isImportType()        {}
 
-// Export defines a set of exports that become accessible to the host
+// export defines a set of exports that become accessible to the host
 // environment once the module has been instantiated.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#exports.
-type Export struct {
-	Name      string
-	IndexType ExportIndexKind
-	Index     uint32
+type export struct {
+	name      string
+	indexType exportIndexKind
+	index     uint32
 }
 
-type TableType struct {
-	ReferenceType ReferenceType
-	Limits        Limits
-}
-
-type MemoryType struct {
-	Limits Limits
-}
-
-// ElementMode specifies how an element segment should be handled.
-type ElementMode int
+// elementMode specifies how an element segment should be handled.
+type elementMode int
 
 const (
-	ActiveElementMode ElementMode = iota
-	PassiveElementMode
-	DeclarativeElementMode
+	activeElementMode elementMode = iota
+	passiveElementMode
+	declarativeElementMode
 )
 
-// ElementSegment represents an element segment in a WebAssembly module.
+// elementSegment represents an element segment in a WebAssembly module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#syntax-elem
-type ElementSegment struct {
-	Mode ElementMode
-	Kind ReferenceType
+type elementSegment struct {
+	mode elementMode
+	kind ReferenceType
 
-	// FuncIndexes is a list of function indices. Used when FuncIndexesExpressions
-	// is empty.
-	FuncIndexes []int32
+	// functionIndexes is a list of function indices. Used when
+	// functionIndexesExpressions is empty.
+	functionIndexes []int32
 
-	// FuncIndexesExpressions is a list of constant expressions that produce
-	// function references. Used when FuncIndexes is empty.
-	FuncIndexesExpressions [][]byte
+	// functionIndexesExpressions is a list of constant expressions that produce
+	// function references. Used when functionIndexes is empty.
+	functionIndexesExpressions [][]byte
 
-	// TableIndex is the index of the table to initialize. Only used when
+	// tableIndex is the index of the table to initialize. Only used when
 	// Mode == ActiveElementMode.
-	TableIndex uint32
+	tableIndex uint32
 
-	// OffsetExpression is a constant expression that computes the starting offset
+	// offsetExpression is a constant expression that computes the starting offset
 	// in the table. Only used when Mode == ActiveElementMode.
-	OffsetExpression []byte
+	offsetExpression []byte
 }
 
-// GlobalType defines the type of a global variable, which includes its value
-// type and whether it is mutable.
+// globalVariable represents a global variable in a WebAssembly module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#globals
-type GlobalType struct {
-	ValueType ValueType
-	IsMutable bool
+type globalVariable struct {
+	globalType     GlobalType
+	initExpression []byte
 }
 
-// GlobalVariable represents a global variable in a WebAssembly module.
-// See https://webassembly.github.io/spec/core/syntax/modules.html#globals
-type GlobalVariable struct {
-	GlobalType     GlobalType
-	InitExpression []byte
-}
-
-// DataMode specifies how a data segment should be handled.
-type DataMode int
+// dataMode specifies how a data segment should be handled.
+type dataMode int
 
 const (
-	ActiveDataMode DataMode = iota
-	PassiveDataMode
+	activeDataMode dataMode = iota
+	passiveDataMode
 )
 
-// DataSegment represents a data segment in a WebAssembly module.
+// dataSegment represents a data segment in a WebAssembly module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#data-segments
-type DataSegment struct {
-	Mode    DataMode
-	Content []byte
+type dataSegment struct {
+	mode    dataMode
+	content []byte
 
-	// MemoryIndex is the index of the memory to initialize. Only used when
+	// memoryIndex is the index of the memory to initialize. Only used when
 	// Mode == ActiveDataMode.
-	MemoryIndex uint32
+	memoryIndex uint32
 
-	// OffsetExpression is a constant expression that computes the starting offset
+	// offsetExpression is a constant expression that computes the starting offset
 	// in memory. Only used when Mode == ActiveDataMode.
-	OffsetExpression []byte
+	offsetExpression []byte
 }
 
-// Module represents a WASM module.
+// moduleDefinition represents a non-instantiated WASM module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#modules.
-type Module struct {
-	Types           []FunctionType
-	Imports         []Import
-	Exports         []Export
-	StartIndex      *uint32
-	Tables          []TableType
-	Memories        []MemoryType
-	Funcs           []Function
-	ElementSegments []ElementSegment
-	GlobalVariables []GlobalVariable
-	DataSegments    []DataSegment
-	DataCount       *uint64
+type moduleDefinition struct {
+	types           []FunctionType
+	imports         []moduleImport
+	exports         []export
+	startIndex      *uint32
+	tables          []TableType
+	memories        []MemoryType
+	funcs           []function
+	elementSegments []elementSegment
+	globalVariables []globalVariable
+	dataSegments    []dataSegment
+	dataCount       *uint64
 }
