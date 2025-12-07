@@ -31,7 +31,7 @@ import (
 type specTestRunner struct {
 	t                  *testing.T
 	wasmDict           map[string][]byte
-	vm                 *epsilon.VM
+	runtime            *epsilon.Runtime
 	moduleInstanceMap  map[string]*epsilon.ModuleInstance
 	lastModuleInstance *epsilon.ModuleInstance
 	spectestImports    map[string]any
@@ -90,7 +90,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	return &specTestRunner{
 		t:                 t,
 		wasmDict:          wasmDict,
-		vm:                epsilon.NewVM(),
+		runtime:           epsilon.NewRuntime(),
 		moduleInstanceMap: make(map[string]*epsilon.ModuleInstance),
 		spectestImports:   spectestImports,
 	}
@@ -162,12 +162,8 @@ func (r *specTestRunner) buildImports() map[string]map[string]any {
 
 func (r *specTestRunner) handleModule(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
-	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-	if err != nil {
-		r.fatalf(cmd.Line, "failed to parse module %s: %v", cmd.Filename, err)
-	}
-
-	instance, err := r.vm.Instantiate(module, r.buildImports())
+	instance, err := r.runtime.
+		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 	if err != nil {
 		r.fatalf(cmd.Line, "failed to instantiate module %s: %v", cmd.Filename, err)
 	}
@@ -202,12 +198,8 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
 		wasmBytes := r.wasmDict[cmd.Filename]
-		module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-		if err != nil {
-			r.fatalf(cmd.Line, "failed to parse module %s: %v", cmd.Filename, err)
-		}
-
-		_, err = r.vm.Instantiate(module, r.buildImports())
+		_, err := r.runtime.
+			InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 		if err == nil {
 			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
 		}
@@ -222,13 +214,8 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
-	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-	if err != nil {
-		// We accept also parsing errors as valid form of invalid module.
-		return
-	}
-
-	_, err = r.vm.Instantiate(module, r.buildImports())
+	_, err := r.runtime.
+		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
@@ -242,14 +229,8 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 	}
 
 	wasmBytes := r.wasmDict[cmd.Filename]
-	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-	if err != nil {
-		return
-	}
-
-	// Checks on the instructions are not done in the parser, but later during
-	// validation. Therefore we also need to try to instantiate the module.
-	_, err = r.vm.Instantiate(module, r.buildImports())
+	_, err := r.runtime.
+		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
@@ -257,13 +238,8 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 
 func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
-	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-	if err != nil {
-		// A parsing error is a valid form of being uninstantiable.
-		return
-	}
-
-	_, err = r.vm.Instantiate(module, r.buildImports())
+	_, err := r.runtime.
+		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
 	}
@@ -271,12 +247,8 @@ func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 
 func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
 	wasmBytes := r.wasmDict[cmd.Filename]
-	module, err := epsilon.NewParser(bytes.NewReader(wasmBytes)).Parse()
-	if err != nil {
-		r.fatalf(cmd.Line, "failed to parse module %s: %v", cmd.Filename, err)
-	}
-
-	_, err = r.vm.Instantiate(module, r.buildImports())
+	_, err := r.runtime.
+		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
 	}
@@ -294,9 +266,9 @@ func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
 			}
 			args[i] = val
 		}
-		return r.vm.Invoke(moduleInstance, action.Field, args...)
+		return moduleInstance.Invoke(action.Field, args...)
 	case "get":
-		res, err := r.vm.Get(moduleInstance, action.Field)
+		res, err := moduleInstance.GetGlobal(action.Field)
 		return []any{res}, err
 	default:
 		return nil, fmt.Errorf("unknown action type %s", action.Type)
