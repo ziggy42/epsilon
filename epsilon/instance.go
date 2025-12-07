@@ -83,9 +83,9 @@ type FunctionInstance interface {
 
 // wasmFunction is the runtime representation of a function defined in WASM.
 type wasmFunction struct {
-	Type   FunctionType
-	Module *ModuleInstance
-	Code   function
+	functionType FunctionType
+	module       *ModuleInstance
+	code         function
 	// We cache the continuation pc for each block-like opcde we encounter so we
 	// can compute it only once. The key is the pc of the first instruction inside
 	// the block.
@@ -101,23 +101,23 @@ func newWasmFunction(
 	function function,
 ) *wasmFunction {
 	return &wasmFunction{
-		Type:          funType,
-		Module:        module,
-		Code:          function,
+		functionType:  funType,
+		module:        module,
+		code:          function,
 		jumpCache:     map[uint]uint{},
 		jumpElseCache: map[uint]uint{},
 	}
 }
 
-func (wf *wasmFunction) GetType() *FunctionType { return &wf.Type }
+func (wf *wasmFunction) GetType() *FunctionType { return &wf.functionType }
 
 // hostFunction represents a function defined by the host environment.
 type hostFunction struct {
-	Type     FunctionType
-	HostCode func(...any) []any
+	functionType FunctionType
+	hostCode     func(...any) []any
 }
 
-func (hf *hostFunction) GetType() *FunctionType { return &hf.Type }
+func (hf *hostFunction) GetType() *FunctionType { return &hf.functionType }
 
 // Global is a global variable.
 type Global struct {

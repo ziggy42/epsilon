@@ -221,18 +221,18 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popN(len(function.Type.ParamTypes))
-	for _, local := range function.Code.locals {
+	locals := vm.stack.popN(len(function.functionType.ParamTypes))
+	for _, local := range function.code.locals {
 		locals = append(locals, defaultValue(local))
 	}
 
 	callFrame := &callFrame{
-		decoder: newDecoder(function.Code.body),
+		decoder: newDecoder(function.code.body),
 		controlStack: []*controlFrame{{
 			opcode:         block,
-			continuationPc: uint(len(function.Code.body)),
-			inputCount:     uint(len(function.Type.ParamTypes)),
-			outputCount:    uint(len(function.Type.ResultTypes)),
+			continuationPc: uint(len(function.code.body)),
+			inputCount:     uint(len(function.functionType.ParamTypes)),
+			outputCount:    uint(len(function.functionType.ResultTypes)),
 			stackHeight:    vm.stack.size(),
 		}},
 		locals:   locals,
@@ -256,7 +256,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	}
 
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	values := vm.stack.popN(len(callFrame.function.Type.ResultTypes))
+	values := vm.stack.popN(len(callFrame.function.functionType.ResultTypes))
 	return values, nil
 }
 
@@ -1148,7 +1148,7 @@ func (vm *vm) currentCallFrame() *callFrame {
 }
 
 func (vm *vm) currentModuleInstance() *ModuleInstance {
-	return vm.currentCallFrame().function.Module
+	return vm.currentCallFrame().function.module
 }
 
 func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
@@ -1889,7 +1889,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
 	}()
 
 	args := vm.stack.popN(len(fun.GetType().ParamTypes))
-	res = fun.HostCode(args...)
+	res = fun.hostCode(args...)
 	return res, nil
 }
 
@@ -1901,12 +1901,12 @@ func (vm *vm) invokeInitExpression(
 	// We create a fake function to execute the expression.
 	// The expression is expected to return a single value.
 	function := wasmFunction{
-		Type: FunctionType{
+		functionType: FunctionType{
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},
 		},
-		Code:   function{body: expression},
-		Module: moduleInstance,
+		code:   function{body: expression},
+		module: moduleInstance,
 	}
 	results, err := vm.invokeWasmFunction(&function)
 	if err != nil {
