@@ -14,8 +14,6 @@
 
 package epsilon
 
-
-
 // Binary opcodes for WebAssembly instructions.
 // It uses a uint32 to accommodate both single-byte and multi-byte opcodes.
 // See https://webassembly.github.io/spec/core/appendix/index-instructions.html

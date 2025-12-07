@@ -35,10 +35,10 @@ const (
 	sixthBitMask    = uint64(1 << 6)
 )
 
-// This buffer exists for perfomance reasons: it makes sure only a single
-// allocation is done to parse the immediates across multiple Decode
-// invocations and multiple Decoders. Note that this means immediates should
-// never be stored in between Decode calls since their values will be corrupted.
+// This buffer exists for performance reasons: it makes sure only a single
+// allocation is done to parse the immediates across multiple Decode invocations
+// and multiple Decoders. Note that this means immediates should never be stored
+// in between Decode calls since their values will be corrupted.
 var immediatesBuffer []uint64 = make([]uint64, 16)
 
 type Decoder struct {
