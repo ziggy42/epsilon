@@ -91,10 +91,11 @@ func (s *ValueStack) PopValueType(vt ValueType) any {
 }
 
 func (s *ValueStack) PopValueTypes(valueTypes []ValueType) []any {
-	results := make([]any, len(valueTypes))
-	for i := len(valueTypes) - 1; i >= 0; i-- {
-		results[i] = s.PopValueType(valueTypes[i])
-	}
+	count := len(valueTypes)
+	newLen := len(s.data) - count
+	results := make([]any, count)
+	copy(results, s.data[newLen:])
+	s.data = s.data[:newLen]
 	return results
 }
 
