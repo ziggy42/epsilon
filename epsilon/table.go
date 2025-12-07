@@ -109,9 +109,7 @@ func (t *Table) InitFromAnySlice(startIndex int32, values []any) error {
 		return ErrTableOutOfBounds
 	}
 
-	for i, val := range values {
-		t.Elements[startIndex+int32(i)] = val
-	}
+	copy(t.Elements[startIndex:], values)
 	return nil
 }
 
