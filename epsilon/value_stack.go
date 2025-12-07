@@ -28,9 +28,7 @@ func (s *ValueStack) Push(v any) {
 }
 
 func (s *ValueStack) PushAll(values []any) {
-	for _, v := range values {
-		s.Push(v)
-	}
+	s.data = append(s.data, values...)
 }
 
 func (s *ValueStack) Drop() {
@@ -105,12 +103,14 @@ func (s *ValueStack) PopValueTypes(valueTypes []ValueType) []any {
 	return results
 }
 
-func (s *ValueStack) Size() uint {
-	return uint(len(s.data))
+func (s *ValueStack) Unwind(targetHeight, preserveCount uint) {
+	valuesToPreserve := s.data[s.Size()-preserveCount:]
+	s.data = s.data[:targetHeight]
+	s.data = append(s.data, valuesToPreserve...)
 }
 
-func (s *ValueStack) Resize(newSize uint) {
-	s.data = s.data[:newSize]
+func (s *ValueStack) Size() uint {
+	return uint(len(s.data))
 }
 
 func popAs[T any](s *ValueStack) T {

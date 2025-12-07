@@ -1248,7 +1248,7 @@ func (vm *VM) handleElse() {
 
 func (vm *VM) handleEnd() {
 	frame := vm.popControlFrame()
-	vm.unwindStack(frame.StackHeight, frame.OutputCount)
+	vm.stack.Unwind(frame.StackHeight, frame.OutputCount)
 }
 
 func (vm *VM) handleBr(instruction Instruction) {
@@ -1292,7 +1292,7 @@ func (vm *VM) brToLabel(labelIndex uint32) {
 		arity = targetFrame.OutputCount
 	}
 
-	vm.unwindStack(targetFrame.StackHeight, arity)
+	vm.stack.Unwind(targetFrame.StackHeight, arity)
 	if targetFrame.Opcode == Loop {
 		vm.pushControlFrame(targetFrame)
 	}
@@ -1699,12 +1699,6 @@ func handleSimdReplaceLane[T WasmNumber](
 	laneValue := pop()
 	vector := vm.stack.PopV128()
 	vm.stack.Push(replaceLane(vector, laneIndex, laneValue))
-}
-
-func (vm *VM) unwindStack(targetHeight, arity uint) {
-	valuesToPreserve := vm.stack.PeekN(arity)
-	vm.stack.Resize(targetHeight)
-	vm.stack.PushAll(valuesToPreserve)
 }
 
 func (vm *VM) getBlockInputOutputCount(blockType int32) (uint, uint) {
