@@ -180,19 +180,15 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 			call_indirect (type $op))
 	)`)
 
-	hostSub := func(args ...any) []any {
-		x := args[0].(int32)
-		return []any{x - 1}
-	}
-
-	table := NewTable(TableType{
-		ReferenceType: FuncRefType,
-		Limits:        Limits{Min: 2},
-	})
-
 	imports := NewImportBuilder().
-		AddHostFunc("env", "host_sub", hostSub).
-		AddTable("env", "table", table).
+		AddHostFunc("env", "host_sub", func(args ...any) []any {
+			x := args[0].(int32)
+			return []any{x - 1}
+		}).
+		AddTable("env", "table", NewTable(TableType{
+			ReferenceType: FuncRefType,
+			Limits:        Limits{Min: 2},
+		})).
 		Build()
 
 	instance, err := NewRuntime().

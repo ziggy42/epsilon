@@ -91,7 +91,7 @@ func NewImportBuilder() *ImportBuilder {
 
 func (b *ImportBuilder) AddHostFunc(
 	module, name string,
-	fn any,
+	fn func(...any) []any,
 ) *ImportBuilder {
 	b.ensureModule(module)
 	b.imports[module][name] = fn
