@@ -242,6 +242,10 @@ func (p *parser) parseCustomSection(payloadLen uint32) error {
 		return fmt.Errorf("failed to read custom section name length: %w", err)
 	}
 
+	if nameLength > math.MaxUint32 {
+		return errIntegerTooLarge
+	}
+
 	nameBytes := make([]byte, nameLength)
 	if _, err := io.ReadFull(p.reader, nameBytes); err != nil {
 		return fmt.Errorf("failed to read custom section name: %w", err)
@@ -763,7 +767,7 @@ func (p *parser) parseUint32() (uint32, error) {
 		return 0, err
 	}
 	if val > math.MaxUint32 {
-		return 0, fmt.Errorf("integer too large")
+		return 0, errIntegerTooLarge
 	}
 	return uint32(val), nil
 }
