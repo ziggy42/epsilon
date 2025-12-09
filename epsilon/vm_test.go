@@ -146,7 +146,7 @@ func TestExecuteIf(t *testing.T) {
 		t.Fatalf("failed to execute function: %v", err)
 	}
 	expected := int32(2)
-	if result[0] != int32(2) {
+	if result[0] != expected {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
