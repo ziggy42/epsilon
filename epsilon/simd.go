@@ -2269,7 +2269,10 @@ func saturateF32toInt32(f float32) int32 {
 	if math.IsNaN(float64(f)) {
 		return 0
 	}
-	if f > math.MaxInt32 {
+
+	// We use an explicit float rather than comparing against math.MaxInt32
+	// to avoid subtle differences in behavior between architectures.
+	if f >= 2147483648.0 {
 		return math.MaxInt32
 	}
 	if f < math.MinInt32 {
