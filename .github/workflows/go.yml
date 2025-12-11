@@ -33,8 +33,8 @@ jobs:
         go-version-file: 'go.mod'
     - name: Install WABT
       run: |
-        wget https://github.com/WebAssembly/wabt/releases/download/1.0.39/wabt-1.0.39-linux-arm64.tar.gz 
-        tar -xzf wabt-1.0.39-linux-arm64.tar.gz 
+        wget https://github.com/WebAssembly/wabt/releases/download/1.0.39/wabt-1.0.39-linux-x64.tar.gz 
+        tar -xzf wabt-1.0.39-linux-x64.tar.gz 
         echo "$(pwd)/wabt-1.0.39/bin" >> $GITHUB_PATH 
     - name: Build
       run: go build ./...
