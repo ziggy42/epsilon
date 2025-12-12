@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"testing"
 
@@ -30,12 +31,14 @@ func TestRuntimeTrivialFunction(t *testing.T) {
 			i32.add)
 	)`)
 
-	instance, err := NewRuntime().InstantiateModule(bytes.NewReader(wasm))
+	instance, err := NewRuntime().
+		InstantiateModule(context.Background(), bytes.NewReader(wasm))
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
 	}
 
-	results, err := instance.Invoke("add", int32(5), int32(3))
+	results, err := instance.
+		Invoke(context.Background(), "add", int32(5), int32(3))
 	if err != nil {
 		t.Fatalf("failed to invoke function: %v", err)
 	}
@@ -63,13 +66,17 @@ func TestRuntimeImportedFunction(t *testing.T) {
 		}).
 		Build()
 
-	instance, err := NewRuntime().
-		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+	instance, err := NewRuntime().InstantiateModuleWithImports(
+		context.Background(),
+		bytes.NewReader(wasm),
+		imports,
+	)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
 	}
 
-	results, err := instance.Invoke("computeArea", int32(7), int32(6))
+	results, err := instance.
+		Invoke(context.Background(), "computeArea", int32(7), int32(6))
 	if err != nil {
 		t.Fatalf("failed to invoke function: %v", err)
 	}
@@ -100,13 +107,14 @@ func TestRuntimeImportedMemory(t *testing.T) {
 		AddMemory("env", "memory", memory).
 		Build()
 
+	ctx := context.Background()
 	instance, err := NewRuntime().
-		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+		InstantiateModuleWithImports(ctx, bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
 	}
 
-	results, err := instance.Invoke("readAt", int32(100))
+	results, err := instance.Invoke(ctx, "readAt", int32(100))
 	if err != nil {
 		t.Fatalf("failed to invoke function: %v", err)
 	}
@@ -145,12 +153,12 @@ func TestRuntimeImportedGlobal(t *testing.T) {
 		Build()
 
 	instance, err := NewRuntime().
-		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+		InstantiateModuleWithImports(context.Background(), bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
 	}
 
-	results, err := instance.Invoke("addOffset", int32(23))
+	results, err := instance.Invoke(context.Background(), "addOffset", int32(23))
 	if err != nil {
 		t.Fatalf("failed to invoke function: %v", err)
 	}
@@ -179,7 +187,6 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 			local.get 0
 			call_indirect (type $op))
 	)`)
-
 	imports := NewImportBuilder().
 		AddHostFunc("env", "host_sub", func(args ...any) []any {
 			x := args[0].(int32)
@@ -190,14 +197,15 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 			Limits:        Limits{Min: 2},
 		})).
 		Build()
+	ctx := context.Background()
 
 	instance, err := NewRuntime().
-		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+		InstantiateModuleWithImports(ctx, bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
 	}
 
-	results, err := instance.Invoke("applyOp", int32(0), int32(10))
+	results, err := instance.Invoke(ctx, "applyOp", int32(0), int32(10))
 	if err != nil {
 		t.Fatalf("failed to invoke applyOp with host function: %v", err)
 	}
@@ -205,7 +213,7 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 		t.Fatalf("expected 9, got %d", results[0])
 	}
 
-	results, err = instance.Invoke("applyOp", int32(1), int32(10))
+	results, err = instance.Invoke(ctx, "applyOp", int32(1), int32(10))
 	if err != nil {
 		t.Fatalf("failed to invoke applyOp with WASM function: %v", err)
 	}
@@ -225,16 +233,17 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 			local.get 0
 			i32.mul)
 	)`)
+	ctx := context.Background()
 
 	runtime := NewRuntime()
-	module1, err := runtime.InstantiateModule(bytes.NewReader(module1Wasm))
+	module1, err := runtime.InstantiateModule(ctx, bytes.NewReader(module1Wasm))
 	if err != nil {
 		t.Fatalf("failed to instantiate module1: %v", err)
 	}
 
 	module2Wasm, _ := wabt.Wat2Wasm(`(module
 		(import "math" "multiply" (func $multiply (param i32 i32) (result i32)))
-		(func (export "multiplyAndAdd") (param i32 i32 i32) (result i32)
+		(func (export "mulAndAdd") (param i32 i32 i32) (result i32)
 			local.get 0
 			local.get 1
 			call $multiply
@@ -243,6 +252,7 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 	)`)
 
 	module2, err := runtime.InstantiateModuleWithImports(
+		ctx,
 		bytes.NewReader(module2Wasm),
 		NewImportBuilder().AddModuleExports("math", module1).Build(),
 	)
@@ -250,9 +260,9 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 		t.Fatalf("failed to instantiate module2: %v", err)
 	}
 
-	results, err := module2.Invoke("multiplyAndAdd", int32(3), int32(4), int32(5))
+	results, err := module2.Invoke(ctx, "mulAndAdd", int32(3), int32(4), int32(5))
 	if err != nil {
-		t.Fatalf("failed to invoke multiplyAndAdd: %v", err)
+		t.Fatalf("failed to invoke mulAndAdd: %v", err)
 	}
 
 	expected := int32(17)
@@ -260,7 +270,7 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, results[0])
 	}
 
-	results, err = module1.Invoke("square", int32(5))
+	results, err = module1.Invoke(ctx, "square", int32(5))
 	if err != nil {
 		t.Fatalf("failed to invoke square: %v", err)
 	}

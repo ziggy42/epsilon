@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"context"
 	"io"
 )
 
@@ -36,13 +37,17 @@ func (r *Runtime) WithFeatures(features ExperimentalFeatures) *Runtime {
 }
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
-func (r *Runtime) InstantiateModule(wasm io.Reader) (*ModuleInstance, error) {
-	return r.InstantiateModuleWithImports(wasm, nil)
+func (r *Runtime) InstantiateModule(
+	ctx context.Context,
+	wasm io.Reader,
+) (*ModuleInstance, error) {
+	return r.InstantiateModuleWithImports(ctx, wasm, nil)
 }
 
 // InstantiateModuleWithImports parses and instantiates a WASM module with
 // imports.
 func (r *Runtime) InstantiateModuleWithImports(
+	ctx context.Context,
 	wasm io.Reader,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
@@ -51,15 +56,16 @@ func (r *Runtime) InstantiateModuleWithImports(
 		return nil, err
 	}
 
-	return r.vm.instantiate(module, imports)
+	return r.vm.instantiate(ctx, module, imports)
 }
 
 // InstantiateModuleFromBytes is a convenience method to instantiate a WASM
 // module from a byte slice.
 func (r *Runtime) InstantiateModuleFromBytes(
+	ctx context.Context,
 	data []byte,
 ) (*ModuleInstance, error) {
-	return r.InstantiateModule(bytes.NewReader(data))
+	return r.InstantiateModule(ctx, bytes.NewReader(data))
 }
 
 // ImportBuilder provides a fluent, type-safe API for building import objects

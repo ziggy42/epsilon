@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -18,14 +19,16 @@ func main() {
 	}
 
 	// 2. Instantiate the module
-	instance, err := epsilon.NewRuntime().InstantiateModuleFromBytes(wasmBytes)
+	ctx := context.Background()
+	instance, err := epsilon.NewRuntime().
+		InstantiateModuleFromBytes(ctx, wasmBytes)
 	if err != nil {
 		fmt.Println("Error instantiating module:", err)
 		return
 	}
 
 	// 3. Invoke an exported function
-	result, err := instance.Invoke("add", int32(5), int32(37))
+	result, err := instance.Invoke(ctx, "add", int32(5), int32(37))
 	if err != nil {
 		fmt.Println("Error invoking function:", err)
 		return

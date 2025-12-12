@@ -16,7 +16,9 @@ package epsilon
 
 import (
 	"bytes"
+	"context"
 	"testing"
+	"time"
 
 	"github.com/ziggy42/epsilon/internal/wabt"
 )
@@ -40,11 +42,11 @@ func initVM(
 		vm.features = *features
 	}
 
-	moduleInstance, err := vm.instantiate(module, imports)
+	instance, err := vm.instantiate(context.Background(), module, imports)
 	if err != nil {
 		return nil, nil, err
 	}
-	return vm, moduleInstance, nil
+	return vm, instance, nil
 }
 
 func TestExecuteExportedFunctionSum(t *testing.T) {
@@ -54,12 +56,18 @@ func TestExecuteExportedFunctionSum(t *testing.T) {
 			local.get 1
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "sum", int32(1), int32(1))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"sum",
+		int32(1),
+		int32(1),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -77,12 +85,18 @@ func TestExecuteExportedFunctionDiff(t *testing.T) {
 			local.get 1
 			i32.sub)
   )`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "diff", int32(5), int32(2))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"diff",
+		int32(5),
+		int32(2),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute diff: %v", err)
@@ -105,12 +119,18 @@ func TestExecuteCall(t *testing.T) {
 			call $swap
 			i32.sub)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "reverseSub", int32(5), int32(3))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"reverseSub",
+		int32(5),
+		int32(3),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -135,12 +155,18 @@ func TestExecuteIf(t *testing.T) {
 		)
 		(export "min" (func $min))
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "min", int32(7), int32(2))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"min",
+		int32(7),
+		int32(2),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -150,7 +176,13 @@ func TestExecuteIf(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "min", int32(3), int32(5))
+	result, err = vm.invoke(
+		context.Background(),
+		instance,
+		"min",
+		int32(3),
+		int32(5),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -182,12 +214,18 @@ func TestExecuteNestedIf(t *testing.T) {
 		)
 		(export "nested_if" (func $nested_if))
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "nested_if", int32(11), int32(2))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"nested_if",
+		int32(11),
+		int32(2),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -215,12 +253,12 @@ func TestExecuteRecursive(t *testing.T) {
 				i32.mul
 			end)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "fac", int32(5))
+	result, err := vm.invoke(context.Background(), instance, "fac", int32(5))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -244,12 +282,12 @@ func TestExecuteBrFromIf(t *testing.T) {
 				i32.const 200
 			end)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -280,12 +318,12 @@ func TestExecuteBrFromNestedIf(t *testing.T) {
 			i32.const 300
 		end)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -307,12 +345,12 @@ func TestExecuteBlock(t *testing.T) {
 			i32.const 5
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -335,12 +373,12 @@ func TestExecuteBrBlock(t *testing.T) {
 			i32.const 5
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -363,12 +401,12 @@ func TestExecuteBrFromNestedBlock(t *testing.T) {
 				i32.add
 			end)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -410,12 +448,18 @@ func TestExecuteLoop(t *testing.T) {
 
 			local.get $sum)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "mul", int32(3), int32(5))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"mul",
+		int32(3),
+		int32(5),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -435,12 +479,12 @@ func TestExecuteBrIf(t *testing.T) {
 			drop
 			i32.const 0)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(10))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(10))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -450,7 +494,7 @@ func TestExecuteBrIf(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "test", int32(0))
+	result, err = vm.invoke(context.Background(), instance, "test", int32(0))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -470,12 +514,12 @@ func TestExecuteBrIfPreservesStack(t *testing.T) {
 			i32.const 1
 			i32.add)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -503,12 +547,12 @@ func TestExecuteBrTable(t *testing.T) {
 				i32.add
 			end)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(0))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(0))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -518,7 +562,7 @@ func TestExecuteBrTable(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "test", int32(1))
+	result, err = vm.invoke(context.Background(), instance, "test", int32(1))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -528,7 +572,7 @@ func TestExecuteBrTable(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "test", int32(2))
+	result, err = vm.invoke(context.Background(), instance, "test", int32(2))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -538,7 +582,7 @@ func TestExecuteBrTable(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "test", int32(3))
+	result, err = vm.invoke(context.Background(), instance, "test", int32(3))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -556,12 +600,12 @@ func TestExecuteReturn(t *testing.T) {
 			return
 			i32.const 20)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(10))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(10))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -596,12 +640,18 @@ func TestExecuteCallIndirect(t *testing.T) {
 
 		(export "dispatch" (func $dispatch))
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "dispatch", int32(0), int32(10))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"dispatch",
+		int32(0),
+		int32(10),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -611,7 +661,13 @@ func TestExecuteCallIndirect(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "dispatch", int32(1), int32(10))
+	result, err = vm.invoke(
+		context.Background(),
+		instance,
+		"dispatch",
+		int32(1),
+		int32(10),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -631,12 +687,12 @@ func TestExecuteSelect(t *testing.T) {
 			select
 		)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "select", int32(1))
+	result, err := vm.invoke(context.Background(), instance, "select", int32(1))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -646,7 +702,7 @@ func TestExecuteSelect(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "select", int32(0))
+	result, err = vm.invoke(context.Background(), instance, "select", int32(0))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -668,12 +724,12 @@ func TestExecuteLocalTee(t *testing.T) {
 			i32.mul
 		)
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(1))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(1))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -683,7 +739,7 @@ func TestExecuteLocalTee(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
 
-	result, err = vm.invoke(moduleInstance, "test", int32(2))
+	result, err = vm.invoke(context.Background(), instance, "test", int32(2))
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -708,12 +764,18 @@ func TestExecuteLoadStore(t *testing.T) {
 
 		(export "test" (func $test))
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(2), int32(8))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"test",
+		int32(2),
+		int32(8),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -732,12 +794,12 @@ func TestExecuteLoadOutOfBoundsTraps(t *testing.T) {
 			i32.load offset=1)
 		(export "test" (func $test))
 	)`
-	vm, moduleInstance, err := initVM(wat, nil, nil)
+	vm, instance, err := initVM(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	_, err = vm.invoke(moduleInstance, "test", int32(65532))
+	_, err = vm.invoke(context.Background(), instance, "test", int32(65532))
 
 	if err == nil {
 		t.Fatalf("expected trap")
@@ -764,12 +826,18 @@ func TestFunctionImport(t *testing.T) {
 			},
 		},
 	}
-	vm, moduleInstance, err := initVM(wat, imports, nil)
+	vm, instance, err := initVM(wat, imports, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "native_sum", int32(2), int32(3))
+	result, err := vm.invoke(
+		context.Background(),
+		instance,
+		"native_sum",
+		int32(2),
+		int32(3),
+	)
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -793,12 +861,12 @@ func TestGlobalGet(t *testing.T) {
 			"global": int32(42),
 		},
 	}
-	vm, moduleInstance, err := initVM(wat, imports, nil)
+	vm, instance, err := initVM(wat, imports, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
@@ -818,7 +886,7 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
 	features := &ExperimentalFeatures{MultipleMemories: true}
-	_, moduleInstance, err := initVM(wat, nil, features)
+	_, instance, err := initVM(wat, nil, features)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -826,7 +894,7 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 	checkMemory := func(exportName, expectedValue string) {
 		t.Helper()
 
-		mem, err := moduleInstance.GetMemory(exportName)
+		mem, err := instance.GetMemory(exportName)
 		if err != nil {
 			t.Fatalf("failed to get %s: %v", exportName, err)
 		}
@@ -863,7 +931,7 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 			i32.load8_u $mem1
 		)
 	)`
-	vm, moduleInstance, err := initVM(
+	vm, instance, err := initVM(
 		wat,
 		nil,
 		&ExperimentalFeatures{MultipleMemories: true},
@@ -872,7 +940,7 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(2))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(2))
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
 	}
@@ -905,7 +973,7 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 		)
 	)`
 
-	vm, moduleInstance, err := initVM(
+	vm, instance, err := initVM(
 		wat,
 		nil,
 		&ExperimentalFeatures{MultipleMemories: true},
@@ -914,7 +982,7 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test", int32(2))
+	result, err := vm.invoke(context.Background(), instance, "test", int32(2))
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
 	}
@@ -943,7 +1011,7 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 			i32.load $mem2
 		)
 	)`
-	vm, moduleInstance, err := initVM(
+	vm, instance, err := initVM(
 		wat,
 		nil,
 		&ExperimentalFeatures{MultipleMemories: true},
@@ -952,12 +1020,41 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := vm.invoke(moduleInstance, "test")
+	result, err := vm.invoke(context.Background(), instance, "test")
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)
 	}
 
 	if got := result[0]; got != int32(0x2a) {
 		t.Fatalf("expected %d, got %d", 0x2a, got)
+	}
+}
+
+func TestExecutionCancellation(t *testing.T) {
+	wat := `(module
+		(func (export "loop_forever")
+			(loop br 0)
+		)
+	)`
+	vm, instance, err := initVM(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = vm.invoke(ctx, instance, "loop_forever")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("execution took too long: %v", elapsed)
 	}
 }

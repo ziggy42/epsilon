@@ -16,6 +16,7 @@ package spec_tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
@@ -104,37 +105,41 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 }
 
 func (r *specTestRunner) run(commands []wabt.Command) {
+	ctx := context.Background()
 	for _, cmd := range commands {
 		r.t.Logf("Line %d: executing command type: %s", cmd.Line, cmd.Type)
 		switch cmd.Type {
 		case "module":
-			r.handleModule(cmd)
+			r.handleModule(ctx, cmd)
 		case "assert_return":
-			r.handleAssertReturn(cmd)
+			r.handleAssertReturn(ctx, cmd)
 		case "assert_trap":
-			r.handleAssertTrap(cmd)
+			r.handleAssertTrap(ctx, cmd)
 		case "assert_uninstantiable":
-			r.handleAssertUninstantiable(cmd)
+			r.handleAssertUninstantiable(ctx, cmd)
 		case "action":
-			r.handleAction(cmd.Action)
+			r.handleAction(ctx, cmd.Action)
 		case "register":
 			r.handleRegister(cmd)
 		case "assert_exhaustion":
-			r.handleAssertExhaustion(cmd)
+			r.handleAssertExhaustion(ctx, cmd)
 		case "assert_invalid":
-			r.handleAssertInvalid(cmd)
+			r.handleAssertInvalid(ctx, cmd)
 		case "assert_malformed":
-			r.handleAssertMalformed(cmd)
+			r.handleAssertMalformed(ctx, cmd)
 		case "assert_unlinkable":
-			r.handleAssertUnlinkable(cmd)
+			r.handleAssertUnlinkable(ctx, cmd)
 		default:
 			r.fatalf(cmd.Line, "unknown command type: %s", cmd.Type)
 		}
 	}
 }
 
-func (r *specTestRunner) handleAssertExhaustion(cmd wabt.Command) {
-	_, err := r.handleAction(cmd.Action)
+func (r *specTestRunner) handleAssertExhaustion(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
+	_, err := r.handleAction(ctx, cmd.Action)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected call stack exhaustion, but got no error")
 	}
@@ -161,10 +166,10 @@ func (r *specTestRunner) buildImports() map[string]map[string]any {
 	return imports
 }
 
-func (r *specTestRunner) handleModule(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
+func (r *specTestRunner) handleModule(ctx context.Context, cmd wabt.Command) {
+	wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 	instance, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 	if err != nil {
 		r.fatalf(cmd.Line, "failed to instantiate module %s: %v", cmd.Filename, err)
 	}
@@ -175,8 +180,11 @@ func (r *specTestRunner) handleModule(cmd wabt.Command) {
 	}
 }
 
-func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
-	actual, err := r.handleAction(cmd.Action)
+func (r *specTestRunner) handleAssertReturn(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
+	actual, err := r.handleAction(ctx, cmd.Action)
 	if err != nil {
 		r.fatalf(cmd.Line, "action failed unexpectedly: %v", err)
 	}
@@ -195,67 +203,85 @@ func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
 	}
 }
 
-func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertTrap(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
-		wasmBytes := r.wasmDict[cmd.Filename]
+		wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 		_, err := r.runtime.
-			InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+			InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 		if err == nil {
 			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
 		}
 	} else {
 		// This is asserting that a function call will trap.
-		_, err := r.handleAction(cmd.Action)
+		_, err := r.handleAction(ctx, cmd.Action)
 		if err == nil {
 			r.fatalf(cmd.Line, "expected trap, but got no error")
 		}
 	}
 }
 
-func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
+func (r *specTestRunner) handleAssertInvalid(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
+	wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
 }
 
-func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
+func (r *specTestRunner) handleAssertMalformed(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
 	if strings.HasSuffix(cmd.Filename, ".wat") {
 		// "assert_malformed" in text format cannot even be compiled to wasm,
 		// therefore there is no point in trying to run this test.
 		return
 	}
 
-	wasmBytes := r.wasmDict[cmd.Filename]
+	wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
 }
 
-func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
+func (r *specTestRunner) handleAssertUninstantiable(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
+	wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
 	}
 }
 
-func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
+func (r *specTestRunner) handleAssertUnlinkable(
+	ctx context.Context,
+	cmd wabt.Command,
+) {
+	wasmReader := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(ctx, wasmReader, r.buildImports())
 	if err == nil {
 		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
 	}
 }
 
-func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
+func (r *specTestRunner) handleAction(
+	ctx context.Context,
+	action *wabt.Action,
+) ([]any, error) {
 	moduleInstance := r.getModuleInstance(action.Module)
 	switch action.Type {
 	case "invoke":
@@ -267,7 +293,7 @@ func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
 			}
 			args[i] = val
 		}
-		return moduleInstance.Invoke(action.Field, args...)
+		return moduleInstance.Invoke(ctx, action.Field, args...)
 	case "get":
 		res, err := moduleInstance.GetGlobal(action.Field)
 		return []any{res}, err

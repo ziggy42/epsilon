@@ -16,6 +16,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,7 @@ func main() {
 		moduleInstances: make(map[string]*epsilon.ModuleInstance),
 		scanner:         bufio.NewScanner(os.Stdin),
 	}
-	repl.run()
+	repl.run(context.Background())
 }
 
 type repl struct {
@@ -65,7 +66,7 @@ type repl struct {
 	scanner         *bufio.Scanner
 }
 
-func (r *repl) run() {
+func (r *repl) run(ctx context.Context) {
 	fmt.Print(prompt)
 
 	for r.scanner.Scan() {
@@ -82,9 +83,9 @@ func (r *repl) run() {
 
 		switch cmd {
 		case "LOAD":
-			err = r.handleInstantiate(args)
+			err = r.handleInstantiate(ctx, args)
 		case "INVOKE":
-			err = r.handleInvoke(args)
+			err = r.handleInvoke(ctx, args)
 		case "GET":
 			err = r.handleGet(args)
 		case "MEM":
@@ -111,7 +112,7 @@ func (r *repl) run() {
 	}
 }
 
-func (r *repl) handleInstantiate(args []string) error {
+func (r *repl) handleInstantiate(ctx context.Context, args []string) error {
 	var instanceName, source string
 	switch len(args) {
 	case 1:
@@ -128,13 +129,13 @@ func (r *repl) handleInstantiate(args []string) error {
 		return fmt.Errorf("module instance '%s' already exists", instanceName)
 	}
 
-	moduleReader, err := resolveModule(source)
+	moduleReader, err := resolveModule(ctx, source)
 	if err != nil {
 		return err
 	}
 	defer moduleReader.Close()
 
-	instance, err := r.runtime.InstantiateModule(moduleReader)
+	instance, err := r.runtime.InstantiateModule(ctx, moduleReader)
 	if err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (r *repl) handleInstantiate(args []string) error {
 	return nil
 }
 
-func (r *repl) handleInvoke(args []string) error {
+func (r *repl) handleInvoke(ctx context.Context, args []string) error {
 	if len(args) < 1 {
 		return errors.New("usage: INVOKE [<module>.]<function-name> [args...]")
 	}
@@ -179,7 +180,7 @@ func (r *repl) handleInvoke(args []string) error {
 		parsedArgs = append(parsedArgs, arg)
 	}
 
-	result, err := module.Invoke(funcName, parsedArgs...)
+	result, err := module.Invoke(ctx, funcName, parsedArgs...)
 	if err != nil {
 		return err
 	}
@@ -340,7 +341,7 @@ func parseFunctionArgument(
 	}
 }
 
-func resolveModule(source string) (io.ReadCloser, error) {
+func resolveModule(ctx context.Context, source string) (io.ReadCloser, error) {
 	u, err := url.Parse(source)
 	if err != nil {
 		return nil, err
@@ -348,7 +349,11 @@ func resolveModule(source string) (io.ReadCloser, error) {
 
 	switch u.Scheme {
 	case "http", "https":
-		resp, err := http.Get(u.String())
+		req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("create request failed: %w", err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("http request failed: %w", err)
 		}

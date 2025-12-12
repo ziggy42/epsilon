@@ -14,6 +14,8 @@
 
 package epsilon
 
+import "context"
+
 // exportInstance represents the runtime representation of an export.
 type exportInstance struct {
 	name  string
@@ -37,8 +39,12 @@ type ModuleInstance struct {
 //
 // Args can be int32, int64, float32, or float64. The function returns a slice
 // of results as []any, which can be type-asserted to the appropriate types.
-func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
-	return m.vm.invoke(m, name, args...)
+func (m *ModuleInstance) Invoke(
+	ctx context.Context,
+	name string,
+	args ...any,
+) ([]any, error) {
+	return m.vm.invoke(ctx, m, name, args...)
 }
 
 // GetMemory returns an exported memory by name.

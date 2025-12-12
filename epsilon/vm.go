@@ -15,7 +15,9 @@
 package epsilon
 
 import (
+	"context"
 	"errors"
+
 	"fmt"
 	"math"
 )
@@ -72,6 +74,7 @@ func newVm() *vm {
 }
 
 func (vm *vm) instantiate(
+	ctx context.Context,
 	module *moduleDefinition,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
@@ -137,6 +140,7 @@ func (vm *vm) instantiate(
 
 	for _, global := range module.globalVariables {
 		val, err := vm.invokeInitExpression(
+			ctx,
 			global.initExpression,
 			global.globalType.ValueType,
 			moduleInstance,
@@ -168,18 +172,18 @@ func (vm *vm) instantiate(
 		vm.store.datas = append(vm.store.datas, data)
 	}
 
-	if err := vm.initActiveElements(module, moduleInstance); err != nil {
+	if err := vm.initActiveElements(ctx, module, moduleInstance); err != nil {
 		return nil, err
 	}
 
-	if err := vm.initActiveDatas(module, moduleInstance); err != nil {
+	if err := vm.initActiveDatas(ctx, module, moduleInstance); err != nil {
 		return nil, err
 	}
 
 	if module.startIndex != nil {
 		storeFunctionIndex := moduleInstance.funcAddrs[*module.startIndex]
 		function := vm.store.funcs[storeFunctionIndex]
-		if _, err := vm.invokeFunction(function); err != nil {
+		if _, err := vm.invokeFunction(ctx, function); err != nil {
 			return nil, err
 		}
 	}
@@ -189,6 +193,7 @@ func (vm *vm) instantiate(
 }
 
 func (vm *vm) invoke(
+	ctx context.Context,
 	module *ModuleInstance,
 	name string,
 	args ...any,
@@ -199,21 +204,27 @@ func (vm *vm) invoke(
 	}
 
 	vm.stack.pushAll(args)
-	return vm.invokeFunction(export.(FunctionInstance))
+	return vm.invokeFunction(ctx, export.(FunctionInstance))
 }
 
-func (vm *vm) invokeFunction(function FunctionInstance) ([]any, error) {
+func (vm *vm) invokeFunction(
+	ctx context.Context,
+	function FunctionInstance,
+) ([]any, error) {
 	switch f := function.(type) {
 	case *wasmFunction:
-		return vm.invokeWasmFunction(f)
+		return vm.invokeWasmFunction(ctx, f)
 	case *hostFunction:
-		return vm.invokeHostFunction(f)
+		return vm.invokeHostFunction(ctx, f)
 	default:
 		return nil, fmt.Errorf("unknown function type")
 	}
 }
 
-func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
+func (vm *vm) invokeWasmFunction(
+	ctx context.Context,
+	function *wasmFunction,
+) ([]any, error) {
 	if vm.callStackDepth >= maxCallStackDepth {
 		return nil, errCallStackExhausted
 	}
@@ -239,13 +250,26 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	}
 	vm.callStack = append(vm.callStack, callFrame)
 
+	// Check for cancellation every 1024 instructions
+	const checkIntervalMask = 1023
+	instructionCount := 0
+
 	for callFrame.decoder.hasMore() {
+		if instructionCount&checkIntervalMask == 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			default:
+			}
+		}
+		instructionCount++
+
 		instruction, err := callFrame.decoder.decode()
 		if err != nil {
 			return nil, err
 		}
 
-		if err = vm.handleInstruction(instruction); err != nil {
+		if err = vm.handleInstruction(ctx, instruction); err != nil {
 			if errors.Is(err, errReturn) {
 				break // A 'return' instruction was executed.
 			}
@@ -259,7 +283,10 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	return values, nil
 }
 
-func (vm *vm) handleInstruction(instruction instruction) error {
+func (vm *vm) handleInstruction(
+	ctx context.Context,
+	instruction instruction,
+) error {
 	var err error
 	// Using a switch instead of a map of opcode -> Handler is significantly
 	// faster.
@@ -285,9 +312,9 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case returnOp:
 		err = errReturn
 	case call:
-		err = vm.handleCall(instruction)
+		err = vm.handleCall(ctx, instruction)
 	case callIndirect:
-		err = vm.handleCallIndirect(instruction)
+		err = vm.handleCallIndirect(ctx, instruction)
 	case drop:
 		vm.stack.drop()
 	case selectOp:
@@ -1290,10 +1317,13 @@ func (vm *vm) brToLabel(labelIndex uint32) {
 	callFrame.decoder.pc = targetFrame.continuationPc
 }
 
-func (vm *vm) handleCall(instruction instruction) error {
+func (vm *vm) handleCall(
+	ctx context.Context,
+	instruction instruction,
+) error {
 	localIndex := uint32(instruction.immediates[0])
 	function := vm.getFunction(localIndex)
-	res, err := vm.invokeFunction(function)
+	res, err := vm.invokeFunction(ctx, function)
 	if err != nil {
 		return err
 	}
@@ -1301,7 +1331,10 @@ func (vm *vm) handleCall(instruction instruction) error {
 	return nil
 }
 
-func (vm *vm) handleCallIndirect(instruction instruction) error {
+func (vm *vm) handleCallIndirect(
+	ctx context.Context,
+	instruction instruction,
+) error {
 	typeIndex := uint32(instruction.immediates[0])
 	tableIndex := uint32(instruction.immediates[1])
 
@@ -1323,7 +1356,7 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 
-	res, err := vm.invokeFunction(function)
+	res, err := vm.invokeFunction(ctx, function)
 	if err != nil {
 		return err
 	}
@@ -1771,6 +1804,7 @@ func (vm *vm) popControlFrame() *controlFrame {
 }
 
 func (vm *vm) initActiveElements(
+	ctx context.Context,
 	module *moduleDefinition,
 	moduleInstance *ModuleInstance,
 ) error {
@@ -1780,7 +1814,7 @@ func (vm *vm) initActiveElements(
 		}
 
 		expression := element.offsetExpression
-		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
+		offsetAny, err := vm.invokeInitExpression(ctx, expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
@@ -1803,6 +1837,7 @@ func (vm *vm) initActiveElements(
 			values := make([]any, len(element.functionIndexesExpressions))
 			for i, expr := range element.functionIndexesExpressions {
 				refAny, err := vm.invokeInitExpression(
+					ctx,
 					expr,
 					element.kind,
 					moduleInstance,
@@ -1823,6 +1858,7 @@ func (vm *vm) initActiveElements(
 }
 
 func (vm *vm) initActiveDatas(
+	ctx context.Context,
 	module *moduleDefinition,
 	moduleInstance *ModuleInstance,
 ) error {
@@ -1832,7 +1868,12 @@ func (vm *vm) initActiveDatas(
 		}
 
 		expression := segment.offsetExpression
-		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
+		offsetAny, err := vm.invokeInitExpression(
+			ctx,
+			expression,
+			I32,
+			moduleInstance,
+		)
 		if err != nil {
 			return err
 		}
@@ -1873,7 +1914,10 @@ func (vm *vm) resolveExports(
 	return exports
 }
 
-func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
+func (vm *vm) invokeHostFunction(
+	ctx context.Context,
+	fun *hostFunction,
+) (res []any, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var panicErr error
@@ -1893,6 +1937,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
 }
 
 func (vm *vm) invokeInitExpression(
+	ctx context.Context,
 	expression []byte,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
@@ -1907,7 +1952,7 @@ func (vm *vm) invokeInitExpression(
 		code:   function{body: expression},
 		module: moduleInstance,
 	}
-	results, err := vm.invokeWasmFunction(&function)
+	results, err := vm.invokeWasmFunction(ctx, &function)
 	if err != nil {
 		return nil, err
 	}
