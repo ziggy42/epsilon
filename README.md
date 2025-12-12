@@ -13,8 +13,20 @@
 
 ## Installation
 
+### As a Library
+
+To use Epsilon in your Go project:
+
 ```bash
 go get github.com/ziggy42/epsilon
+```
+
+### As a CLI Tool
+
+To install the `epsilon` command-line interface:
+
+```bash
+go install github.com/ziggy42/epsilon/cmd/epsilon@latest
 ```
 
 ## Quick Start
@@ -68,12 +80,6 @@ instance, _ := epsilon.NewRuntime().
 
 ## CLI
 
-Epsilon provides a simple CLI for running WebAssembly modules directly:
-
-```bash
-go install github.com/ziggy42/epsilon/cmd/epsilon@latest
-```
-
 ### Usage
 
 ```text
@@ -104,9 +110,21 @@ $ epsilon https://github.com/mdn/webassembly-examples/raw/refs/heads/main/unders
 42
 ```
 
-## Testing & Benchmarks
+## Development
 
-### Prerequisites
+### Building from Source
+
+To build the CLI from source:
+
+```bash
+git clone https://github.com/ziggy42/epsilon.git
+cd epsilon
+go build -o bin/epsilon ./cmd/epsilon
+```
+
+### Testing & Benchmarks
+
+#### Prerequisites
 
 * Install [WABT](https://github.com/WebAssembly/wabt), which is required to compile WASM code defined in text format to binary.
 * Fetch the spec tests submodule:
@@ -114,7 +132,7 @@ $ epsilon https://github.com/mdn/webassembly-examples/raw/refs/heads/main/unders
 git submodule update --init --recursive
 ```
 
-### Running Tests
+#### Running Tests
 
 ```bash
 # Run unit tests
