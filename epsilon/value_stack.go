@@ -39,11 +39,11 @@ func (s *valueStack) pushInt64(v int64) {
 }
 
 func (s *valueStack) pushFloat32(v float32) {
-	s.data = append(s.data, valueStackItem{low: uint64(v)})
+	s.data = append(s.data, valueStackItem{low: uint64(math.Float32bits(v))})
 }
 
 func (s *valueStack) pushFloat64(v float64) {
-	s.data = append(s.data, valueStackItem{low: uint64(v)})
+	s.data = append(s.data, valueStackItem{low: math.Float64bits(v)})
 }
 
 func (s *valueStack) pushV128(v V128Value) {
