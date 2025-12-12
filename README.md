@@ -9,12 +9,24 @@
 * Fully supports [WebAssembly 2.0 Specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
 * Runs on any architecture supported by Go (amd64, arm64, etc.) without requiring CGo
 * Allows embedding WebAssembly modules in Go applications
-* Includes an interactive REPL for testing and debugging
+* Includes a command-line interface and interactive REPL
 
 ## Installation
 
+### As a Library
+
+To use Epsilon in your Go project:
+
 ```bash
 go get github.com/ziggy42/epsilon
+```
+
+### As a CLI Tool
+
+To install the `epsilon` command-line interface:
+
+```bash
+go install github.com/ziggy42/epsilon/cmd/epsilon@latest
 ```
 
 ## Quick Start
@@ -66,37 +78,53 @@ instance, _ := epsilon.NewRuntime().
 	InstantiateModuleWithImports(wasmFile, imports)
 ```
 
-## Interactive REPL
+## CLI
 
-Epsilon includes a REPL for interactively testing and debugging modules.
+### Usage
 
-```bash
-# Run the REPL
-go run ./cmd/epsilon
+```text
+Usage:
+  epsilon [options]
+  epsilon <module>
+  epsilon <module> <function> [args...]
+
+Arguments:
+  <module>      Path or URL to a WebAssembly module
+  <function>    Name of the exported function to invoke
+  [args...]     Arguments to pass to the function
+
+Options:
+  -version
+        print version and exit
+
+Examples:
+  epsilon                          Start interactive REPL
+  epsilon module.wasm              Instantiate a module
+  epsilon module.wasm add 5 10     Invoke a function
 ```
 
-### Essential Commands
+### Example
 
-| Category | Command | Description |
-|----------|---------|-------------|
-| **Loading** | `LOAD <path\|url>` | Load a module from a file or URL |
-| **Running** | `INVOKE <func> [args...]` | Call an exported function |
-| **State** | `GET <global>` | Read a global variable |
-| **Debug** | `MEM <offset> <len>` | Inspect linear memory |
-| **System** | `LIST` | List loaded modules and their exports |
-
-**Example Session:**
-```text
-$ go run ./cmd/epsilon
->> LOAD https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm
-'default' instantiated.
->> INVOKE add 10 32
+```bash
+$ epsilon https://github.com/mdn/webassembly-examples/raw/refs/heads/main/understanding-text-format/add.wasm add 10 32
 42
 ```
 
-## Testing & Benchmarks
+## Development
 
-### Prerequisites
+### Building from Source
+
+To build the CLI from source:
+
+```bash
+git clone https://github.com/ziggy42/epsilon.git
+cd epsilon
+go build -o bin/epsilon ./cmd/epsilon
+```
+
+### Testing & Benchmarks
+
+#### Prerequisites
 
 * Install [WABT](https://github.com/WebAssembly/wabt), which is required to compile WASM code defined in text format to binary.
 * Fetch the spec tests submodule:
@@ -104,7 +132,7 @@ $ go run ./cmd/epsilon
 git submodule update --init --recursive
 ```
 
-### Running Tests
+#### Running Tests
 
 ```bash
 # Run unit tests
