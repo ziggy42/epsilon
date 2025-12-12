@@ -22,9 +22,52 @@ func newValueStack() *valueStack {
 	return &valueStack{data: make([]any, 512)}
 }
 
-func (s *valueStack) push(v any) {
-	// We know, due to validation, this is always safe.
+func (s *valueStack) pushInt32(v int32) {
 	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushInt64(v int64) {
+	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushFloat32(v float32) {
+	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushFloat64(v float64) {
+	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushV128(v V128Value) {
+	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushNull() {
+	s.data = append(s.data, NullVal)
+}
+
+func (s *valueStack) pushRaw(v any) {
+	s.data = append(s.data, v)
+}
+
+func (s *valueStack) pushValueType(v any, t ValueType) {
+	switch t {
+	case I32:
+		s.pushInt32(v.(int32))
+	case I64:
+		s.pushInt64(v.(int64))
+	case F32:
+		s.pushFloat32(v.(float32))
+	case F64:
+		s.pushFloat64(v.(float64))
+	case V128:
+		s.pushV128(v.(V128Value))
+	case FuncRefType, ExternRefType:
+		// TODO this could be null
+		s.pushRaw(v)
+	default:
+		panic("unreachable")
+	}
 }
 
 func (s *valueStack) pushAll(values []any) {
@@ -85,6 +128,40 @@ func (s *valueStack) unwind(targetHeight, preserveCount uint) {
 	valuesToPreserve := s.data[s.size()-preserveCount:]
 	s.data = s.data[:targetHeight]
 	s.data = append(s.data, valuesToPreserve...)
+}
+
+// popRaw returns the top value with its internal representation. It should only
+// be used when the returned value is not going to be used as a value.
+func (s *valueStack) popRaw() any {
+	return s.pop()
+}
+
+func (s *valueStack) popReference() any {
+	// TODO we do this just to prove a point but of course this is wrong.
+	if s.data[len(s.data)-1] == NullVal {
+		return s.pop()
+	}
+	return s.popInt32()
+}
+
+func (s *valueStack) popValueType(t ValueType) any {
+	switch t {
+	case I32:
+		return s.popInt32()
+	case I64:
+		return s.popInt64()
+	case F32:
+		return s.popFloat32()
+	case F64:
+		return s.popFloat64()
+	case V128:
+		return s.popV128()
+	case FuncRefType, ExternRefType:
+		// TODO this could be null
+		return s.pop()
+	default:
+		panic("unreachable")
+	}
 }
 
 func (s *valueStack) size() uint {
