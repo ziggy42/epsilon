@@ -42,13 +42,13 @@ func (s *valueStack) pushV128(v V128Value) {
 	s.data = append(s.data, v128(v))
 }
 
-func (s *valueStack) pushRaw(v value) {
+func (s *valueStack) push(v value) {
 	s.data = append(s.data, v)
 }
 
 func (s *valueStack) pushAll(values []any) {
 	for _, v := range values {
-		s.pushRaw(valueFromAny(v))
+		s.push(valueFromAny(v))
 	}
 }
 

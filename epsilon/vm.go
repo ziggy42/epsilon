@@ -1329,16 +1329,16 @@ func (vm *vm) handleSelect() {
 	val2 := vm.stack.pop()
 	val1 := vm.stack.pop()
 	if condition != 0 {
-		vm.stack.pushRaw(val1)
+		vm.stack.push(val1)
 	} else {
-		vm.stack.pushRaw(val2)
+		vm.stack.push(val2)
 	}
 }
 
 func (vm *vm) handleLocalGet(instruction instruction) {
 	callFrame := vm.currentCallFrame()
 	localIndex := int32(instruction.immediates[0])
-	vm.stack.pushRaw(callFrame.locals[localIndex])
+	vm.stack.push(callFrame.locals[localIndex])
 }
 
 func (vm *vm) handleLocalSet(instruction instruction) {
@@ -1352,13 +1352,13 @@ func (vm *vm) handleLocalTee(instruction instruction) {
 	localIndex := int32(instruction.immediates[0])
 	val := vm.stack.pop()
 	frame.locals[localIndex] = val
-	vm.stack.pushRaw(val)
+	vm.stack.push(val)
 }
 
 func (vm *vm) handleGlobalGet(instruction instruction) {
 	localIndex := uint32(instruction.immediates[0])
 	global := vm.getGlobal(localIndex)
-	vm.stack.pushRaw(global.value)
+	vm.stack.push(global.value)
 }
 
 func (vm *vm) handleGlobalSet(instruction instruction) {
