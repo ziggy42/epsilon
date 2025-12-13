@@ -83,17 +83,6 @@ func (v value) anyValueType(t ValueType) any {
 	}
 }
 
-func defaultValue(vt ValueType) value {
-	switch vt {
-	case I32, I64, F32, F64, V128:
-		return value{}
-	case FuncRefType, ExternRefType:
-		return i32(NullReference)
-	default:
-		panic("unreachable")
-	}
-}
-
 func valueFromAny(v any) value {
 	switch val := v.(type) {
 	case int32:

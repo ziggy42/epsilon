@@ -225,8 +225,8 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	defer func() { vm.callStackDepth-- }()
 
 	locals := vm.stack.popN(len(function.functionType.ParamTypes))
-	for _, local := range function.code.locals {
-		locals = append(locals, defaultValue(local))
+	for range len(function.code.locals) {
+		locals = append(locals, value{})
 	}
 
 	callFrame := &callFrame{
