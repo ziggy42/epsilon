@@ -106,14 +106,6 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 	return result
 }
 
-func (s *valueStack) popN(n int) []value {
-	newLen := len(s.data) - n
-	result := make([]value, n)
-	copy(result, s.data[newLen:])
-	s.data = s.data[:newLen]
-	return result
-}
-
 func (s *valueStack) unwind(targetHeight, preserveCount uint) {
 	valuesToPreserve := s.data[s.size()-preserveCount:]
 	s.data = s.data[:targetHeight]

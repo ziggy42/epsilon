@@ -214,10 +214,13 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popN(len(function.functionType.ParamTypes))
-	for range len(function.code.locals) {
-		locals = append(locals, value{})
-	}
+	numParams := len(function.functionType.ParamTypes)
+	locals := make([]value, numParams+len(function.code.locals))
+
+	// Copy params and shrink stack by operating on the underlying slice directly.
+	newLen := len(vm.stack.data) - numParams
+	copy(locals[:numParams], vm.stack.data[newLen:])
+	vm.stack.data = vm.stack.data[:newLen]
 
 	callFrame := &callFrame{
 		decoder: newDecoder(function.code.body),
