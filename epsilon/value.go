@@ -85,13 +85,10 @@ func (v value) anyValueType(t ValueType) any {
 
 func defaultValue(vt ValueType) value {
 	switch vt {
-	case I32, I64, F32, F64:
-		return value{low: 0}
-	case V128:
-		return value{low: 0, high: 0}
+	case I32, I64, F32, F64, V128:
+		return value{}
 	case FuncRefType, ExternRefType:
-		nullRef := NullReference
-		return value{low: uint64(int64(nullRef))}
+		return i32(NullReference)
 	default:
 		panic("unreachable")
 	}
