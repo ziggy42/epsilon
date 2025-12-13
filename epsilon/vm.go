@@ -62,7 +62,7 @@ type controlFrame struct {
 type vm struct {
 	store          *store
 	stack          *valueStack
-	callStack      []*callFrame
+	callStack      []callFrame
 	callStackDepth int
 	features       ExperimentalFeatures
 }
@@ -222,7 +222,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	copy(locals[:numParams], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
-	callFrame := &callFrame{
+	callFrame := callFrame{
 		decoder: newDecoder(function.code.body),
 		controlStack: []controlFrame{{
 			opcode:         block,
@@ -1139,7 +1139,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 }
 
 func (vm *vm) currentCallFrame() *callFrame {
-	return vm.callStack[len(vm.callStack)-1]
+	return &vm.callStack[len(vm.callStack)-1]
 }
 
 func (vm *vm) currentModuleInstance() *ModuleInstance {
