@@ -46,23 +46,6 @@ func (s *valueStack) pushRaw(v value) {
 	s.data = append(s.data, v)
 }
 
-func (s *valueStack) pushValueType(v any, t ValueType) {
-	switch t {
-	case I32, FuncRefType, ExternRefType:
-		s.pushInt32(v.(int32))
-	case I64:
-		s.pushInt64(v.(int64))
-	case F32:
-		s.pushFloat32(v.(float32))
-	case F64:
-		s.pushFloat64(v.(float64))
-	case V128:
-		s.pushV128(v.(V128Value))
-	default:
-		panic("unreachable")
-	}
-}
-
 func (s *valueStack) pushAll(values []any) {
 	for _, v := range values {
 		switch val := v.(type) {
@@ -122,23 +105,6 @@ func (s *valueStack) pop() value {
 	element := s.data[index]
 	s.data = s.data[:index]
 	return element
-}
-
-func (s *valueStack) popValueType(t ValueType) any {
-	switch t {
-	case I32, FuncRefType, ExternRefType:
-		return s.popInt32()
-	case I64:
-		return s.popInt64()
-	case F32:
-		return s.popFloat32()
-	case F64:
-		return s.popFloat64()
-	case V128:
-		return s.popV128()
-	default:
-		panic("unreachable")
-	}
 }
 
 func (s *valueStack) popValueTypes(types []ValueType) []any {

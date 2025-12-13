@@ -148,7 +148,7 @@ func (vm *vm) instantiate(
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, &Global{
-			Value:   val,
+			value:   val,
 			Mutable: global.globalType.IsMutable,
 			Type:    global.globalType.ValueType,
 		})
@@ -1358,13 +1358,13 @@ func (vm *vm) handleLocalTee(instruction instruction) {
 func (vm *vm) handleGlobalGet(instruction instruction) {
 	localIndex := uint32(instruction.immediates[0])
 	global := vm.getGlobal(localIndex)
-	vm.stack.pushValueType(global.Value, global.Type)
+	vm.stack.pushRaw(global.value)
 }
 
 func (vm *vm) handleGlobalSet(instruction instruction) {
 	localIndex := uint32(instruction.immediates[0])
 	global := vm.getGlobal(localIndex)
-	global.Value = vm.stack.popValueType(global.Type)
+	global.value = vm.stack.pop()
 }
 
 func (vm *vm) handleTableGet(instruction instruction) error {
@@ -1757,11 +1757,11 @@ func (vm *vm) initActiveElements(
 		}
 
 		expression := element.offsetExpression
-		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
+		offsetVal, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
-		offset := offsetAny.(int32)
+		offset := offsetVal.int32()
 
 		storeTableIndex := moduleInstance.tableAddrs[element.tableIndex]
 		table := vm.store.tables[storeTableIndex]
@@ -1779,7 +1779,7 @@ func (vm *vm) initActiveElements(
 		if len(element.functionIndexesExpressions) > 0 {
 			values := make([]int32, len(element.functionIndexesExpressions))
 			for i, expr := range element.functionIndexesExpressions {
-				refAny, err := vm.invokeInitExpression(
+				refVal, err := vm.invokeInitExpression(
 					expr,
 					element.kind,
 					moduleInstance,
@@ -1787,7 +1787,7 @@ func (vm *vm) initActiveElements(
 				if err != nil {
 					return err
 				}
-				values[i] = refAny.(int32)
+				values[i] = refVal.int32()
 			}
 
 			if err := table.InitFromSlice(offset, values); err != nil {
@@ -1808,11 +1808,11 @@ func (vm *vm) initActiveDatas(
 		}
 
 		expression := segment.offsetExpression
-		offsetAny, err := vm.invokeInitExpression(expression, I32, moduleInstance)
+		offsetVal, err := vm.invokeInitExpression(expression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
-		offset := offsetAny.(int32)
+		offset := offsetVal.int32()
 		storeMemoryIndex := moduleInstance.memAddrs[segment.memoryIndex]
 		memory := vm.store.memories[storeMemoryIndex]
 		if err := memory.Set(uint32(offset), 0, segment.content); err != nil {
@@ -1873,7 +1873,7 @@ func (vm *vm) invokeInitExpression(
 	expression []byte,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
-) (any, error) {
+) (value, error) {
 	// We create a fake function to execute the expression.
 	// The expression is expected to return a single value.
 	function := wasmFunction{
@@ -1885,9 +1885,9 @@ func (vm *vm) invokeInitExpression(
 		module: moduleInstance,
 	}
 	if err := vm.invokeWasmFunction(&function); err != nil {
-		return nil, err
+		return value{}, err
 	}
-	return vm.stack.pop().anyValueType(resultType), nil
+	return vm.stack.pop(), nil
 }
 
 func toStoreFuncIndexes(

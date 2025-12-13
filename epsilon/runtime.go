@@ -124,7 +124,7 @@ func (b *ImportBuilder) AddGlobal(
 ) *ImportBuilder {
 	b.ensureModule(module)
 	b.imports[module][name] = &Global{
-		Value:   value,
+		value:   valueFromAny(value, valueType),
 		Mutable: mutable,
 		Type:    valueType,
 	}

@@ -65,7 +65,7 @@ func (m *ModuleInstance) GetGlobal(name string) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return export.(*Global).Value, nil
+	return export.(*Global).Get(), nil
 }
 
 // GetFunction returns an exported function by name.
@@ -130,7 +130,11 @@ func (hf *hostFunction) GetType() *FunctionType { return &hf.functionType }
 
 // Global is a global variable.
 type Global struct {
-	Value   any
+	value   value
 	Mutable bool
 	Type    ValueType
+}
+
+func (g *Global) Get() any {
+	return g.value.anyValueType(g.Type)
 }
