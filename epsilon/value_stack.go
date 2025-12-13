@@ -42,10 +42,6 @@ func (s *valueStack) pushV128(v V128Value) {
 	s.data = append(s.data, v128(v))
 }
 
-func (s *valueStack) pushNull() {
-	s.pushInt32(NullReference)
-}
-
 func (s *valueStack) pushRaw(v value) {
 	s.data = append(s.data, v)
 }

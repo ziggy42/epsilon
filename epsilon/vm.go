@@ -627,7 +627,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64Extend32S:
 		vm.stack.pushInt64(extend32STo64(vm.stack.popInt64()))
 	case refNull:
-		vm.stack.pushNull()
+		vm.stack.pushInt32(NullReference)
 	case refIsNull:
 		vm.handleRefIsNull()
 	case refFunc:
