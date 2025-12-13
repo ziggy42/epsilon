@@ -260,10 +260,6 @@ func abs[T wasmFloat](a T) T {
 	return T(math.Abs(float64(a)))
 }
 
-func neg[T wasmFloat](a T) T {
-	return -a
-}
-
 func ceil[T wasmFloat](a T) T {
 	return T(math.Ceil(float64(a)))
 }

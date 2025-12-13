@@ -512,7 +512,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f32Abs:
 		vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
 	case f32Neg:
-		vm.stack.pushFloat32(neg(vm.stack.popFloat32()))
+		vm.stack.pushFloat32(-vm.stack.popFloat32())
 	case f32Ceil:
 		vm.stack.pushFloat32(ceil(vm.stack.popFloat32()))
 	case f32Floor:
@@ -540,7 +540,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64Abs:
 		vm.stack.pushFloat64(abs(vm.stack.popFloat64()))
 	case f64Neg:
-		vm.stack.pushFloat64(neg(vm.stack.popFloat64()))
+		vm.stack.pushFloat64(-vm.stack.popFloat64())
 	case f64Ceil:
 		vm.stack.pushFloat64(ceil(vm.stack.popFloat64()))
 	case f64Floor:
