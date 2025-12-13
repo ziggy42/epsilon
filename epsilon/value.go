@@ -24,6 +24,23 @@ type value struct {
 	low, high uint64
 }
 
+func newValue(v any) value {
+	switch val := v.(type) {
+	case int32:
+		return i32(val)
+	case int64:
+		return i64(val)
+	case float32:
+		return f32(val)
+	case float64:
+		return f64(val)
+	case V128Value:
+		return v128(val)
+	default:
+		panic("unreachable")
+	}
+}
+
 func i32(v int32) value {
 	return value{low: uint64(v)}
 }
@@ -64,7 +81,7 @@ func (v value) v128() V128Value {
 	return V128Value{Low: v.low, High: v.high}
 }
 
-func (v value) anyValueType(t ValueType) any {
+func (v value) any(t ValueType) any {
 	switch t {
 	case I32:
 		return v.int32()
@@ -78,23 +95,6 @@ func (v value) anyValueType(t ValueType) any {
 		return v.v128()
 	case FuncRefType, ExternRefType:
 		return v.int32()
-	default:
-		panic("unreachable")
-	}
-}
-
-func valueFromAny(v any) value {
-	switch val := v.(type) {
-	case int32:
-		return i32(val)
-	case int64:
-		return i64(val)
-	case float32:
-		return f32(val)
-	case float64:
-		return f64(val)
-	case V128Value:
-		return v128(val)
 	default:
 		panic("unreachable")
 	}

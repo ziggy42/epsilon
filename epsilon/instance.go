@@ -136,5 +136,5 @@ type Global struct {
 }
 
 func (g *Global) Get() any {
-	return g.value.anyValueType(g.Type)
+	return g.value.any(g.Type)
 }

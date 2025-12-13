@@ -48,7 +48,7 @@ func (s *valueStack) push(v value) {
 
 func (s *valueStack) pushAll(values []any) {
 	for _, v := range values {
-		s.push(valueFromAny(v))
+		s.push(newValue(v))
 	}
 }
 
@@ -100,7 +100,7 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 	result := make([]any, n)
 	for i, t := range types {
 		v := s.data[newLen+i]
-		result[i] = v.anyValueType(t)
+		result[i] = v.any(t)
 	}
 	s.data = s.data[:newLen]
 	return result
