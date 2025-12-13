@@ -1266,10 +1266,9 @@ func (vm *vm) handleBrTable(instruction instruction) {
 func (vm *vm) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
-	var targetFrame controlFrame
-	for range int(labelIndex) + 1 {
-		targetFrame = vm.popControlFrame()
-	}
+	targetIndex := len(callFrame.controlStack) - int(labelIndex) - 1
+	targetFrame := callFrame.controlStack[targetIndex]
+	callFrame.controlStack = callFrame.controlStack[:targetIndex]
 
 	var arity uint
 	if targetFrame.opcode == loop {
