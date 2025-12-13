@@ -133,7 +133,7 @@ func resolveGlobalImport(
 		)
 	}
 	return &Global{
-		value:   valueFromAny(obj, globalType.ValueType),
+		value:   valueFromAny(obj),
 		Mutable: globalType.IsMutable,
 		Type:    globalType.ValueType,
 	}, nil

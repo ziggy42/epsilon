@@ -94,18 +94,18 @@ func defaultValue(vt ValueType) value {
 	}
 }
 
-func valueFromAny(v any, vt ValueType) value {
-	switch vt {
-	case I32, FuncRefType, ExternRefType:
-		return i32(v.(int32))
-	case I64:
-		return i64(v.(int64))
-	case F32:
-		return f32(v.(float32))
-	case F64:
-		return f64(v.(float64))
-	case V128:
-		return v128(v.(V128Value))
+func valueFromAny(v any) value {
+	switch val := v.(type) {
+	case int32:
+		return i32(val)
+	case int64:
+		return i64(val)
+	case float32:
+		return f32(val)
+	case float64:
+		return f64(val)
+	case V128Value:
+		return v128(val)
 	default:
 		panic("unreachable")
 	}

@@ -48,20 +48,7 @@ func (s *valueStack) pushRaw(v value) {
 
 func (s *valueStack) pushAll(values []any) {
 	for _, v := range values {
-		switch val := v.(type) {
-		case int32:
-			s.pushInt32(val)
-		case int64:
-			s.pushInt64(val)
-		case float32:
-			s.pushFloat32(val)
-		case float64:
-			s.pushFloat64(val)
-		case V128Value:
-			s.pushV128(val)
-		default:
-			panic("unreachable")
-		}
+		s.pushRaw(valueFromAny(v))
 	}
 }
 
@@ -113,20 +100,7 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 	result := make([]any, n)
 	for i, t := range types {
 		v := s.data[newLen+i]
-		switch t {
-		case I32, FuncRefType, ExternRefType:
-			result[i] = v.int32()
-		case I64:
-			result[i] = v.int64()
-		case F32:
-			result[i] = v.float32()
-		case F64:
-			result[i] = v.float64()
-		case V128:
-			result[i] = v.v128()
-		default:
-			panic("unreachable")
-		}
+		result[i] = v.anyValueType(t)
 	}
 	s.data = s.data[:newLen]
 	return result
