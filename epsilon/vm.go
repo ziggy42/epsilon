@@ -367,7 +367,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64Const:
 		vm.stack.pushFloat64(math.Float64frombits(instruction.immediates[0]))
 	case i32Eqz:
-		handleUnaryBool(vm.stack.popInt32, vm.stack.pushInt32, equalZero)
+		vm.stack.pushInt32(boolToInt32(vm.stack.popInt32() == 0))
 	case i32Eq:
 		handleBinaryBool(vm.stack.popInt32, vm.stack.pushInt32, equal)
 	case i32Ne:
@@ -389,7 +389,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i32GeU:
 		handleBinaryBool(vm.stack.popInt32, vm.stack.pushInt32, greaterOrEqualU32)
 	case i64Eqz:
-		handleUnaryBool(vm.stack.popInt64, vm.stack.pushInt32, equalZero)
+		vm.stack.pushInt32(boolToInt32(vm.stack.popInt64() == 0))
 	case i64Eq:
 		handleBinaryBool(vm.stack.popInt64, vm.stack.pushInt32, equal)
 	case i64Ne:
@@ -435,11 +435,11 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64Ge:
 		handleBinaryBool(vm.stack.popFloat64, vm.stack.pushInt32, greaterOrEqual)
 	case i32Clz:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt32, clz32)
+		vm.stack.pushInt32(clz32(vm.stack.popInt32()))
 	case i32Ctz:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt32, ctz32)
+		vm.stack.pushInt32(ctz32(vm.stack.popInt32()))
 	case i32Popcnt:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt32, popcnt32)
+		vm.stack.pushInt32(popcnt32(vm.stack.popInt32()))
 	case i32Add:
 		handleBinary(vm.stack.popInt32, vm.stack.pushInt32, add)
 	case i32Sub:
@@ -471,11 +471,11 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i32Rotr:
 		handleBinary(vm.stack.popInt32, vm.stack.pushInt32, rotr32)
 	case i64Clz:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, clz64)
+		vm.stack.pushInt64(clz64(vm.stack.popInt64()))
 	case i64Ctz:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, ctz64)
+		vm.stack.pushInt64(ctz64(vm.stack.popInt64()))
 	case i64Popcnt:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, popcnt64)
+		vm.stack.pushInt64(popcnt64(vm.stack.popInt64()))
 	case i64Add:
 		handleBinary(vm.stack.popInt64, vm.stack.pushInt64, add)
 	case i64Sub:
@@ -507,19 +507,19 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64Rotr:
 		handleBinary(vm.stack.popInt64, vm.stack.pushInt64, rotr64)
 	case f32Abs:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, abs[float32])
+		vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
 	case f32Neg:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, neg[float32])
+		vm.stack.pushFloat32(neg(vm.stack.popFloat32()))
 	case f32Ceil:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, ceil[float32])
+		vm.stack.pushFloat32(ceil(vm.stack.popFloat32()))
 	case f32Floor:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, floor[float32])
+		vm.stack.pushFloat32(floor(vm.stack.popFloat32()))
 	case f32Trunc:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, trunc[float32])
+		vm.stack.pushFloat32(trunc(vm.stack.popFloat32()))
 	case f32Nearest:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, nearest[float32])
+		vm.stack.pushFloat32(nearest(vm.stack.popFloat32()))
 	case f32Sqrt:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat32, sqrt[float32])
+		vm.stack.pushFloat32(sqrt(vm.stack.popFloat32()))
 	case f32Add:
 		handleBinary(vm.stack.popFloat32, vm.stack.pushFloat32, add[float32])
 	case f32Sub:
@@ -535,19 +535,19 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f32Copysign:
 		handleBinary(vm.stack.popFloat32, vm.stack.pushFloat32, copysign[float32])
 	case f64Abs:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, abs[float64])
+		vm.stack.pushFloat64(abs(vm.stack.popFloat64()))
 	case f64Neg:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, neg[float64])
+		vm.stack.pushFloat64(neg(vm.stack.popFloat64()))
 	case f64Ceil:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, ceil[float64])
+		vm.stack.pushFloat64(ceil(vm.stack.popFloat64()))
 	case f64Floor:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, floor[float64])
+		vm.stack.pushFloat64(floor(vm.stack.popFloat64()))
 	case f64Trunc:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, trunc[float64])
+		vm.stack.pushFloat64(trunc(vm.stack.popFloat64()))
 	case f64Nearest:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, nearest[float64])
+		vm.stack.pushFloat64(nearest(vm.stack.popFloat64()))
 	case f64Sqrt:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat64, sqrt[float64])
+		vm.stack.pushFloat64(sqrt(vm.stack.popFloat64()))
 	case f64Add:
 		handleBinary(vm.stack.popFloat64, vm.stack.pushFloat64, add[float64])
 	case f64Sub:
@@ -563,7 +563,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64Copysign:
 		handleBinary(vm.stack.popFloat64, vm.stack.pushFloat64, copysign[float64])
 	case i32WrapI64:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt32, wrapI64ToI32)
+		vm.stack.pushInt32(wrapI64ToI32(vm.stack.popInt64()))
 	case i32TruncF32S:
 		err = handleUnarySafe(vm.stack.popFloat32, vm.stack.pushInt32, truncF32SToI32)
 	case i32TruncF32U:
@@ -573,9 +573,9 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i32TruncF64U:
 		err = handleUnarySafe(vm.stack.popFloat64, vm.stack.pushInt32, truncF64UToI32)
 	case i64ExtendI32S:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt64, extendI32SToI64)
+		vm.stack.pushInt64(extendI32SToI64(vm.stack.popInt32()))
 	case i64ExtendI32U:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt64, extendI32UToI64)
+		vm.stack.pushInt64(extendI32UToI64(vm.stack.popInt32()))
 	case i64TruncF32S:
 		err = handleUnarySafe(vm.stack.popFloat32, vm.stack.pushInt64, truncF32SToI64)
 	case i64TruncF32U:
@@ -585,43 +585,43 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64TruncF64U:
 		err = handleUnarySafe(vm.stack.popFloat64, vm.stack.pushInt64, truncF64UToI64)
 	case f32ConvertI32S:
-		handleUnary(vm.stack.popInt32, vm.stack.pushFloat32, convertI32SToF32)
+		vm.stack.pushFloat32(convertI32SToF32(vm.stack.popInt32()))
 	case f32ConvertI32U:
-		handleUnary(vm.stack.popInt32, vm.stack.pushFloat32, convertI32UToF32)
+		vm.stack.pushFloat32(convertI32UToF32(vm.stack.popInt32()))
 	case f32ConvertI64S:
-		handleUnary(vm.stack.popInt64, vm.stack.pushFloat32, convertI64SToF32)
+		vm.stack.pushFloat32(convertI64SToF32(vm.stack.popInt64()))
 	case f32ConvertI64U:
-		handleUnary(vm.stack.popInt64, vm.stack.pushFloat32, convertI64UToF32)
+		vm.stack.pushFloat32(convertI64UToF32(vm.stack.popInt64()))
 	case f32DemoteF64:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushFloat32, demoteF64ToF32)
+		vm.stack.pushFloat32(demoteF64ToF32(vm.stack.popFloat64()))
 	case f64ConvertI32S:
-		handleUnary(vm.stack.popInt32, vm.stack.pushFloat64, convertI32SToF64)
+		vm.stack.pushFloat64(convertI32SToF64(vm.stack.popInt32()))
 	case f64ConvertI32U:
-		handleUnary(vm.stack.popInt32, vm.stack.pushFloat64, convertI32UToF64)
+		vm.stack.pushFloat64(convertI32UToF64(vm.stack.popInt32()))
 	case f64ConvertI64S:
-		handleUnary(vm.stack.popInt64, vm.stack.pushFloat64, convertI64SToF64)
+		vm.stack.pushFloat64(convertI64SToF64(vm.stack.popInt64()))
 	case f64ConvertI64U:
-		handleUnary(vm.stack.popInt64, vm.stack.pushFloat64, convertI64UToF64)
+		vm.stack.pushFloat64(convertI64UToF64(vm.stack.popInt64()))
 	case f64PromoteF32:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushFloat64, promoteF32ToF64)
+		vm.stack.pushFloat64(promoteF32ToF64(vm.stack.popFloat32()))
 	case i32ReinterpretF32:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushInt32, reinterpretF32ToI32)
+		vm.stack.pushInt32(reinterpretF32ToI32(vm.stack.popFloat32()))
 	case i64ReinterpretF64:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushInt64, reinterpretF64ToI64)
+		vm.stack.pushInt64(reinterpretF64ToI64(vm.stack.popFloat64()))
 	case f32ReinterpretI32:
-		handleUnary(vm.stack.popInt32, vm.stack.pushFloat32, reinterpretI32ToF32)
+		vm.stack.pushFloat32(reinterpretI32ToF32(vm.stack.popInt32()))
 	case f64ReinterpretI64:
-		handleUnary(vm.stack.popInt64, vm.stack.pushFloat64, reinterpretI64ToF64)
+		vm.stack.pushFloat64(reinterpretI64ToF64(vm.stack.popInt64()))
 	case i32Extend8S:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt32, extend8STo32)
+		vm.stack.pushInt32(extend8STo32(vm.stack.popInt32()))
 	case i32Extend16S:
-		handleUnary(vm.stack.popInt32, vm.stack.pushInt32, extend16STo32)
+		vm.stack.pushInt32(extend16STo32(vm.stack.popInt32()))
 	case i64Extend8S:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, extend8STo64)
+		vm.stack.pushInt64(extend8STo64(vm.stack.popInt64()))
 	case i64Extend16S:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, extend16STo64)
+		vm.stack.pushInt64(extend16STo64(vm.stack.popInt64()))
 	case i64Extend32S:
-		handleUnary(vm.stack.popInt64, vm.stack.pushInt64, extend32STo64)
+		vm.stack.pushInt64(extend32STo64(vm.stack.popInt64()))
 	case refNull:
 		vm.stack.pushNull()
 	case refIsNull:
@@ -629,21 +629,21 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case refFunc:
 		vm.handleRefFunc(instruction)
 	case i32TruncSatF32S:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushInt32, truncSatF32SToI32)
+		vm.stack.pushInt32(truncSatF32SToI32(vm.stack.popFloat32()))
 	case i32TruncSatF32U:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushInt32, truncSatF32UToI32)
+		vm.stack.pushInt32(truncSatF32UToI32(vm.stack.popFloat32()))
 	case i32TruncSatF64S:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushInt32, truncSatF64SToI32)
+		vm.stack.pushInt32(truncSatF64SToI32(vm.stack.popFloat64()))
 	case i32TruncSatF64U:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushInt32, truncSatF64UToI32)
+		vm.stack.pushInt32(truncSatF64UToI32(vm.stack.popFloat64()))
 	case i64TruncSatF32S:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushInt64, truncSatF32SToI64)
+		vm.stack.pushInt64(truncSatF32SToI64(vm.stack.popFloat32()))
 	case i64TruncSatF32U:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushInt64, truncSatF32UToI64)
+		vm.stack.pushInt64(truncSatF32UToI64(vm.stack.popFloat32()))
 	case i64TruncSatF64S:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushInt64, truncSatF64SToI64)
+		vm.stack.pushInt64(truncSatF64SToI64(vm.stack.popFloat64()))
 	case i64TruncSatF64U:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushInt64, truncSatF64UToI64)
+		vm.stack.pushInt64(truncSatF64UToI64(vm.stack.popFloat64()))
 	case memoryInit:
 		err = vm.handleMemoryInit(instruction)
 	case dataDrop:
@@ -695,17 +695,17 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i8x16Swizzle:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16Swizzle)
 	case i8x16Splat:
-		handleUnary(vm.stack.popInt32, vm.stack.pushV128, simdI8x16Splat)
+		vm.stack.pushV128(simdI8x16Splat(vm.stack.popInt32()))
 	case i16x8Splat:
-		handleUnary(vm.stack.popInt32, vm.stack.pushV128, simdI16x8Splat)
+		vm.stack.pushV128(simdI16x8Splat(vm.stack.popInt32()))
 	case i32x4Splat:
-		handleUnary(vm.stack.popInt32, vm.stack.pushV128, simdI32x4Splat)
+		vm.stack.pushV128(simdI32x4Splat(vm.stack.popInt32()))
 	case i64x2Splat:
-		handleUnary(vm.stack.popInt64, vm.stack.pushV128, simdI64x2Splat)
+		vm.stack.pushV128(simdI64x2Splat(vm.stack.popInt64()))
 	case f32x4Splat:
-		handleUnary(vm.stack.popFloat32, vm.stack.pushV128, simdF32x4Splat)
+		vm.stack.pushV128(simdF32x4Splat(vm.stack.popFloat32()))
 	case f64x2Splat:
-		handleUnary(vm.stack.popFloat64, vm.stack.pushV128, simdF64x2Splat)
+		vm.stack.pushV128(simdF64x2Splat(vm.stack.popFloat64()))
 	case i8x16ExtractLaneS:
 		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI8x16ExtractLaneS)
 	case i8x16ExtractLaneU:
@@ -819,7 +819,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64x2Ge:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Ge)
 	case v128Not:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdV128Not)
+		vm.stack.pushV128(simdV128Not(vm.stack.popV128()))
 	case v128And:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdV128And)
 	case v128Andnot:
@@ -831,7 +831,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case v128Bitselect:
 		vm.handleSimdTernary(simdV128Bitselect)
 	case v128AnyTrue:
-		handleUnaryBool(vm.stack.popV128, vm.stack.pushInt32, simdV128AnyTrue)
+		vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(vm.stack.popV128())))
 	case v128Load8Lane:
 		err = vm.handleSimdLoadLane(instruction, 8)
 	case v128Load16Lane:
@@ -853,31 +853,31 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case v128Load64Zero:
 		err = vm.handleLoadV128FromBytes(instruction, simdV128Load64Zero, 8)
 	case f32x4DemoteF64x2Zero:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4DemoteF64x2Zero)
+		vm.stack.pushV128(simdF32x4DemoteF64x2Zero(vm.stack.popV128()))
 	case f64x2PromoteLowF32x4:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2PromoteLowF32x4)
+		vm.stack.pushV128(simdF64x2PromoteLowF32x4(vm.stack.popV128()))
 	case i8x16Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI8x16Abs)
+		vm.stack.pushV128(simdI8x16Abs(vm.stack.popV128()))
 	case i8x16Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI8x16Neg)
+		vm.stack.pushV128(simdI8x16Neg(vm.stack.popV128()))
 	case i8x16Popcnt:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI8x16Popcnt)
+		vm.stack.pushV128(simdI8x16Popcnt(vm.stack.popV128()))
 	case i8x16AllTrue:
-		handleUnaryBool(vm.stack.popV128, vm.stack.pushInt32, simdI8x16AllTrue)
+		vm.stack.pushInt32(boolToInt32(simdI8x16AllTrue(vm.stack.popV128())))
 	case i8x16Bitmask:
-		handleUnary(vm.stack.popV128, vm.stack.pushInt32, simdI8x16Bitmask)
+		vm.stack.pushInt32(simdI8x16Bitmask(vm.stack.popV128()))
 	case i8x16NarrowI16x8S:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16NarrowI16x8S)
 	case i8x16NarrowI16x8U:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16NarrowI16x8U)
 	case f32x4Ceil:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Ceil)
+		vm.stack.pushV128(simdF32x4Ceil(vm.stack.popV128()))
 	case f32x4Floor:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Floor)
+		vm.stack.pushV128(simdF32x4Floor(vm.stack.popV128()))
 	case f32x4Trunc:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Trunc)
+		vm.stack.pushV128(simdF32x4Trunc(vm.stack.popV128()))
 	case f32x4Nearest:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Nearest)
+		vm.stack.pushV128(simdF32x4Nearest(vm.stack.popV128()))
 	case i8x16Shl:
 		vm.handleSimdShift(simdI8x16Shl)
 	case i8x16ShrU:
@@ -897,9 +897,9 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i8x16SubSatU:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16SubSatU)
 	case f64x2Ceil:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Ceil)
+		vm.stack.pushV128(simdF64x2Ceil(vm.stack.popV128()))
 	case f64x2Floor:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Floor)
+		vm.stack.pushV128(simdF64x2Floor(vm.stack.popV128()))
 	case i8x16MinS:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16MinS)
 	case i8x16MinU:
@@ -909,39 +909,39 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i8x16MaxU:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16MaxU)
 	case f64x2Trunc:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Trunc)
+		vm.stack.pushV128(simdF64x2Trunc(vm.stack.popV128()))
 	case i8x16AvgrU:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI8x16AvgrU)
 	case i16x8ExtaddPairwiseI8x16S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtaddPairwiseI8x16S)
+		vm.stack.pushV128(simdI16x8ExtaddPairwiseI8x16S(vm.stack.popV128()))
 	case i16x8ExtaddPairwiseI8x16U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtaddPairwiseI8x16U)
+		vm.stack.pushV128(simdI16x8ExtaddPairwiseI8x16U(vm.stack.popV128()))
 	case i32x4ExtaddPairwiseI16x8S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtaddPairwiseI16x8S)
+		vm.stack.pushV128(simdI32x4ExtaddPairwiseI16x8S(vm.stack.popV128()))
 	case i32x4ExtaddPairwiseI16x8U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtaddPairwiseI16x8U)
+		vm.stack.pushV128(simdI32x4ExtaddPairwiseI16x8U(vm.stack.popV128()))
 	case i16x8Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8Abs)
+		vm.stack.pushV128(simdI16x8Abs(vm.stack.popV128()))
 	case i16x8Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8Neg)
+		vm.stack.pushV128(simdI16x8Neg(vm.stack.popV128()))
 	case i16x8Q15mulrSatS:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8Q15mulrSatS)
 	case i16x8AllTrue:
-		handleUnaryBool(vm.stack.popV128, vm.stack.pushInt32, simdI16x8AllTrue)
+		vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(vm.stack.popV128())))
 	case i16x8Bitmask:
-		handleUnary(vm.stack.popV128, vm.stack.pushInt32, simdI16x8Bitmask)
+		vm.stack.pushInt32(simdI16x8Bitmask(vm.stack.popV128()))
 	case i16x8NarrowI32x4S:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8NarrowI32x4S)
 	case i16x8NarrowI32x4U:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8NarrowI32x4U)
 	case i16x8ExtendLowI8x16S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtendLowI8x16S)
+		vm.stack.pushV128(simdI16x8ExtendLowI8x16S(vm.stack.popV128()))
 	case i16x8ExtendHighI8x16S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtendHighI8x16S)
+		vm.stack.pushV128(simdI16x8ExtendHighI8x16S(vm.stack.popV128()))
 	case i16x8ExtendLowI8x16U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtendLowI8x16U)
+		vm.stack.pushV128(simdI16x8ExtendLowI8x16U(vm.stack.popV128()))
 	case i16x8ExtendHighI8x16U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtendHighI8x16U)
+		vm.stack.pushV128(simdI16x8ExtendHighI8x16U(vm.stack.popV128()))
 	case i16x8Shl:
 		vm.handleSimdShift(simdI16x8Shl)
 	case i16x8ShrS:
@@ -961,7 +961,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i16x8SubSatU:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8SubSatU)
 	case f64x2Nearest:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Nearest)
+		vm.stack.pushV128(simdF64x2Nearest(vm.stack.popV128()))
 	case i16x8Mul:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8Mul)
 	case i16x8MinS:
@@ -983,21 +983,21 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i16x8ExtmulHighI8x16U:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI16x8ExtmulHighI8x16U)
 	case i32x4Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4Abs)
+		vm.stack.pushV128(simdI32x4Abs(vm.stack.popV128()))
 	case i32x4Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4Neg)
+		vm.stack.pushV128(simdI32x4Neg(vm.stack.popV128()))
 	case i32x4AllTrue:
-		handleUnaryBool(vm.stack.popV128, vm.stack.pushInt32, simdI32x4AllTrue)
+		vm.stack.pushInt32(boolToInt32(simdI32x4AllTrue(vm.stack.popV128())))
 	case i32x4Bitmask:
-		handleUnary(vm.stack.popV128, vm.stack.pushInt32, simdI32x4Bitmask)
+		vm.stack.pushInt32(simdI32x4Bitmask(vm.stack.popV128()))
 	case i32x4ExtendLowI16x8S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtendLowI16x8S)
+		vm.stack.pushV128(simdI32x4ExtendLowI16x8S(vm.stack.popV128()))
 	case i32x4ExtendHighI16x8S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtendHighI16x8S)
+		vm.stack.pushV128(simdI32x4ExtendHighI16x8S(vm.stack.popV128()))
 	case i32x4ExtendLowI16x8U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtendLowI16x8U)
+		vm.stack.pushV128(simdI32x4ExtendLowI16x8U(vm.stack.popV128()))
 	case i32x4ExtendHighI16x8U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtendHighI16x8U)
+		vm.stack.pushV128(simdI32x4ExtendHighI16x8U(vm.stack.popV128()))
 	case i32x4Shl:
 		vm.handleSimdShift(simdI32x4Shl)
 	case i32x4ShrS:
@@ -1029,21 +1029,21 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i32x4ExtmulHighI16x8U:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI32x4ExtmulHighI16x8U)
 	case i64x2Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2Abs)
+		vm.stack.pushV128(simdI64x2Abs(vm.stack.popV128()))
 	case i64x2Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2Neg)
+		vm.stack.pushV128(simdI64x2Neg(vm.stack.popV128()))
 	case i64x2AllTrue:
-		handleUnaryBool(vm.stack.popV128, vm.stack.pushInt32, simdI64x2AllTrue)
+		vm.stack.pushInt32(boolToInt32(simdI64x2AllTrue(vm.stack.popV128())))
 	case i64x2Bitmask:
-		handleUnary(vm.stack.popV128, vm.stack.pushInt32, simdI64x2Bitmask)
+		vm.stack.pushInt32(simdI64x2Bitmask(vm.stack.popV128()))
 	case i64x2ExtendLowI32x4S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2ExtendLowI32x4S)
+		vm.stack.pushV128(simdI64x2ExtendLowI32x4S(vm.stack.popV128()))
 	case i64x2ExtendHighI32x4S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2ExtendHighI32x4S)
+		vm.stack.pushV128(simdI64x2ExtendHighI32x4S(vm.stack.popV128()))
 	case i64x2ExtendLowI32x4U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2ExtendLowI32x4U)
+		vm.stack.pushV128(simdI64x2ExtendLowI32x4U(vm.stack.popV128()))
 	case i64x2ExtendHighI32x4U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI64x2ExtendHighI32x4U)
+		vm.stack.pushV128(simdI64x2ExtendHighI32x4U(vm.stack.popV128()))
 	case i64x2Shl:
 		vm.handleSimdShift(simdI64x2Shl)
 	case i64x2ShrS:
@@ -1077,11 +1077,11 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64x2ExtmulHighI32x4U:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdI64x2ExtmulHighI32x4U)
 	case f32x4Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Abs)
+		vm.stack.pushV128(simdF32x4Abs(vm.stack.popV128()))
 	case f32x4Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Neg)
+		vm.stack.pushV128(simdF32x4Neg(vm.stack.popV128()))
 	case f32x4Sqrt:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Sqrt)
+		vm.stack.pushV128(simdF32x4Sqrt(vm.stack.popV128()))
 	case f32x4Add:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Add)
 	case f32x4Sub:
@@ -1099,11 +1099,11 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f32x4Pmax:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdF32x4Pmax)
 	case f64x2Abs:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Abs)
+		vm.stack.pushV128(simdF64x2Abs(vm.stack.popV128()))
 	case f64x2Neg:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Neg)
+		vm.stack.pushV128(simdF64x2Neg(vm.stack.popV128()))
 	case f64x2Sqrt:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Sqrt)
+		vm.stack.pushV128(simdF64x2Sqrt(vm.stack.popV128()))
 	case f64x2Add:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Add)
 	case f64x2Sub:
@@ -1121,21 +1121,21 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64x2Pmax:
 		handleBinary(vm.stack.popV128, vm.stack.pushV128, simdF64x2Pmax)
 	case i32x4TruncSatF32x4S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4TruncSatF32x4S)
+		vm.stack.pushV128(simdI32x4TruncSatF32x4S(vm.stack.popV128()))
 	case i32x4TruncSatF32x4U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4TruncSatF32x4U)
+		vm.stack.pushV128(simdI32x4TruncSatF32x4U(vm.stack.popV128()))
 	case f32x4ConvertI32x4S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4ConvertI32x4S)
+		vm.stack.pushV128(simdF32x4ConvertI32x4S(vm.stack.popV128()))
 	case f32x4ConvertI32x4U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF32x4ConvertI32x4U)
+		vm.stack.pushV128(simdF32x4ConvertI32x4U(vm.stack.popV128()))
 	case i32x4TruncSatF64x2SZero:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4TruncSatF64x2SZero)
+		vm.stack.pushV128(simdI32x4TruncSatF64x2SZero(vm.stack.popV128()))
 	case i32x4TruncSatF64x2UZero:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdI32x4TruncSatF64x2UZero)
+		vm.stack.pushV128(simdI32x4TruncSatF64x2UZero(vm.stack.popV128()))
 	case f64x2ConvertLowI32x4S:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2ConvertLowI32x4S)
+		vm.stack.pushV128(simdF64x2ConvertLowI32x4S(vm.stack.popV128()))
 	case f64x2ConvertLowI32x4U:
-		handleUnary(vm.stack.popV128, vm.stack.pushV128, simdF64x2ConvertLowI32x4U)
+		vm.stack.pushV128(simdF64x2ConvertLowI32x4U(vm.stack.popV128()))
 	default:
 		err = fmt.Errorf("unknown opcode %d", instruction.opcode)
 	}
@@ -1550,14 +1550,6 @@ func handleBinaryBool[T wasmNumber](
 	push(boolToInt32(op(a, b)))
 }
 
-func handleUnary[T wasmNumber | V128Value, R wasmNumber | V128Value](
-	pop func() T,
-	push func(R),
-	op func(a T) R,
-) {
-	push(op(pop()))
-}
-
 func handleUnarySafe[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	pop func() T,
 	push func(R),
@@ -1570,14 +1562,6 @@ func handleUnarySafe[T wasmNumber | V128Value, R wasmNumber | V128Value](
 	}
 	push(result)
 	return nil
-}
-
-func handleUnaryBool[T wasmNumber | V128Value](
-	pop func() T,
-	push func(int32),
-	op func(a T) bool,
-) {
-	push(boolToInt32(op(pop())))
 }
 
 func (vm *vm) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
