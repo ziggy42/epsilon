@@ -48,6 +48,7 @@ var (
 	errUndeclaredFunctionReference      = errors.New("undeclared function reference")
 	errMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
 	errDataCountNotSet                  = errors.New("data count not set")
+	errUnclosedControlFrames            = errors.New("unclosed control frames")
 )
 
 type bottomType struct{}
@@ -327,7 +328,7 @@ func (v *validator) validateFunction(function *function) error {
 		return err
 	}
 	if len(v.controlStack) != 0 {
-		return errors.New("unclosed control frames")
+		return errUnclosedControlFrames
 	}
 	return nil
 }
