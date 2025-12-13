@@ -44,7 +44,7 @@ type store struct {
 
 type callFrame struct {
 	decoder      *decoder
-	controlStack []*controlFrame
+	controlStack []controlFrame
 	locals       []value
 	function     *wasmFunction
 }
@@ -224,7 +224,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 
 	callFrame := &callFrame{
 		decoder: newDecoder(function.code.body),
-		controlStack: []*controlFrame{{
+		controlStack: []controlFrame{{
 			opcode:         block,
 			continuationPc: uint(len(function.code.body)),
 			inputCount:     uint(len(function.functionType.ParamTypes)),
@@ -1150,7 +1150,7 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
 	callFrame := vm.currentCallFrame()
 	originalPc := callFrame.decoder.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
-	frame := &controlFrame{
+	frame := controlFrame{
 		opcode:      opcode,
 		inputCount:  inputCount,
 		outputCount: outputCount,
@@ -1266,7 +1266,7 @@ func (vm *vm) handleBrTable(instruction instruction) {
 func (vm *vm) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
-	var targetFrame *controlFrame
+	var targetFrame controlFrame
 	for range int(labelIndex) + 1 {
 		targetFrame = vm.popControlFrame()
 	}
@@ -1683,12 +1683,12 @@ func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	return 0, 1 // value type.
 }
 
-func (vm *vm) pushControlFrame(frame *controlFrame) {
+func (vm *vm) pushControlFrame(frame controlFrame) {
 	callFrame := vm.currentCallFrame()
 	callFrame.controlStack = append(callFrame.controlStack, frame)
 }
 
-func (vm *vm) popControlFrame() *controlFrame {
+func (vm *vm) popControlFrame() controlFrame {
 	callFrame := vm.currentCallFrame()
 	// Validation guarantees the control stack is never empty.
 	index := len(callFrame.controlStack) - 1
