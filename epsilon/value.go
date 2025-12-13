@@ -40,7 +40,7 @@ func f64(v float64) value {
 	return value{low: math.Float64bits(v)}
 }
 
-func v128Stack(v V128Value) value {
+func v128(v V128Value) value {
 	return value{low: v.Low, high: v.High}
 }
 
@@ -64,6 +64,25 @@ func (v value) v128() V128Value {
 	return V128Value{Low: v.low, High: v.high}
 }
 
+func (v value) anyValueType(t ValueType) any {
+	switch t {
+	case I32:
+		return v.int32()
+	case I64:
+		return v.int64()
+	case F32:
+		return v.float32()
+	case F64:
+		return v.float64()
+	case V128:
+		return v.v128()
+	case FuncRefType, ExternRefType:
+		return v.int32()
+	default:
+		panic("unreachable")
+	}
+}
+
 func defaultValue(vt ValueType) value {
 	switch vt {
 	case I32, I64, F32, F64:
@@ -74,7 +93,6 @@ func defaultValue(vt ValueType) value {
 		nullRef := NullReference
 		return value{low: uint64(int64(nullRef))}
 	default:
-		// Should ideally not be reached with a valid module.
-		return value{low: 0}
+		panic("unreachable")
 	}
 }

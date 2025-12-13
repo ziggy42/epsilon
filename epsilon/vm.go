@@ -179,7 +179,7 @@ func (vm *vm) instantiate(
 	if module.startIndex != nil {
 		storeFunctionIndex := moduleInstance.funcAddrs[*module.startIndex]
 		function := vm.store.funcs[storeFunctionIndex]
-		if _, err := vm.invokeFunction(function); err != nil {
+		if err := vm.invokeFunction(function); err != nil {
 			return nil, err
 		}
 	}
@@ -199,28 +199,33 @@ func (vm *vm) invoke(
 	}
 
 	vm.stack.pushAll(args)
-	return vm.invokeFunction(export.(FunctionInstance))
+	fn := export.(FunctionInstance)
+	if err := vm.invokeFunction(fn); err != nil {
+		return nil, err
+	}
+	resValues := vm.stack.popN(len(fn.GetType().ResultTypes))
+	return vm.valuesToAny(resValues, fn.GetType().ResultTypes), nil
 }
 
-func (vm *vm) invokeFunction(function FunctionInstance) ([]any, error) {
+func (vm *vm) invokeFunction(function FunctionInstance) error {
 	switch f := function.(type) {
 	case *wasmFunction:
 		return vm.invokeWasmFunction(f)
 	case *hostFunction:
 		return vm.invokeHostFunction(f)
 	default:
-		return nil, fmt.Errorf("unknown function type")
+		return fmt.Errorf("unknown function type")
 	}
 }
 
-func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
+func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	if vm.callStackDepth >= maxCallStackDepth {
-		return nil, errCallStackExhausted
+		return errCallStackExhausted
 	}
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popValues(len(function.functionType.ParamTypes))
+	locals := vm.stack.popN(len(function.functionType.ParamTypes))
 	for _, local := range function.code.locals {
 		locals = append(locals, defaultValue(local))
 	}
@@ -242,7 +247,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	for callFrame.decoder.hasMore() {
 		instruction, err := callFrame.decoder.decode()
 		if err != nil {
-			return nil, err
+			return err
 		}
 
 		if err = vm.handleInstruction(instruction); err != nil {
@@ -250,13 +255,12 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 				break // A 'return' instruction was executed.
 			}
 
-			return nil, err
+			return err
 		}
 	}
 
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	res := vm.stack.popValueTypes(function.functionType.ResultTypes)
-	return res, nil
+	return nil
 }
 
 func (vm *vm) handleInstruction(instruction instruction) error {
@@ -1293,12 +1297,7 @@ func (vm *vm) brToLabel(labelIndex uint32) {
 func (vm *vm) handleCall(instruction instruction) error {
 	localIndex := uint32(instruction.immediates[0])
 	function := vm.getFunction(localIndex)
-	res, err := vm.invokeFunction(function)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushAll(res)
-	return nil
+	return vm.invokeFunction(function)
 }
 
 func (vm *vm) handleCallIndirect(instruction instruction) error {
@@ -1323,12 +1322,7 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 
-	res, err := vm.invokeFunction(function)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushAll(res)
-	return nil
+	return vm.invokeFunction(function)
 }
 
 func (vm *vm) handleSelect() {
@@ -1856,7 +1850,7 @@ func (vm *vm) resolveExports(
 	return exports
 }
 
-func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
+func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			var panicErr error
@@ -1870,9 +1864,32 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
 		}
 	}()
 
-	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
-	res = fun.hostCode(args...)
-	return res, nil
+	argsValues := vm.stack.popN(len(fun.GetType().ParamTypes))
+	args := vm.valuesToAny(argsValues, fun.GetType().ParamTypes)
+	res := fun.hostCode(args...)
+	vm.stack.pushAll(res)
+	return err
+}
+
+func (vm *vm) valuesToAny(values []value, types []ValueType) []any {
+	result := make([]any, len(values))
+	for i, v := range values {
+		switch types[i] {
+		case I32, FuncRefType, ExternRefType:
+			result[i] = v.int32()
+		case I64:
+			result[i] = v.int64()
+		case F32:
+			result[i] = v.float32()
+		case F64:
+			result[i] = v.float64()
+		case V128:
+			result[i] = v.v128()
+		default:
+			panic("unreachable")
+		}
+	}
+	return result
 }
 
 func (vm *vm) invokeInitExpression(
@@ -1890,11 +1907,10 @@ func (vm *vm) invokeInitExpression(
 		code:   function{body: expression},
 		module: moduleInstance,
 	}
-	results, err := vm.invokeWasmFunction(&function)
-	if err != nil {
+	if err := vm.invokeWasmFunction(&function); err != nil {
 		return nil, err
 	}
-	return results[0], nil
+	return vm.stack.pop().anyValueType(resultType), nil
 }
 
 func toStoreFuncIndexes(

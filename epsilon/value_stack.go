@@ -39,7 +39,7 @@ func (s *valueStack) pushFloat64(v float64) {
 }
 
 func (s *valueStack) pushV128(v V128Value) {
-	s.data = append(s.data, v128Stack(v))
+	s.data = append(s.data, v128(v))
 }
 
 func (s *valueStack) pushNull() {
@@ -145,40 +145,10 @@ func (s *valueStack) popValueType(t ValueType) any {
 	}
 }
 
-func (s *valueStack) popValueTypes(types []ValueType) []any {
-	n := len(types)
+func (s *valueStack) popN(n int) []value {
 	newLen := len(s.data) - n
-	values := s.data[newLen:]
-	s.data = s.data[:newLen]
-
-	results := make([]any, n)
-	for i, t := range types {
-		item := values[i]
-		switch t {
-		case I32, FuncRefType, ExternRefType:
-			results[i] = item.int32()
-		case I64:
-			results[i] = item.int64()
-		case F32:
-			results[i] = item.float32()
-		case F64:
-			results[i] = item.float64()
-		case V128:
-			results[i] = item.v128()
-		default:
-			panic("unreachable")
-		}
-	}
-	return results
-}
-
-func (s *valueStack) popValues(n int) []value {
-	newLen := len(s.data) - n
-	values := s.data[newLen:]
-	// We need to copy the values because the underlying array slice will be reused
-	// by subsequent pushes.
 	result := make([]value, n)
-	copy(result, values)
+	copy(result, s.data[newLen:])
 	s.data = s.data[:newLen]
 	return result
 }
