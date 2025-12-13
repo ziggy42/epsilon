@@ -46,10 +46,6 @@ type wasmInt interface {
 	int32 | int64
 }
 
-func equalZero[T wasmNumber](a T) bool {
-	return a == 0
-}
-
 func equal[T wasmNumber](a, b T) bool {
 	return a == b
 }
