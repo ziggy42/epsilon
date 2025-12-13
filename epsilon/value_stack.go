@@ -19,7 +19,7 @@ type valueStack struct {
 }
 
 func newValueStack() *valueStack {
-	return &valueStack{data: make([]value, 512)}
+	return &valueStack{data: make([]value, 0, 512)}
 }
 
 func (s *valueStack) pushInt32(v int32) {
