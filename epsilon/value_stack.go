@@ -20,8 +20,6 @@ type valueStackItem struct {
 	low, high uint64
 }
 
-var nullValueStackItem = valueStackItem{low: 0, high: 1<<64 - 1}
-
 type valueStack struct {
 	data []valueStackItem
 }
@@ -51,7 +49,7 @@ func (s *valueStack) pushV128(v V128Value) {
 }
 
 func (s *valueStack) pushNull() {
-	s.data = append(s.data, nullValueStackItem)
+	s.pushInt32(NullReference)
 }
 
 func (s *valueStack) pushRaw(v valueStackItem) {
@@ -60,7 +58,7 @@ func (s *valueStack) pushRaw(v valueStackItem) {
 
 func (s *valueStack) pushValueType(v any, t ValueType) {
 	switch t {
-	case I32:
+	case I32, FuncRefType, ExternRefType:
 		s.pushInt32(v.(int32))
 	case I64:
 		s.pushInt64(v.(int64))
@@ -70,12 +68,6 @@ func (s *valueStack) pushValueType(v any, t ValueType) {
 		s.pushFloat64(v.(float64))
 	case V128:
 		s.pushV128(v.(V128Value))
-	case FuncRefType, ExternRefType:
-		if v == NullVal {
-			s.pushNull()
-		} else {
-			s.pushInt32(v.(int32))
-		}
 	default:
 		panic("unreachable")
 	}
@@ -94,19 +86,8 @@ func (s *valueStack) pushAll(values []any) {
 			s.pushFloat64(val)
 		case V128Value:
 			s.pushV128(val)
-		case Null:
-			s.pushNull()
-		// References are currently int32s in the store implementation.
-		// If we have actual reference types later, we need to handle them.
-		// For now, assume other types (reference indices) are int32s or handle appropriately.
 		default:
-			// Fallback for unexpected types, potentially unsafe but depends on usage.
-			// If it's a reference index (int32), it goes to pushInt32.
-			if i, ok := v.(int32); ok {
-				s.pushInt32(i)
-			} else {
-				panic("unsupported type in pushAll")
-			}
+			panic("unreachable")
 		}
 	}
 }
@@ -154,66 +135,9 @@ func (s *valueStack) pop() valueStackItem {
 	return element
 }
 
-func (s *valueStack) popTypedValues(types []ValueType) []any {
-	n := len(types)
-	newLen := len(s.data) - n
-	values := s.data[newLen:]
-	s.data = s.data[:newLen]
-
-	results := make([]any, n)
-	for i, t := range types {
-		item := values[i]
-		switch t {
-		case I32:
-			results[i] = int32(item.low)
-		case I64:
-			results[i] = int64(item.low)
-		case F32:
-			results[i] = math.Float32frombits(uint32(item.low))
-		case F64:
-			results[i] = math.Float64frombits(item.low)
-		case V128:
-			results[i] = V128Value{Low: item.low, High: item.high}
-		case FuncRefType, ExternRefType:
-			if item == nullValueStackItem {
-				results[i] = NullVal
-			} else {
-				results[i] = int32(item.low)
-			}
-		default:
-			panic("unsupported type in popTypedValues")
-		}
-	}
-	return results
-}
-
-func (s *valueStack) unwind(targetHeight, preserveCount uint) {
-	valuesToPreserve := s.data[s.size()-preserveCount:]
-	s.data = s.data[:targetHeight]
-	s.data = append(s.data, valuesToPreserve...)
-}
-
-func (s *valueStack) popRaw() valueStackItem {
-	return s.pop()
-}
-
-func (s *valueStack) popReference() any {
-	// References are stored as lowered indices (int32) usually.
-	// Or NullVal.
-	item := s.pop()
-	// Since we don't have types, we assume it's an index or we need to handle Null.
-	// User logic: if s.data[...] == NullVal. But `data` is `valueStackItem`.
-	// We need to define what Null looks like.
-	// var nullValueStackItem = valueStackItem{low: 0, high: 1<<64 - 1} // Defined above
-	if item == nullValueStackItem {
-		return NullVal
-	}
-	return int32(item.low)
-}
-
 func (s *valueStack) popValueType(t ValueType) any {
 	switch t {
-	case I32:
+	case I32, FuncRefType, ExternRefType:
 		return s.popInt32()
 	case I64:
 		return s.popInt64()
@@ -223,11 +147,42 @@ func (s *valueStack) popValueType(t ValueType) any {
 		return s.popFloat64()
 	case V128:
 		return s.popV128()
-	case FuncRefType, ExternRefType:
-		return s.popReference()
 	default:
 		panic("unreachable")
 	}
+}
+
+func (s *valueStack) popValueTypes(types []ValueType) []any {
+	n := len(types)
+	newLen := len(s.data) - n
+	values := s.data[newLen:]
+	s.data = s.data[:newLen]
+
+	results := make([]any, n)
+	for i, t := range types {
+		item := values[i]
+		switch t {
+		case I32, FuncRefType, ExternRefType:
+			results[i] = int32(item.low)
+		case I64:
+			results[i] = int64(item.low)
+		case F32:
+			results[i] = math.Float32frombits(uint32(item.low))
+		case F64:
+			results[i] = math.Float64frombits(item.low)
+		case V128:
+			results[i] = V128Value{Low: item.low, High: item.high}
+		default:
+			panic("unreachable")
+		}
+	}
+	return results
+}
+
+func (s *valueStack) unwind(targetHeight, preserveCount uint) {
+	valuesToPreserve := s.data[s.size()-preserveCount:]
+	s.data = s.data[:targetHeight]
+	s.data = append(s.data, valuesToPreserve...)
 }
 
 func (s *valueStack) size() uint {

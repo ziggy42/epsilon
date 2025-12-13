@@ -21,29 +21,29 @@ var errTableOutOfBounds = errors.New("out of bounds table access")
 // Table represents a WebAssembly table instance.
 type Table struct {
 	Type     TableType
-	elements []any
+	elements []int32
 }
 
 // NewTable creates a new Table instance from a TableType.
-// The table is initialized with 'NullVal' elements up to the minimum size.
+// The table is initialized with 'NullReference' elements up to the minimum size.
 func NewTable(tt TableType) *Table {
-	elements := make([]any, tt.Limits.Min)
+	elements := make([]int32, tt.Limits.Min)
 	for i := range elements {
-		elements[i] = NullVal
+		elements[i] = NullReference
 	}
 	return &Table{Type: tt, elements: elements}
 }
 
 // Get returns the element at the given index.
-func (t *Table) Get(index int32) (any, error) {
+func (t *Table) Get(index int32) (int32, error) {
 	if index < 0 || index >= int32(len(t.elements)) {
-		return nil, errTableOutOfBounds
+		return 0, errTableOutOfBounds
 	}
 	return t.elements[index], nil
 }
 
 // Set places a value at the given index.
-func (t *Table) Set(index int32, value any) error {
+func (t *Table) Set(index int32, value int32) error {
 	if index < 0 || index >= int32(len(t.elements)) {
 		return errTableOutOfBounds
 	}
@@ -57,7 +57,7 @@ func (t *Table) Size() int32 {
 
 // Grow increases the table size by n, initializing new elements with val.
 // It returns the previous size on success, or -1 if the growth is not possible.
-func (t *Table) Grow(n int32, val any) int32 {
+func (t *Table) Grow(n int32, val int32) int32 {
 	if n < 0 {
 		return -1
 	}
@@ -68,7 +68,7 @@ func (t *Table) Grow(n int32, val any) int32 {
 		}
 	}
 
-	newElements := make([]any, n)
+	newElements := make([]int32, n)
 	for i := range newElements {
 		newElements[i] = val
 	}
@@ -103,7 +103,7 @@ func (t *Table) InitFromSlice(startIndex int32, funcIndexes []int32) error {
 
 // InitFromAnySlice copies an entire slice of any values (function indexes or
 // nils) into the table at a starting index.
-func (t *Table) InitFromAnySlice(startIndex int32, values []any) error {
+func (t *Table) InitFromInt32Slice(startIndex int32, values []int32) error {
 	if startIndex < 0 || startIndex > t.Size() ||
 		uint64(uint32(startIndex))+uint64(len(values)) > uint64(t.Size()) {
 		return errTableOutOfBounds
@@ -136,7 +136,7 @@ func (t *Table) Copy(
 }
 
 // Fill sets n elements to a given value, starting from an index.
-func (t *Table) Fill(n, startIndex int32, val any) error {
+func (t *Table) Fill(n, startIndex int32, val int32) error {
 	if uint64(uint32(startIndex))+uint64(uint32(n)) > uint64(uint32(t.Size())) {
 		return errTableOutOfBounds
 	}

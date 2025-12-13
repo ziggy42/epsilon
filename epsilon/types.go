@@ -107,8 +107,6 @@ func (ft *FunctionType) Equal(other *FunctionType) bool {
 		slices.Equal(ft.ResultTypes, other.ResultTypes)
 }
 
-// Null is a lightweight way to represent a Wasm null reference.
-type Null struct{}
-
-// NullVal is a convenient, reusable instance of the Null type.
-var NullVal = Null{}
+// NullReference is the internal representation of a null reference.
+// It is represented as -1.
+const NullReference int32 = -1

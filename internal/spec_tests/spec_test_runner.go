@@ -434,7 +434,7 @@ func parseScalar(value string, valueType string) (any, error) {
 		return parseF64(value)
 	case "externref", "funcref":
 		if value == "null" {
-			return epsilon.NullVal, nil
+			return epsilon.NullReference, nil
 		}
 		val, err := strconv.ParseUint(value, 10, 32)
 		if err != nil {

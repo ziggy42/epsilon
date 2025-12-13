@@ -220,7 +220,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popTypedValues(function.functionType.ParamTypes)
+	locals := vm.stack.popValueTypes(function.functionType.ParamTypes)
 	for _, local := range function.code.locals {
 		locals = append(locals, defaultValue(local))
 	}
@@ -255,7 +255,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	}
 
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	res := vm.stack.popTypedValues(function.functionType.ResultTypes)
+	res := vm.stack.popValueTypes(function.functionType.ResultTypes)
 	return res, nil
 }
 
@@ -1314,11 +1314,11 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 	if err != nil {
 		return err
 	}
-	if tableElement == NullVal {
+	if tableElement == NullReference {
 		return fmt.Errorf("uninitialized element %d", elementIndex)
 	}
 
-	function := vm.store.funcs[uint32(tableElement.(int32))]
+	function := vm.store.funcs[uint32(tableElement)]
 	if !function.GetType().Equal(&expectedType) {
 		return fmt.Errorf("indirect call type mismatch")
 	}
@@ -1333,8 +1333,8 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 
 func (vm *vm) handleSelect() {
 	condition := vm.stack.popInt32()
-	val2 := vm.stack.popRaw()
-	val1 := vm.stack.popRaw()
+	val2 := vm.stack.pop()
+	val1 := vm.stack.pop()
 	if condition != 0 {
 		vm.stack.pushRaw(val1)
 	} else {
@@ -1388,18 +1388,14 @@ func (vm *vm) handleTableGet(instruction instruction) error {
 		return err
 	}
 
-	if element == NullVal {
-		vm.stack.pushNull()
-	} else {
-		vm.stack.pushInt32(element.(int32))
-	}
+	vm.stack.pushInt32(element)
 	return nil
 }
 
 func (vm *vm) handleTableSet(instruction instruction) error {
 	tableIndex := uint32(instruction.immediates[0])
 	table := vm.getTable(tableIndex)
-	reference := vm.stack.popReference()
+	reference := vm.stack.popInt32()
 	index := vm.stack.popInt32()
 	return table.Set(index, reference)
 }
@@ -1423,9 +1419,8 @@ func (vm *vm) handleRefFunc(instruction instruction) {
 }
 
 func (vm *vm) handleRefIsNull() {
-	top := vm.stack.popReference()
-	_, topIsNull := top.(Null)
-	vm.stack.pushInt32(boolToInt32(topIsNull))
+	top := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(top == NullReference))
 }
 
 func (vm *vm) handleMemoryInit(instruction instruction) error {
@@ -1491,7 +1486,7 @@ func (vm *vm) handleTableCopy(instruction instruction) error {
 func (vm *vm) handleTableGrow(instruction instruction) {
 	table := vm.getTable(uint32(instruction.immediates[0]))
 	n := vm.stack.popInt32()
-	val := vm.stack.popReference()
+	val := vm.stack.popInt32()
 	vm.stack.pushInt32(table.Grow(n, val))
 }
 
@@ -1503,7 +1498,7 @@ func (vm *vm) handleTableSize(instruction instruction) {
 func (vm *vm) handleTableFill(instruction instruction) error {
 	table := vm.getTable(uint32(instruction.immediates[0]))
 	n := vm.stack.popInt32()
-	val := vm.stack.popReference()
+	val := vm.stack.popInt32()
 	i := vm.stack.popInt32()
 	return table.Fill(n, i, val)
 }
@@ -1809,7 +1804,7 @@ func (vm *vm) initActiveElements(
 		}
 
 		if len(element.functionIndexesExpressions) > 0 {
-			values := make([]any, len(element.functionIndexesExpressions))
+			values := make([]int32, len(element.functionIndexesExpressions))
 			for i, expr := range element.functionIndexesExpressions {
 				refAny, err := vm.invokeInitExpression(
 					expr,
@@ -1819,11 +1814,10 @@ func (vm *vm) initActiveElements(
 				if err != nil {
 					return err
 				}
-				// Note that this reference might be nil.
-				values[i] = refAny
+				values[i] = refAny.(int32)
 			}
 
-			if err := table.InitFromAnySlice(offset, values); err != nil {
+			if err := table.InitFromInt32Slice(offset, values); err != nil {
 				return err
 			}
 		}
@@ -1896,7 +1890,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (res []any, err error) {
 		}
 	}()
 
-	args := vm.stack.popTypedValues(fun.GetType().ParamTypes)
+	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
 	res = fun.hostCode(args...)
 	return res, nil
 }
@@ -1947,7 +1941,7 @@ func defaultValue(vt ValueType) any {
 	case V128:
 		return V128Value{}
 	case FuncRefType, ExternRefType:
-		return NullVal
+		return NullReference
 	default:
 		// Should ideally not be reached with a valid module.
 		return nil
