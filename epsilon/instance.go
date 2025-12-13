@@ -14,6 +14,13 @@
 
 package epsilon
 
+import (
+	"errors"
+	"fmt"
+)
+
+var errFailedToFindExport = errors.New("failed to find export")
+
 // exportInstance represents the runtime representation of an export.
 type exportInstance struct {
 	name  string
@@ -38,43 +45,63 @@ type ModuleInstance struct {
 // Args can be int32, int64, float32, or float64. The function returns a slice
 // of results as []any, which can be type-asserted to the appropriate types.
 func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
-	return m.vm.invoke(m, name, args...)
+	function, err := m.GetFunction(name)
+	if err != nil {
+		return nil, err
+	}
+	return m.vm.invoke(function, args)
 }
 
 // GetMemory returns an exported memory by name.
 func (m *ModuleInstance) GetMemory(name string) (*Memory, error) {
-	export, err := getExport(m, name, memoryExportKind)
+	export, err := m.findExport(name)
 	if err != nil {
 		return nil, err
 	}
-	return export.(*Memory), nil
+	mem, ok := export.(*Memory)
+	if !ok {
+		return nil, fmt.Errorf("export %s is not a memory", name)
+	}
+	return mem, nil
 }
 
 // GetTable returns an exported table by name.
 func (m *ModuleInstance) GetTable(name string) (*Table, error) {
-	export, err := getExport(m, name, tableExportKind)
+	export, err := m.findExport(name)
 	if err != nil {
 		return nil, err
 	}
-	return export.(*Table), nil
+	table, ok := export.(*Table)
+	if !ok {
+		return nil, fmt.Errorf("export %s is not a table", name)
+	}
+	return table, nil
 }
 
 // GetGlobal returns the value of an exported global by name.
 func (m *ModuleInstance) GetGlobal(name string) (any, error) {
-	export, err := getExport(m, name, globalExportKind)
+	export, err := m.findExport(name)
 	if err != nil {
 		return nil, err
 	}
-	return export.(*Global).Get(), nil
+	global, ok := export.(*Global)
+	if !ok {
+		return nil, fmt.Errorf("export %s is not a global", name)
+	}
+	return global.Get(), nil
 }
 
 // GetFunction returns an exported function by name.
 func (m *ModuleInstance) GetFunction(name string) (FunctionInstance, error) {
-	export, err := getExport(m, name, functionExportKind)
+	export, err := m.findExport(name)
 	if err != nil {
 		return nil, err
 	}
-	return export.(FunctionInstance), nil
+	fn, ok := export.(FunctionInstance)
+	if !ok {
+		return nil, fmt.Errorf("export %s is not a function", name)
+	}
+	return fn, nil
 }
 
 // ExportNames returns a slice of all export names in the module.
@@ -84,6 +111,15 @@ func (m *ModuleInstance) ExportNames() []string {
 		names[i] = export.name
 	}
 	return names
+}
+
+func (m *ModuleInstance) findExport(name string) (any, error) {
+	for _, export := range m.exports {
+		if export.name == name {
+			return export.value, nil
+		}
+	}
+	return nil, errFailedToFindExport
 }
 
 type FunctionInstance interface {

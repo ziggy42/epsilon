@@ -188,22 +188,12 @@ func (vm *vm) instantiate(
 	return moduleInstance, nil
 }
 
-func (vm *vm) invoke(
-	module *ModuleInstance,
-	name string,
-	args ...any,
-) ([]any, error) {
-	export, err := getExport(module, name, functionExportKind)
-	if err != nil {
-		return nil, err
-	}
-
+func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
 	vm.stack.pushAll(args)
-	fn := export.(FunctionInstance)
-	if err := vm.invokeFunction(fn); err != nil {
+	if err := vm.invokeFunction(function); err != nil {
 		return nil, err
 	}
-	return vm.stack.popValueTypes(fn.GetType().ResultTypes), nil
+	return vm.stack.popValueTypes(function.GetType().ResultTypes), nil
 }
 
 func (vm *vm) invokeFunction(function FunctionInstance) error {
@@ -1688,49 +1678,6 @@ func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	}
 
 	return 0, 1 // value type.
-}
-
-func getExport(
-	module *ModuleInstance,
-	name string,
-	indexType exportIndexKind,
-) (any, error) {
-	for _, export := range module.exports {
-		if export.name != name {
-			continue
-		}
-
-		switch indexType {
-		case functionExportKind:
-			function, ok := export.value.(FunctionInstance)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a function", name)
-			}
-			return function, nil
-		case globalExportKind:
-			global, ok := export.value.(*Global)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a global", name)
-			}
-			return global, nil
-		case memoryExportKind:
-			memory, ok := export.value.(*Memory)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a memory", name)
-			}
-			return memory, nil
-		case tableExportKind:
-			table, ok := export.value.(*Table)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a table", name)
-			}
-			return table, nil
-		default:
-			return nil, fmt.Errorf("unsupported indexType %d", indexType)
-		}
-	}
-
-	return nil, fmt.Errorf("failed to find export with name: %s", name)
 }
 
 func (vm *vm) pushControlFrame(frame *controlFrame) {
