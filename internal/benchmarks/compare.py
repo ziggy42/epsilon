@@ -23,8 +23,13 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
+_BENCHMARK_LINE_PATTERN = (
+    r"Benchmark(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+B/op\s+([\d.]+)\s+allocs/op"
+)
+
+
 @dataclass
-class BenchmarkResult:
+class _BenchmarkResult:
   ns_per_op: float
   bytes_per_op: int
   allocs_per_op: int
@@ -61,7 +66,7 @@ def _worktree(tmp: Path, branch: str) -> str:
   return path
 
 
-def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
+def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
   """Run benchmarks and parse results."""
   result = subprocess.run(
       ["go", "test", "-bench=.", "-benchmem", "./internal/benchmarks"],
@@ -73,16 +78,10 @@ def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
     print(result.stderr, file=sys.stderr)
     sys.exit(1)
 
-  return _parse_output(result.stdout)
-
-
-def _parse_output(output: str) -> dict[str, BenchmarkResult]:
-  """Parse benchmark output."""
-  pattern = r"Benchmark(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+B/op\s+([\d.]+)\s+allocs/op"
   results = {}
-  for line in output.split('\n'):
-    if match := re.search(pattern, line):
-      results[match.group(1)] = BenchmarkResult(
+  for line in result.stdout.split('\n'):
+    if match := re.search(_BENCHMARK_LINE_PATTERN, line):
+      results[match.group(1)] = _BenchmarkResult(
           ns_per_op=float(match.group(2)),
           bytes_per_op=int(float(match.group(3))),
           allocs_per_op=int(float(match.group(4)))
@@ -90,20 +89,15 @@ def _parse_output(output: str) -> dict[str, BenchmarkResult]:
   return results
 
 
-def _percent_change(old: float, new: float) -> float:
-  """Calculate percentage change."""
-  return ((new - old) / old * 100) if old != 0 else 0.0
-
-
-def _format_change(value: float) -> str:
+def _format_change(old: float, new: float) -> str:
   """Format percentage change for display."""
-  match value:
-    case _ if abs(value) < 0.5:
-      return f"⚪ {value:+.2f}%"
-    case _ if value < 0:
-      return f"🟢 {value:+.2f}%"
-    case _:
-      return f"🔴 {value:+.2f}%"
+  percentage = ((new - old) / old * 100) if old != 0 else 0.0
+  if abs(percentage) < 0.5:
+    return f"⚪ {percentage:+.2f}%"
+  elif percentage < 0:
+    return f"🟢 {percentage:+.2f}%"
+  else:
+    return f"🔴 {percentage:+.2f}%"
 
 
 def _format_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -129,7 +123,7 @@ def _format_table(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def _compare_benchmarks(
-    main: dict[str, BenchmarkResult], branch: dict[str, BenchmarkResult],
+    main: dict[str, _BenchmarkResult], branch: dict[str, _BenchmarkResult],
 ) -> str:
   """Generate comparison table."""
   headers = ['Benchmark', 'Time (ns/op)', 'Δ',
@@ -140,11 +134,11 @@ def _compare_benchmarks(
     rows.append([
         name,
         f"{m.ns_per_op:,.0f} → {b.ns_per_op:,.0f}",
-        _format_change(_percent_change(m.ns_per_op, b.ns_per_op)),
+        _format_change(m.ns_per_op, b.ns_per_op),
         f"{m.bytes_per_op:,} → {b.bytes_per_op:,}",
-        _format_change(_percent_change(m.bytes_per_op, b.bytes_per_op)),
+        _format_change(m.bytes_per_op, b.bytes_per_op),
         f"{m.allocs_per_op:,} → {b.allocs_per_op:,}",
-        _format_change(_percent_change(m.allocs_per_op, b.allocs_per_op)),
+        _format_change(m.allocs_per_op, b.allocs_per_op),
     ])
   return _format_table(headers, rows)
 
