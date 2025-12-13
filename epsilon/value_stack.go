@@ -141,6 +141,31 @@ func (s *valueStack) popValueType(t ValueType) any {
 	}
 }
 
+func (s *valueStack) popValueTypes(types []ValueType) []any {
+	n := len(types)
+	newLen := len(s.data) - n
+	result := make([]any, n)
+	for i, t := range types {
+		v := s.data[newLen+i]
+		switch t {
+		case I32, FuncRefType, ExternRefType:
+			result[i] = v.int32()
+		case I64:
+			result[i] = v.int64()
+		case F32:
+			result[i] = v.float32()
+		case F64:
+			result[i] = v.float64()
+		case V128:
+			result[i] = v.v128()
+		default:
+			panic("unreachable")
+		}
+	}
+	s.data = s.data[:newLen]
+	return result
+}
+
 func (s *valueStack) popN(n int) []value {
 	newLen := len(s.data) - n
 	result := make([]value, n)

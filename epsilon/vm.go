@@ -203,8 +203,7 @@ func (vm *vm) invoke(
 	if err := vm.invokeFunction(fn); err != nil {
 		return nil, err
 	}
-	resValues := vm.stack.popN(len(fn.GetType().ResultTypes))
-	return vm.valuesToAny(resValues, fn.GetType().ResultTypes), nil
+	return vm.stack.popValueTypes(fn.GetType().ResultTypes), nil
 }
 
 func (vm *vm) invokeFunction(function FunctionInstance) error {
@@ -1864,32 +1863,10 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 		}
 	}()
 
-	argsValues := vm.stack.popN(len(fun.GetType().ParamTypes))
-	args := vm.valuesToAny(argsValues, fun.GetType().ParamTypes)
+	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
 	res := fun.hostCode(args...)
 	vm.stack.pushAll(res)
 	return err
-}
-
-func (vm *vm) valuesToAny(values []value, types []ValueType) []any {
-	result := make([]any, len(values))
-	for i, v := range values {
-		switch types[i] {
-		case I32, FuncRefType, ExternRefType:
-			result[i] = v.int32()
-		case I64:
-			result[i] = v.int64()
-		case F32:
-			result[i] = v.float32()
-		case F64:
-			result[i] = v.float64()
-		case V128:
-			result[i] = v.v128()
-		default:
-			panic("unreachable")
-		}
-	}
-	return result
 }
 
 func (vm *vm) invokeInitExpression(
