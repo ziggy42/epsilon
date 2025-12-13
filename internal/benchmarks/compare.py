@@ -25,7 +25,6 @@ from dataclasses import dataclass
 
 @dataclass
 class BenchmarkResult:
-  name: str
   ns_per_op: float
   bytes_per_op: int
   allocs_per_op: int
@@ -53,22 +52,13 @@ def _current_branch() -> str:
 
 def _worktree(tmp: Path, branch: str) -> str:
   """Create a worktree for branch, return its path."""
-  path = tmp / branch
-  result = subprocess.run(
-      ["git", "worktree", "add", str(path), branch],
+  path = str(tmp / branch)
+  subprocess.run(
+      ["git", "worktree", "add", path, branch],
       capture_output=True,
-      text=True
+      check=True
   )
-  return str(path)
-
-
-def _branch_exists(branch: str) -> bool:
-  """Check if a git branch exists."""
-  result = subprocess.run(
-      ["git", "rev-parse", "--verify", branch],
-      capture_output=True
-  )
-  return result.returncode == 0
+  return path
 
 
 def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
@@ -93,7 +83,6 @@ def _parse_output(output: str) -> dict[str, BenchmarkResult]:
   for line in output.split('\n'):
     if match := re.search(pattern, line):
       results[match.group(1)] = BenchmarkResult(
-          name=match.group(1),
           ns_per_op=float(match.group(2)),
           bytes_per_op=int(float(match.group(3))),
           allocs_per_op=int(float(match.group(4)))
@@ -117,44 +106,50 @@ def _format_change(value: float) -> str:
       return f"🔴 {value:+.2f}%"
 
 
-def _format_number(n: float | int) -> str:
-  """Format number with thousand separators."""
-  return f"{n:,.0f}" if isinstance(n, float) else f"{n:,}"
+def _format_table(headers: list[str], rows: list[list[str]]) -> str:
+  """Format data as a markdown table."""
+  widths = [len(h) for h in headers]
+  for row in rows:
+    for i, cell in enumerate(row):
+      widths[i] = max(widths[i], len(cell))
+
+  # Format header
+  header_row = "| " + " | ".join(h.ljust(widths[i])
+                                 for i, h in enumerate(headers)) + " |"
+  separator = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
+
+  # Format data rows
+  data_rows = []
+  for row in rows:
+    data_rows.append(
+        "| " + " | ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) +
+        " |")
+
+  return "\n".join([header_row, separator] + data_rows)
 
 
 def _compare_benchmarks(
-        main: dict[str, BenchmarkResult],
-        branch: dict[str, BenchmarkResult],
-        branch_name: str,
+    main: dict[str, BenchmarkResult], branch: dict[str, BenchmarkResult],
 ) -> str:
   """Generate comparison table."""
-  lines = [
-      f"# Benchmark: `main` vs `{branch_name}`\n",
-      "| Benchmark | Time (ns/op) | Δ | Memory (B/op) | Δ | Allocs | Δ |",
-      "|-----------|--------------|---|---------------|---|--------|---|"
-  ]
-
-  for name in sorted(set(main.keys()) | set(branch.keys())):
-    if name not in main:
-      lines.append(f"| {name} | - | ✨ NEW | - | ✨ NEW | - | ✨ NEW |")
-    elif name not in branch:
-      lines.append(f"| {name} | - | ❌ DEL | - | ❌ DEL | - | ❌ DEL |")
-    else:
-      m, b = main[name], branch[name]
-      lines.append(
-          f"| {name} "
-          f"| {_format_number(m.ns_per_op)} → {_format_number(b.ns_per_op)} "
-          f"| {_format_change(_percent_change(m.ns_per_op, b.ns_per_op))} "
-          f"| {_format_number(m.bytes_per_op)} → {_format_number(b.bytes_per_op)} "
-          f"| {_format_change(_percent_change(m.bytes_per_op, b.bytes_per_op))} "
-          f"| {_format_number(m.allocs_per_op)} → {_format_number(b.allocs_per_op)} "
-          f"| {_format_change(_percent_change(m.allocs_per_op, b.allocs_per_op))} |"
-      )
-
-  return "\n".join(lines)
+  headers = ['Benchmark', 'Time (ns/op)', 'Δ',
+             'Memory (B/op)', 'Δ', 'Allocs', 'Δ']
+  rows = []
+  for name in sorted(set(main.keys()) & set(branch.keys())):
+    m, b = main[name], branch[name]
+    rows.append([
+        name,
+        f"{m.ns_per_op:,.0f} → {b.ns_per_op:,.0f}",
+        _format_change(_percent_change(m.ns_per_op, b.ns_per_op)),
+        f"{m.bytes_per_op:,} → {b.bytes_per_op:,}",
+        _format_change(_percent_change(m.bytes_per_op, b.bytes_per_op)),
+        f"{m.allocs_per_op:,} → {b.allocs_per_op:,}",
+        _format_change(_percent_change(m.allocs_per_op, b.allocs_per_op)),
+    ])
+  return _format_table(headers, rows)
 
 
-def main():
+def _main():
   if len(sys.argv) != 2:
     print("usage: compare.py <branch>", file=sys.stderr)
     sys.exit(1)
@@ -162,9 +157,6 @@ def main():
   branch_name = sys.argv[1]
   current = _current_branch()
   root = _git_root()
-
-  # Clean up any orphaned worktrees from interrupted runs
-  subprocess.run(["git", "worktree", "prune"], capture_output=True)
 
   with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
@@ -177,8 +169,10 @@ def main():
 
     main_results = _run_benchmarks(main_path)
     branch_results = _run_benchmarks(branch_path)
-    print(_compare_benchmarks(main_results, branch_results, branch_name))
+    print(_compare_benchmarks(main_results, branch_results))
+
+  subprocess.run(["git", "worktree", "prune"], check=False)
 
 
 if __name__ == "__main__":
-  main()
+  _main()
