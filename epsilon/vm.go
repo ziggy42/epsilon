@@ -1791,7 +1791,7 @@ func (vm *vm) initActiveElements(
 				values[i] = refAny.(int32)
 			}
 
-			if err := table.InitFromInt32Slice(offset, values); err != nil {
+			if err := table.InitFromSlice(offset, values); err != nil {
 				return err
 			}
 		}

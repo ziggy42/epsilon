@@ -101,18 +101,6 @@ func (t *Table) InitFromSlice(startIndex int32, funcIndexes []int32) error {
 	return t.Init(int32(len(funcIndexes)), startIndex, 0, funcIndexes)
 }
 
-// InitFromAnySlice copies an entire slice of any values (function indexes or
-// nils) into the table at a starting index.
-func (t *Table) InitFromInt32Slice(startIndex int32, values []int32) error {
-	if startIndex < 0 || startIndex > t.Size() ||
-		uint64(uint32(startIndex))+uint64(len(values)) > uint64(t.Size()) {
-		return errTableOutOfBounds
-	}
-
-	copy(t.elements[startIndex:], values)
-	return nil
-}
-
 // Copy copies n elements from a source table to a destination table.
 func (t *Table) Copy(
 	destTable *Table,
