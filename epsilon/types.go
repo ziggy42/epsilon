@@ -106,7 +106,3 @@ func (ft *FunctionType) Equal(other *FunctionType) bool {
 	return slices.Equal(ft.ParamTypes, other.ParamTypes) &&
 		slices.Equal(ft.ResultTypes, other.ResultTypes)
 }
-
-// NullReference is the internal representation of a null reference.
-// It is represented as -1.
-const NullReference int32 = -1

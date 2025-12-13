@@ -14,45 +14,39 @@
 
 package epsilon
 
-import "math"
-
-type valueStackItem struct {
-	low, high uint64
-}
-
 type valueStack struct {
-	data []valueStackItem
+	data []value
 }
 
 func newValueStack() *valueStack {
-	return &valueStack{data: make([]valueStackItem, 512)}
+	return &valueStack{data: make([]value, 512)}
 }
 
 func (s *valueStack) pushInt32(v int32) {
-	s.data = append(s.data, valueStackItem{low: uint64(v)})
+	s.data = append(s.data, i32(v))
 }
 
 func (s *valueStack) pushInt64(v int64) {
-	s.data = append(s.data, valueStackItem{low: uint64(v)})
+	s.data = append(s.data, i64(v))
 }
 
 func (s *valueStack) pushFloat32(v float32) {
-	s.data = append(s.data, valueStackItem{low: uint64(math.Float32bits(v))})
+	s.data = append(s.data, f32(v))
 }
 
 func (s *valueStack) pushFloat64(v float64) {
-	s.data = append(s.data, valueStackItem{low: math.Float64bits(v)})
+	s.data = append(s.data, f64(v))
 }
 
 func (s *valueStack) pushV128(v V128Value) {
-	s.data = append(s.data, valueStackItem{low: v.Low, high: v.High})
+	s.data = append(s.data, v128Stack(v))
 }
 
 func (s *valueStack) pushNull() {
 	s.pushInt32(NullReference)
 }
 
-func (s *valueStack) pushRaw(v valueStackItem) {
+func (s *valueStack) pushRaw(v value) {
 	s.data = append(s.data, v)
 }
 
@@ -97,37 +91,36 @@ func (s *valueStack) drop() {
 }
 
 func (s *valueStack) popInt32() int32 {
-	return int32(s.pop().low)
+	return s.pop().int32()
 }
 
 func (s *valueStack) pop3Int32() (int32, int32, int32) {
 	data := s.data
 	n := len(data)
-	c := int32(data[n-3].low)
-	b := int32(data[n-2].low)
-	a := int32(data[n-1].low)
+	c := data[n-3].int32()
+	b := data[n-2].int32()
+	a := data[n-1].int32()
 	s.data = data[:n-3]
 	return a, b, c
 }
 
 func (s *valueStack) popInt64() int64 {
-	return int64(s.pop().low)
+	return s.pop().int64()
 }
 
 func (s *valueStack) popFloat32() float32 {
-	return math.Float32frombits(uint32(s.pop().low))
+	return s.pop().float32()
 }
 
 func (s *valueStack) popFloat64() float64 {
-	return math.Float64frombits(s.pop().low)
+	return s.pop().float64()
 }
 
 func (s *valueStack) popV128() V128Value {
-	item := s.pop()
-	return V128Value{Low: item.low, High: item.high}
+	return s.pop().v128()
 }
 
-func (s *valueStack) pop() valueStackItem {
+func (s *valueStack) pop() value {
 	// Due to validation, we know the stack is never empty if we call Pop.
 	index := len(s.data) - 1
 	element := s.data[index]
@@ -163,20 +156,31 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 		item := values[i]
 		switch t {
 		case I32, FuncRefType, ExternRefType:
-			results[i] = int32(item.low)
+			results[i] = item.int32()
 		case I64:
-			results[i] = int64(item.low)
+			results[i] = item.int64()
 		case F32:
-			results[i] = math.Float32frombits(uint32(item.low))
+			results[i] = item.float32()
 		case F64:
-			results[i] = math.Float64frombits(item.low)
+			results[i] = item.float64()
 		case V128:
-			results[i] = V128Value{Low: item.low, High: item.high}
+			results[i] = item.v128()
 		default:
 			panic("unreachable")
 		}
 	}
 	return results
+}
+
+func (s *valueStack) popValues(n int) []value {
+	newLen := len(s.data) - n
+	values := s.data[newLen:]
+	// We need to copy the values because the underlying array slice will be reused
+	// by subsequent pushes.
+	result := make([]value, n)
+	copy(result, values)
+	s.data = s.data[:newLen]
+	return result
 }
 
 func (s *valueStack) unwind(targetHeight, preserveCount uint) {

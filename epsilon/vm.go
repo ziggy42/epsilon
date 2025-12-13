@@ -45,7 +45,7 @@ type store struct {
 type callFrame struct {
 	decoder      *decoder
 	controlStack []*controlFrame
-	locals       []any
+	locals       []value
 	function     *wasmFunction
 }
 
@@ -220,7 +220,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) ([]any, error) {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popValueTypes(function.functionType.ParamTypes)
+	locals := vm.stack.popValues(len(function.functionType.ParamTypes))
 	for _, local := range function.code.locals {
 		locals = append(locals, defaultValue(local))
 	}
@@ -1345,25 +1345,21 @@ func (vm *vm) handleSelect() {
 func (vm *vm) handleLocalGet(instruction instruction) {
 	callFrame := vm.currentCallFrame()
 	localIndex := int32(instruction.immediates[0])
-	localType := vm.getLocalType(localIndex)
-	vm.stack.pushValueType(callFrame.locals[localIndex], localType)
+	vm.stack.pushRaw(callFrame.locals[localIndex])
 }
 
 func (vm *vm) handleLocalSet(instruction instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.immediates[0])
-	// We know, due to validation, the top of the stack is always the right type.
-	frame.locals[localIndex] = vm.stack.popValueType(vm.getLocalType(localIndex))
+	frame.locals[localIndex] = vm.stack.pop()
 }
 
 func (vm *vm) handleLocalTee(instruction instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.immediates[0])
-	// We know, due to validation, the top of the stack is always the right type.
-	localType := vm.getLocalType(localIndex)
-	val := vm.stack.popValueType(localType)
+	val := vm.stack.pop()
 	frame.locals[localIndex] = val
-	vm.stack.pushValueType(val, localType)
+	vm.stack.pushRaw(val)
 }
 
 func (vm *vm) handleGlobalGet(instruction instruction) {
@@ -1910,36 +1906,6 @@ func toStoreFuncIndexes(
 		storeIndices[i] = int32(moduleInstance.funcAddrs[localIndex])
 	}
 	return storeIndices
-}
-
-func defaultValue(vt ValueType) any {
-	switch vt {
-	case I32:
-		return int32(0)
-	case I64:
-		return int64(0)
-	case F32:
-		return float32(0)
-	case F64:
-		return float64(0)
-	case V128:
-		return V128Value{}
-	case FuncRefType, ExternRefType:
-		return NullReference
-	default:
-		// Should ideally not be reached with a valid module.
-		return nil
-	}
-}
-
-func (vm *vm) getLocalType(localIndex int32) ValueType {
-	frame := vm.currentCallFrame()
-	if localIndex < int32(len(frame.function.functionType.ParamTypes)) {
-		return frame.function.functionType.ParamTypes[localIndex]
-	}
-
-	index := localIndex - int32(len(frame.function.functionType.ParamTypes))
-	return frame.function.code.locals[index]
 }
 
 func (vm *vm) getFunction(localIndex uint32) FunctionInstance {
