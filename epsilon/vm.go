@@ -47,7 +47,7 @@ type store struct {
 }
 
 type callFrame struct {
-	decoder      *decoder
+	decoder      decoder
 	controlStack []controlFrame
 	locals       []value
 	function     *wasmFunction
@@ -241,15 +241,15 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	})
 
 	callFrame := callFrame{
-		decoder:      newDecoder(function.code.body),
+		decoder:      decoder{code: function.code.body, pc: 0},
 		controlStack: controlStack,
 		locals:       locals,
 		function:     function,
 	}
 	vm.callStack = append(vm.callStack, callFrame)
 
-	for callFrame.decoder.hasMore() {
-		instruction, err := callFrame.decoder.decode()
+	for vm.currentCallFrame().decoder.hasMore() {
+		instruction, err := vm.currentCallFrame().decoder.decode()
 		if err != nil {
 			return err
 		}
