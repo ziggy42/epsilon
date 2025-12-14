@@ -31,6 +31,8 @@ const (
 	maxCallStackDepth         = 1000
 	controlStackCacheSlotSize = 64 // Size of the cache allocated to a call frame.
 	controlStackCacheSize     = maxCallStackDepth * controlStackCacheSlotSize
+	localsCacheSlotSize       = 16 // Max locals per function to cache.
+	localsCacheSize           = maxCallStackDepth * localsCacheSlotSize
 )
 
 // store represents all global state that can be manipulated by the vm. It
@@ -69,6 +71,7 @@ type vm struct {
 	callStack         []callFrame
 	callStackDepth    int
 	controlStackCache [controlStackCacheSize]controlFrame
+	localsCache       [localsCacheSize]value
 	features          ExperimentalFeatures
 }
 
@@ -220,7 +223,24 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	defer func() { vm.callStackDepth-- }()
 
 	numParams := len(function.functionType.ParamTypes)
-	locals := make([]value, numParams+len(function.code.locals))
+	numLocals := numParams + len(function.code.locals)
+	var locals []value
+	if numLocals <= localsCacheSlotSize {
+		blockDepth := (vm.callStackDepth - 1) * localsCacheSlotSize
+		max := blockDepth + localsCacheSlotSize
+		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
+		// We need to be careful here. In WASM, locals are initialized to their 0
+		// values and it is legal to access a local without it ever been set.
+		// Therefore we need to initialize the locals to their 0 values or we would
+		// end up with locals containing values from previous invocations.
+		// We only need to clear the non-parameter locals since parameters will be
+		// overwritten below.
+		clear(locals[numParams:])
+	} else {
+		// The cache is not large enough to fit the amount of locals for the current
+		// function, therefore we need a new allocation.
+		locals = make([]value, numLocals)
+	}
 
 	// Copy params and shrink stack by operating on the underlying slice directly.
 	newLen := len(vm.stack.data) - numParams
