@@ -57,7 +57,10 @@ func (s *valueStack) drop() {
 }
 
 func (s *valueStack) popInt32() int32 {
-	return s.pop().int32()
+	index := len(s.data) - 1
+	element := s.data[index]
+	s.data = s.data[:index]
+	return element.int32()
 }
 
 func (s *valueStack) pop3Int32() (int32, int32, int32) {
@@ -71,23 +74,34 @@ func (s *valueStack) pop3Int32() (int32, int32, int32) {
 }
 
 func (s *valueStack) popInt64() int64 {
-	return s.pop().int64()
+	index := len(s.data) - 1
+	element := s.data[index]
+	s.data = s.data[:index]
+	return element.int64()
 }
 
 func (s *valueStack) popFloat32() float32 {
-	return s.pop().float32()
+	index := len(s.data) - 1
+	element := s.data[index]
+	s.data = s.data[:index]
+	return element.float32()
 }
 
 func (s *valueStack) popFloat64() float64 {
-	return s.pop().float64()
+	index := len(s.data) - 1
+	element := s.data[index]
+	s.data = s.data[:index]
+	return element.float64()
 }
 
 func (s *valueStack) popV128() V128Value {
-	return s.pop().v128()
+	index := len(s.data) - 1
+	element := s.data[index]
+	s.data = s.data[:index]
+	return element.v128()
 }
 
 func (s *valueStack) pop() value {
-	// Due to validation, we know the stack is never empty if we call Pop.
 	index := len(s.data) - 1
 	element := s.data[index]
 	s.data = s.data[:index]

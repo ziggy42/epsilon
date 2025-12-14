@@ -1349,14 +1349,16 @@ func (vm *vm) handleCallIndirect(instruction instruction) error {
 }
 
 func (vm *vm) handleSelect() {
-	condition := vm.stack.popInt32()
-	val2 := vm.stack.pop()
-	val1 := vm.stack.pop()
-	if condition != 0 {
-		vm.stack.push(val1)
+	data := vm.stack.data
+	n := len(data)
+	var top value
+	if data[n-1].int32() != 0 {
+		top = data[n-3]
 	} else {
-		vm.stack.push(val2)
+		top = data[n-2]
 	}
+	data[n-3] = top
+	vm.stack.data = data[:n-2]
 }
 
 func (vm *vm) handleLocalGet(instruction instruction) {
