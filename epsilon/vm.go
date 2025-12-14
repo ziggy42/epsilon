@@ -27,7 +27,11 @@ var (
 	errReturn = errors.New("return instruction")
 )
 
-const maxCallStackDepth = 1000
+const (
+	maxCallStackDepth         = 1000
+	controlStackCacheSlotSize = 64 // Size of the cache allocated to a call frame.
+	controlStackCacheSize     = maxCallStackDepth * controlStackCacheSlotSize
+)
 
 // store represents all global state that can be manipulated by the vm. It
 // consists of the runtime representation of all instances of functions,
@@ -60,11 +64,12 @@ type controlFrame struct {
 
 // vm is the WebAssembly Virtual Machine.
 type vm struct {
-	store          *store
-	stack          *valueStack
-	callStack      []callFrame
-	callStackDepth int
-	features       ExperimentalFeatures
+	store             *store
+	stack             *valueStack
+	callStack         []callFrame
+	callStackDepth    int
+	controlStackCache [controlStackCacheSize]controlFrame
+	features          ExperimentalFeatures
 }
 
 func newVm() *vm {
@@ -222,17 +227,24 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	copy(locals[:numParams], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
+	// Use part of the cache for the control stack to avoid allocations.
+	blockDepth := (vm.callStackDepth - 1) * controlStackCacheSlotSize
+	// Slice cap to prevent appending into the next slot.
+	max := blockDepth + controlStackCacheSlotSize
+	controlStack := vm.controlStackCache[blockDepth:blockDepth:max]
+	controlStack = append(controlStack, controlFrame{
+		opcode:         block,
+		continuationPc: uint(len(function.code.body)),
+		inputCount:     uint(len(function.functionType.ParamTypes)),
+		outputCount:    uint(len(function.functionType.ResultTypes)),
+		stackHeight:    vm.stack.size(),
+	})
+
 	callFrame := callFrame{
-		decoder: newDecoder(function.code.body),
-		controlStack: []controlFrame{{
-			opcode:         block,
-			continuationPc: uint(len(function.code.body)),
-			inputCount:     uint(len(function.functionType.ParamTypes)),
-			outputCount:    uint(len(function.functionType.ResultTypes)),
-			stackHeight:    vm.stack.size(),
-		}},
-		locals:   locals,
-		function: function,
+		decoder:      newDecoder(function.code.body),
+		controlStack: controlStack,
+		locals:       locals,
+		function:     function,
 	}
 	vm.callStack = append(vm.callStack, callFrame)
 
