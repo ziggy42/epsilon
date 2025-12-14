@@ -166,7 +166,7 @@ func (vm *vm) instantiate(
 	// should probably have some runtime representation for them.
 	for _, elem := range module.elementSegments {
 		storeIndex := uint32(len(vm.store.elements))
-		moduleInstance.dlemAddrs = append(moduleInstance.dlemAddrs, storeIndex)
+		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
 		vm.store.elements = append(vm.store.elements, elem)
 	}
 
@@ -1730,7 +1730,7 @@ func (vm *vm) handleSimdLoadLane(
 
 	laneValue, err := memory.Get(offset, uint32(index), laneSize/8)
 	if err != nil {
-		return nil
+		return err
 	}
 
 	vm.stack.pushV128(setLane(v, laneIndex, laneValue))
@@ -1965,7 +1965,7 @@ func (vm *vm) getGlobal(localIndex uint32) *Global {
 }
 
 func (vm *vm) getElement(localIndex uint32) *elementSegment {
-	elementIndex := vm.currentModuleInstance().dlemAddrs[localIndex]
+	elementIndex := vm.currentModuleInstance().elemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 

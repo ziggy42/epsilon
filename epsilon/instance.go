@@ -34,7 +34,7 @@ type ModuleInstance struct {
 	tableAddrs  []uint32
 	memAddrs    []uint32
 	globalAddrs []uint32
-	dlemAddrs   []uint32
+	elemAddrs   []uint32
 	dataAddrs   []uint32
 	exports     []exportInstance
 	vm          *vm // Internal reference to resolve exports
