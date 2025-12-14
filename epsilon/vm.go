@@ -44,7 +44,7 @@ type store struct {
 
 type callFrame struct {
 	decoder      *decoder
-	controlStack []*controlFrame
+	controlStack []controlFrame
 	locals       []value
 	function     *wasmFunction
 }
@@ -62,7 +62,7 @@ type controlFrame struct {
 type vm struct {
 	store          *store
 	stack          *valueStack
-	callStack      []*callFrame
+	callStack      []callFrame
 	callStackDepth int
 	features       ExperimentalFeatures
 }
@@ -188,22 +188,12 @@ func (vm *vm) instantiate(
 	return moduleInstance, nil
 }
 
-func (vm *vm) invoke(
-	module *ModuleInstance,
-	name string,
-	args ...any,
-) ([]any, error) {
-	export, err := getExport(module, name, functionExportKind)
-	if err != nil {
-		return nil, err
-	}
-
+func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
 	vm.stack.pushAll(args)
-	fn := export.(FunctionInstance)
-	if err := vm.invokeFunction(fn); err != nil {
+	if err := vm.invokeFunction(function); err != nil {
 		return nil, err
 	}
-	return vm.stack.popValueTypes(fn.GetType().ResultTypes), nil
+	return vm.stack.popValueTypes(function.GetType().ResultTypes), nil
 }
 
 func (vm *vm) invokeFunction(function FunctionInstance) error {
@@ -224,14 +214,17 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	vm.callStackDepth++
 	defer func() { vm.callStackDepth-- }()
 
-	locals := vm.stack.popN(len(function.functionType.ParamTypes))
-	for range len(function.code.locals) {
-		locals = append(locals, value{})
-	}
+	numParams := len(function.functionType.ParamTypes)
+	locals := make([]value, numParams+len(function.code.locals))
 
-	callFrame := &callFrame{
+	// Copy params and shrink stack by operating on the underlying slice directly.
+	newLen := len(vm.stack.data) - numParams
+	copy(locals[:numParams], vm.stack.data[newLen:])
+	vm.stack.data = vm.stack.data[:newLen]
+
+	callFrame := callFrame{
 		decoder: newDecoder(function.code.body),
-		controlStack: []*controlFrame{{
+		controlStack: []controlFrame{{
 			opcode:         block,
 			continuationPc: uint(len(function.code.body)),
 			inputCount:     uint(len(function.functionType.ParamTypes)),
@@ -1146,7 +1139,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 }
 
 func (vm *vm) currentCallFrame() *callFrame {
-	return vm.callStack[len(vm.callStack)-1]
+	return &vm.callStack[len(vm.callStack)-1]
 }
 
 func (vm *vm) currentModuleInstance() *ModuleInstance {
@@ -1157,7 +1150,7 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
 	callFrame := vm.currentCallFrame()
 	originalPc := callFrame.decoder.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
-	frame := &controlFrame{
+	frame := controlFrame{
 		opcode:      opcode,
 		inputCount:  inputCount,
 		outputCount: outputCount,
@@ -1273,10 +1266,9 @@ func (vm *vm) handleBrTable(instruction instruction) {
 func (vm *vm) brToLabel(labelIndex uint32) {
 	callFrame := vm.currentCallFrame()
 
-	var targetFrame *controlFrame
-	for range int(labelIndex) + 1 {
-		targetFrame = vm.popControlFrame()
-	}
+	targetIndex := len(callFrame.controlStack) - int(labelIndex) - 1
+	targetFrame := callFrame.controlStack[targetIndex]
+	callFrame.controlStack = callFrame.controlStack[:targetIndex]
 
 	var arity uint
 	if targetFrame.opcode == loop {
@@ -1690,55 +1682,12 @@ func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
 	return 0, 1 // value type.
 }
 
-func getExport(
-	module *ModuleInstance,
-	name string,
-	indexType exportIndexKind,
-) (any, error) {
-	for _, export := range module.exports {
-		if export.name != name {
-			continue
-		}
-
-		switch indexType {
-		case functionExportKind:
-			function, ok := export.value.(FunctionInstance)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a function", name)
-			}
-			return function, nil
-		case globalExportKind:
-			global, ok := export.value.(*Global)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a global", name)
-			}
-			return global, nil
-		case memoryExportKind:
-			memory, ok := export.value.(*Memory)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a memory", name)
-			}
-			return memory, nil
-		case tableExportKind:
-			table, ok := export.value.(*Table)
-			if !ok {
-				return nil, fmt.Errorf("export %s is not a table", name)
-			}
-			return table, nil
-		default:
-			return nil, fmt.Errorf("unsupported indexType %d", indexType)
-		}
-	}
-
-	return nil, fmt.Errorf("failed to find export with name: %s", name)
-}
-
-func (vm *vm) pushControlFrame(frame *controlFrame) {
+func (vm *vm) pushControlFrame(frame controlFrame) {
 	callFrame := vm.currentCallFrame()
 	callFrame.controlStack = append(callFrame.controlStack, frame)
 }
 
-func (vm *vm) popControlFrame() *controlFrame {
+func (vm *vm) popControlFrame() controlFrame {
 	callFrame := vm.currentCallFrame()
 	// Validation guarantees the control stack is never empty.
 	index := len(callFrame.controlStack) - 1
