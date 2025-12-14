@@ -1510,9 +1510,7 @@ func (vm *vm) handleTableSize(instruction instruction) {
 
 func (vm *vm) handleTableFill(instruction instruction) error {
 	table := vm.getTable(uint32(instruction.immediates[0]))
-	n := vm.stack.popInt32()
-	val := vm.stack.popInt32()
-	i := vm.stack.popInt32()
+	n, val, i := vm.stack.pop3Int32()
 	return table.Fill(n, i, val)
 }
 
