@@ -15,6 +15,7 @@
 
 """Compares benchmark results between main branch and another branch."""
 
+import argparse
 import subprocess
 import sys
 import re
@@ -45,25 +46,22 @@ def _git_root() -> str:
   ).stdout.strip()
 
 
-def _current_branch() -> str:
-  """Get current git branch name."""
-  return subprocess.run(
-      ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-      capture_output=True,
-      text=True,
-      check=True
-  ).stdout.strip()
-
-
-def _worktree(tmp: Path, branch: str) -> str:
-  """Create a worktree for branch, return its path."""
-  path = str(tmp / branch)
+def _worktree(tmp: Path, ref: str) -> str:
+  """Create a detached worktree for ref, return its path."""
+  path = str(tmp / ref.replace("/", "_"))
   subprocess.run(
-      ["git", "worktree", "add", path, branch],
+      ["git", "worktree", "add", "--detach", path, ref],
       capture_output=True,
       check=True
   )
   return path
+
+
+def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
+  """Resolve path for a ref (either Worktree or CWD)."""
+  if ref == ".":
+    return root
+  return _worktree(tmpdir, ref)
 
 
 def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
@@ -123,49 +121,57 @@ def _format_table(headers: list[str], rows: list[list[str]]) -> str:
 
 
 def _compare_benchmarks(
-    main: dict[str, _BenchmarkResult], branch: dict[str, _BenchmarkResult],
+    base: dict[str, _BenchmarkResult], target: dict[str, _BenchmarkResult],
 ) -> str:
   """Generate comparison table."""
   headers = ['Benchmark', 'Time (ns/op)', 'Δ',
              'Memory (B/op)', 'Δ', 'Allocs', 'Δ']
   rows = []
-  for name in sorted(set(main.keys()) & set(branch.keys())):
-    m, b = main[name], branch[name]
+  for name in sorted(set(base.keys()) & set(target.keys())):
+    b, t = base[name], target[name]
     rows.append([
         name,
-        f"{m.ns_per_op:,.0f} → {b.ns_per_op:,.0f}",
-        _format_change(m.ns_per_op, b.ns_per_op),
-        f"{m.bytes_per_op:,} → {b.bytes_per_op:,}",
-        _format_change(m.bytes_per_op, b.bytes_per_op),
-        f"{m.allocs_per_op:,} → {b.allocs_per_op:,}",
-        _format_change(m.allocs_per_op, b.allocs_per_op),
+        f"{b.ns_per_op:,.0f} → {t.ns_per_op:,.0f}",
+        _format_change(b.ns_per_op, t.ns_per_op),
+        f"{b.bytes_per_op:,} → {t.bytes_per_op:,}",
+        _format_change(b.bytes_per_op, t.bytes_per_op),
+        f"{b.allocs_per_op:,} → {t.allocs_per_op:,}",
+        _format_change(b.allocs_per_op, t.allocs_per_op),
     ])
   return _format_table(headers, rows)
 
 
 def _main():
-  if len(sys.argv) != 2:
-    print("usage: compare.py <branch>", file=sys.stderr)
-    sys.exit(1)
+  parser = argparse.ArgumentParser(
+      description="Compare benchmarks between two git references."
+  )
+  parser.add_argument(
+      "--base",
+      default="main",
+      help="Base reference (branch, commit, or '.'). Defaults to 'main'.",
+  )
+  parser.add_argument(
+      "--target",
+      required=True,
+      help="Target reference (branch, commit, or '.').",
+  )
+  args = parser.parse_args()
 
-  branch_name = sys.argv[1]
-  current = _current_branch()
   root = _git_root()
 
   with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
 
-    # Determine paths: use root if we're on that branch, else create worktree
-    main_path = root if current == "main" else _worktree(tmpdir, "main")
-    branch_path = (
-        root if current == branch_name else _worktree(tmpdir, branch_name)
-    )
+    try:
+      base_path = _resolve_path(args.base, root, tmpdir)
+      target_path = _resolve_path(args.target, root, tmpdir)
 
-    main_results = _run_benchmarks(main_path)
-    branch_results = _run_benchmarks(branch_path)
-    print(_compare_benchmarks(main_results, branch_results))
+      base_results = _run_benchmarks(base_path)
+      target_results = _run_benchmarks(target_path)
 
-  subprocess.run(["git", "worktree", "prune"], check=False)
+      print("\n" + _compare_benchmarks(base_results, target_results))
+    finally:
+      subprocess.run(["git", "worktree", "prune"], check=False)
 
 
 if __name__ == "__main__":
