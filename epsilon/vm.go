@@ -1376,9 +1376,7 @@ func (vm *vm) handleLocalSet(instruction instruction) {
 func (vm *vm) handleLocalTee(instruction instruction) {
 	frame := vm.currentCallFrame()
 	localIndex := int32(instruction.immediates[0])
-	val := vm.stack.pop()
-	frame.locals[localIndex] = val
-	vm.stack.push(val)
+	frame.locals[localIndex] = vm.stack.data[len(vm.stack.data)-1]
 }
 
 func (vm *vm) handleGlobalGet(instruction instruction) {
