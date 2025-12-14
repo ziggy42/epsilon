@@ -15,6 +15,7 @@
 
 """Compares benchmark results between main branch and another branch."""
 
+import argparse
 import subprocess
 import sys
 import re
@@ -23,9 +24,13 @@ from pathlib import Path
 from dataclasses import dataclass
 
 
+_BENCHMARK_LINE_PATTERN = (
+    r"Benchmark(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+B/op\s+([\d.]+)\s+allocs/op"
+)
+
+
 @dataclass
-class BenchmarkResult:
-  name: str
+class _BenchmarkResult:
   ns_per_op: float
   bytes_per_op: int
   allocs_per_op: int
@@ -41,37 +46,25 @@ def _git_root() -> str:
   ).stdout.strip()
 
 
-def _current_branch() -> str:
-  """Get current git branch name."""
-  return subprocess.run(
-      ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+def _worktree(tmp: Path, ref: str) -> str:
+  """Create a detached worktree for ref, return its path."""
+  path = str(tmp / ref.replace("/", "_"))
+  subprocess.run(
+      ["git", "worktree", "add", "--detach", path, ref],
       capture_output=True,
-      text=True,
       check=True
-  ).stdout.strip()
-
-
-def _worktree(tmp: Path, branch: str) -> str:
-  """Create a worktree for branch, return its path."""
-  path = tmp / branch
-  result = subprocess.run(
-      ["git", "worktree", "add", str(path), branch],
-      capture_output=True,
-      text=True
   )
-  return str(path)
+  return path
 
 
-def _branch_exists(branch: str) -> bool:
-  """Check if a git branch exists."""
-  result = subprocess.run(
-      ["git", "rev-parse", "--verify", branch],
-      capture_output=True
-  )
-  return result.returncode == 0
+def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
+  """Resolve path for a ref (either Worktree or CWD)."""
+  if ref == ".":
+    return root
+  return _worktree(tmpdir, ref)
 
 
-def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
+def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
   """Run benchmarks and parse results."""
   result = subprocess.run(
       ["go", "test", "-bench=.", "-benchmem", "./internal/benchmarks"],
@@ -83,17 +76,10 @@ def _run_benchmarks(cwd: str) -> dict[str, BenchmarkResult]:
     print(result.stderr, file=sys.stderr)
     sys.exit(1)
 
-  return _parse_output(result.stdout)
-
-
-def _parse_output(output: str) -> dict[str, BenchmarkResult]:
-  """Parse benchmark output."""
-  pattern = r"Benchmark(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+B/op\s+([\d.]+)\s+allocs/op"
   results = {}
-  for line in output.split('\n'):
-    if match := re.search(pattern, line):
-      results[match.group(1)] = BenchmarkResult(
-          name=match.group(1),
+  for line in result.stdout.split('\n'):
+    if match := re.search(_BENCHMARK_LINE_PATTERN, line):
+      results[match.group(1)] = _BenchmarkResult(
           ns_per_op=float(match.group(2)),
           bytes_per_op=int(float(match.group(3))),
           allocs_per_op=int(float(match.group(4)))
@@ -101,84 +87,92 @@ def _parse_output(output: str) -> dict[str, BenchmarkResult]:
   return results
 
 
-def _percent_change(old: float, new: float) -> float:
-  """Calculate percentage change."""
-  return ((new - old) / old * 100) if old != 0 else 0.0
-
-
-def _format_change(value: float) -> str:
+def _format_change(old: float, new: float) -> str:
   """Format percentage change for display."""
-  match value:
-    case _ if abs(value) < 0.5:
-      return f"⚪ {value:+.2f}%"
-    case _ if value < 0:
-      return f"🟢 {value:+.2f}%"
-    case _:
-      return f"🔴 {value:+.2f}%"
+  percentage = ((new - old) / old * 100) if old != 0 else 0.0
+  if abs(percentage) < 0.5:
+    return f"⚪ {percentage:+.2f}%"
+  elif percentage < 0:
+    return f"🟢 {percentage:+.2f}%"
+  else:
+    return f"🔴 {percentage:+.2f}%"
 
 
-def _format_number(n: float | int) -> str:
-  """Format number with thousand separators."""
-  return f"{n:,.0f}" if isinstance(n, float) else f"{n:,}"
+def _format_table(headers: list[str], rows: list[list[str]]) -> str:
+  """Format data as a markdown table."""
+  widths = [len(h) for h in headers]
+  for row in rows:
+    for i, cell in enumerate(row):
+      widths[i] = max(widths[i], len(cell))
+
+  # Format header
+  header_row = "| " + " | ".join(h.ljust(widths[i])
+                                 for i, h in enumerate(headers)) + " |"
+  separator = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
+
+  # Format data rows
+  data_rows = []
+  for row in rows:
+    data_rows.append(
+        "| " + " | ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) +
+        " |")
+
+  return "\n".join([header_row, separator] + data_rows)
 
 
 def _compare_benchmarks(
-        main: dict[str, BenchmarkResult],
-        branch: dict[str, BenchmarkResult],
-        branch_name: str,
+    base: dict[str, _BenchmarkResult], target: dict[str, _BenchmarkResult],
 ) -> str:
   """Generate comparison table."""
-  lines = [
-      f"# Benchmark: `main` vs `{branch_name}`\n",
-      "| Benchmark | Time (ns/op) | Δ | Memory (B/op) | Δ | Allocs | Δ |",
-      "|-----------|--------------|---|---------------|---|--------|---|"
-  ]
-
-  for name in sorted(set(main.keys()) | set(branch.keys())):
-    if name not in main:
-      lines.append(f"| {name} | - | ✨ NEW | - | ✨ NEW | - | ✨ NEW |")
-    elif name not in branch:
-      lines.append(f"| {name} | - | ❌ DEL | - | ❌ DEL | - | ❌ DEL |")
-    else:
-      m, b = main[name], branch[name]
-      lines.append(
-          f"| {name} "
-          f"| {_format_number(m.ns_per_op)} → {_format_number(b.ns_per_op)} "
-          f"| {_format_change(_percent_change(m.ns_per_op, b.ns_per_op))} "
-          f"| {_format_number(m.bytes_per_op)} → {_format_number(b.bytes_per_op)} "
-          f"| {_format_change(_percent_change(m.bytes_per_op, b.bytes_per_op))} "
-          f"| {_format_number(m.allocs_per_op)} → {_format_number(b.allocs_per_op)} "
-          f"| {_format_change(_percent_change(m.allocs_per_op, b.allocs_per_op))} |"
-      )
-
-  return "\n".join(lines)
+  headers = ['Benchmark', 'Time (ns/op)', 'Δ',
+             'Memory (B/op)', 'Δ', 'Allocs', 'Δ']
+  rows = []
+  for name in sorted(set(base.keys()) & set(target.keys())):
+    b, t = base[name], target[name]
+    rows.append([
+        name,
+        f"{b.ns_per_op:,.0f} → {t.ns_per_op:,.0f}",
+        _format_change(b.ns_per_op, t.ns_per_op),
+        f"{b.bytes_per_op:,} → {t.bytes_per_op:,}",
+        _format_change(b.bytes_per_op, t.bytes_per_op),
+        f"{b.allocs_per_op:,} → {t.allocs_per_op:,}",
+        _format_change(b.allocs_per_op, t.allocs_per_op),
+    ])
+  return _format_table(headers, rows)
 
 
-def main():
-  if len(sys.argv) != 2:
-    print("usage: compare.py <branch>", file=sys.stderr)
-    sys.exit(1)
+def _main():
+  parser = argparse.ArgumentParser(
+      description="Compare benchmarks between two git references."
+  )
+  parser.add_argument(
+      "--base",
+      default="main",
+      help="Base reference (branch, commit, or '.'). Defaults to 'main'.",
+  )
+  parser.add_argument(
+      "--target",
+      required=True,
+      help="Target reference (branch, commit, or '.').",
+  )
+  args = parser.parse_args()
 
-  branch_name = sys.argv[1]
-  current = _current_branch()
   root = _git_root()
-
-  # Clean up any orphaned worktrees from interrupted runs
-  subprocess.run(["git", "worktree", "prune"], capture_output=True)
 
   with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
 
-    # Determine paths: use root if we're on that branch, else create worktree
-    main_path = root if current == "main" else _worktree(tmpdir, "main")
-    branch_path = (
-        root if current == branch_name else _worktree(tmpdir, branch_name)
-    )
+    try:
+      base_path = _resolve_path(args.base, root, tmpdir)
+      target_path = _resolve_path(args.target, root, tmpdir)
 
-    main_results = _run_benchmarks(main_path)
-    branch_results = _run_benchmarks(branch_path)
-    print(_compare_benchmarks(main_results, branch_results, branch_name))
+      base_results = _run_benchmarks(base_path)
+      target_results = _run_benchmarks(target_path)
+
+      print("\n" + _compare_benchmarks(base_results, target_results))
+    finally:
+      subprocess.run(["git", "worktree", "prune"], check=False)
 
 
 if __name__ == "__main__":
-  main()
+  _main()
