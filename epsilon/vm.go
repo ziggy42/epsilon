@@ -29,9 +29,9 @@ var (
 
 const (
 	maxCallStackDepth         = 1000
-	controlStackCacheSlotSize = 16 // Size of the cache allocated to a call frame.
+	controlStackCacheSlotSize = 16 // Control stack slot size per call frame.
 	controlStackCacheSize     = maxCallStackDepth * controlStackCacheSlotSize
-	localsCacheSlotSize       = 16 // Max locals per function to cache.
+	localsCacheSlotSize       = 16 // Locals slot size per call frame.
 	localsCacheSize           = maxCallStackDepth * localsCacheSlotSize
 )
 
@@ -229,12 +229,9 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		blockDepth := (vm.callStackDepth - 1) * localsCacheSlotSize
 		max := blockDepth + localsCacheSlotSize
 		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
-		// We need to be careful here. In WASM, locals are initialized to their 0
-		// values and it is legal to access a local without it ever been set.
-		// Therefore we need to initialize the locals to their 0 values or we would
-		// end up with locals containing values from previous invocations.
-		// We only need to clear the non-parameter locals since parameters will be
-		// overwritten below.
+		// Clear non-parameter locals to their zero values. WASM allows reading
+		// uninitialized locals, so we must zero them to avoid reusing stale values
+		// from previous invocations. Parameters are overwritten below.
 		clear(locals[numParams:])
 	} else {
 		// The cache is not large enough to fit the amount of locals for the current
