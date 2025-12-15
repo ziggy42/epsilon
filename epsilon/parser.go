@@ -296,8 +296,7 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	bytecodeDecoder := &bytecodeDecoder{reader: p.reader}
-	body, err := bytecodeDecoder.decodeBytecode()
+	body, err := p.decodeBytecode()
 	if err != nil {
 		return function{}, fmt.Errorf("failed to read function body: %w", err)
 	}
@@ -686,10 +685,9 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	decoder := bytecodeDecoder{reader: bufio.NewReader(p.reader)}
 	var bytecode []uint64
 	for {
-		instruction, err := decoder.readInstruction()
+		instruction, err := p.readInstruction()
 		if err != nil {
 			return nil, err
 		}
@@ -836,14 +834,10 @@ func getSectionOrder(id sectionId) int {
 // =============================================================================
 // Bytecode
 // =============================================================================
-type bytecodeDecoder struct {
-	reader *bufio.Reader
-}
-
-func (d *bytecodeDecoder) decodeBytecode() ([]uint64, error) {
+func (p *parser) decodeBytecode() ([]uint64, error) {
 	bytecode := []uint64{}
 	for {
-		instruction, err := d.readInstruction()
+		instruction, err := p.readInstruction()
 		if err == io.EOF {
 			break
 		}
@@ -855,9 +849,9 @@ func (d *bytecodeDecoder) decodeBytecode() ([]uint64, error) {
 	return bytecode, nil
 }
 
-func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
+func (p *parser) readInstruction() ([]uint64, error) {
 	bytecode := []uint64{}
-	opcode, err := d.readOpcode()
+	opcode, err := p.readOpcode()
 	if err != nil {
 		return nil, err
 	}
@@ -865,13 +859,13 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 
 	switch opcode {
 	case block, loop, ifOp:
-		immediate, err := d.readBlockType()
+		immediate, err := p.readBlockType()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, immediate)
 	case i32Const:
-		immediate, err := d.readInt32()
+		immediate, err := p.readInt32()
 		if err != nil {
 			return nil, err
 		}
@@ -908,23 +902,23 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 		i64x2ReplaceLane,
 		f32x4ReplaceLane,
 		f64x2ReplaceLane:
-		immediate, err := d.readUint32()
+		immediate, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, immediate)
 	case memorySize, memoryGrow:
-		immediate, err := d.readByte()
+		immediate, err := p.readByte()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, uint64(immediate))
 	case brTable:
-		vector, err := d.readImmediateVector()
+		vector, err := p.readImmediateVector()
 		if err != nil {
 			return nil, err
 		}
-		immediate, err := d.readUint32()
+		immediate, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
@@ -936,11 +930,11 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 		memoryCopy,
 		tableInit,
 		tableCopy:
-		immediate1, err := d.readUint32()
+		immediate1, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
-		immediate2, err := d.readUint32()
+		immediate2, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
@@ -982,38 +976,38 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 		v128Load32x2S,
 		v128Load32x2U,
 		v128Store:
-		align, memoryIndex, offset, err := d.readMemArg()
+		align, memoryIndex, offset, err := p.readMemArg()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, align, memoryIndex, offset)
 	case selectT:
-		vector, err := d.readImmediateVector()
+		vector, err := p.readImmediateVector()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, uint64(len(vector)))
 		bytecode = append(bytecode, vector...)
 	case i64Const:
-		immediate, err := d.readSleb128(10)
+		immediate, err := p.readSleb128(10)
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, immediate)
 	case f32Const:
-		immediate, err := d.readFloat32()
+		immediate, err := p.readFloat32()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, immediate)
 	case f64Const:
-		immediate, err := d.readFloat64()
+		immediate, err := p.readFloat64()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, immediate)
 	case v128Const:
-		bytes, err := d.readBytes(16)
+		bytes, err := p.readBytes(16)
 		if err != nil {
 			return nil, err
 		}
@@ -1028,19 +1022,19 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 		v128Store16Lane,
 		v128Store32Lane,
 		v128Store64Lane:
-		align, memoryIndex, offset, err := d.readMemArg()
+		align, memoryIndex, offset, err := p.readMemArg()
 		if err != nil {
 			return nil, err
 		}
 
-		laneIndex, err := d.readUint8()
+		laneIndex, err := p.readUint8()
 		if err != nil {
 			return nil, err
 		}
 		bytecode = append(bytecode, align, memoryIndex, offset, laneIndex)
 	case i8x16Shuffle:
 		for range 16 {
-			val, err := d.readUint8()
+			val, err := p.readUint8()
 			if err != nil {
 				return nil, err
 			}
@@ -1052,8 +1046,8 @@ func (d *bytecodeDecoder) readInstruction() ([]uint64, error) {
 	return bytecode, nil
 }
 
-func (d *bytecodeDecoder) readOpcode() (opcode, error) {
-	opcodeByte, err := d.reader.ReadByte()
+func (p *parser) readOpcode() (opcode, error) {
+	opcodeByte, err := p.reader.ReadByte()
 	if err != nil {
 		return 0, err
 	}
@@ -1064,7 +1058,7 @@ func (d *bytecodeDecoder) readOpcode() (opcode, error) {
 	}
 
 	// Multi-byte opcode (prefixed with 0xFC or 0xFD).
-	val, err := d.readUint32()
+	val, err := p.readUint32()
 	if err != nil {
 		return 0, err
 	}
@@ -1084,8 +1078,8 @@ func (d *bytecodeDecoder) readOpcode() (opcode, error) {
 	return opcode(compositeOpcode), nil
 }
 
-func (d *bytecodeDecoder) readImmediateVector() ([]uint64, error) {
-	size, err := d.readUint32()
+func (p *parser) readImmediateVector() ([]uint64, error) {
+	size, err := p.readUint32()
 	if err != nil {
 		return nil, err
 	}
@@ -1098,7 +1092,7 @@ func (d *bytecodeDecoder) readImmediateVector() ([]uint64, error) {
 	}
 
 	for i := range size {
-		val, err := d.readUint32()
+		val, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
@@ -1107,24 +1101,24 @@ func (d *bytecodeDecoder) readImmediateVector() ([]uint64, error) {
 	return immediates, nil
 }
 
-func (d *bytecodeDecoder) readFloat32() (uint64, error) {
-	bytes, err := d.readBytes(4)
+func (p *parser) readFloat32() (uint64, error) {
+	bytes, err := p.readBytes(4)
 	if err != nil {
 		return 0, err
 	}
 	return uint64(binary.LittleEndian.Uint32(bytes)), nil
 }
 
-func (d *bytecodeDecoder) readFloat64() (uint64, error) {
-	bytes, err := d.readBytes(8)
+func (p *parser) readFloat64() (uint64, error) {
+	bytes, err := p.readBytes(8)
 	if err != nil {
 		return 0, err
 	}
 	return binary.LittleEndian.Uint64(bytes), nil
 }
 
-func (d *bytecodeDecoder) readMemArg() (uint64, uint64, uint64, error) {
-	align, err := d.readUint32()
+func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
+	align, err := p.readUint32()
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1139,13 +1133,13 @@ func (d *bytecodeDecoder) readMemArg() (uint64, uint64, uint64, error) {
 	// If bit 6 is set, this instruction is using an explicit memory index.
 	// This is relevant in WASM 3.
 	if align&sixthBitMask != 0 {
-		memoryIndex, err = d.readUint32()
+		memoryIndex, err = p.readUint32()
 		if err != nil {
 			return 0, 0, 0, err
 		}
 	}
 
-	offset, err := d.readUleb128(10)
+	offset, err := p.readUleb128(10)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1153,8 +1147,8 @@ func (d *bytecodeDecoder) readMemArg() (uint64, uint64, uint64, error) {
 	return align, memoryIndex, offset, nil
 }
 
-func (d *bytecodeDecoder) readBlockType() (uint64, error) {
-	blockType, err := d.readSleb128(5)
+func (p *parser) readBlockType() (uint64, error) {
+	blockType, err := p.readSleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1170,8 +1164,8 @@ func (d *bytecodeDecoder) readBlockType() (uint64, error) {
 
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
-func (d *bytecodeDecoder) readUint32() (uint64, error) {
-	val, err := d.readUleb128(5)
+func (p *parser) readUint32() (uint64, error) {
+	val, err := p.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1181,8 +1175,8 @@ func (d *bytecodeDecoder) readUint32() (uint64, error) {
 	return val, nil
 }
 
-func (d *bytecodeDecoder) readInt32() (uint64, error) {
-	val, err := d.readSleb128(5)
+func (p *parser) readInt32() (uint64, error) {
+	val, err := p.readSleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1194,8 +1188,8 @@ func (d *bytecodeDecoder) readInt32() (uint64, error) {
 
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
-func (d *bytecodeDecoder) readUint8() (uint64, error) {
-	val, err := d.readUleb128(5)
+func (p *parser) readUint8() (uint64, error) {
+	val, err := p.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1206,7 +1200,7 @@ func (d *bytecodeDecoder) readUint8() (uint64, error) {
 }
 
 // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
-func (d *bytecodeDecoder) readSleb128(maxBytes int) (uint64, error) {
+func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	var result int64
 	var shift uint
 	var b byte
@@ -1214,7 +1208,7 @@ func (d *bytecodeDecoder) readSleb128(maxBytes int) (uint64, error) {
 	bytesRead := 0
 
 	for {
-		b, err = d.readByte()
+		b, err = p.readByte()
 		if err != nil {
 			return 0, err
 		}
@@ -1258,13 +1252,13 @@ func (d *bytecodeDecoder) readSleb128(maxBytes int) (uint64, error) {
 }
 
 // readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (d *bytecodeDecoder) readUleb128(maxBytes int) (uint64, error) {
+func (p *parser) readUleb128(maxBytes int) (uint64, error) {
 	var result uint64
 	var shift uint
 	bytesRead := 0
 
 	for {
-		b, err := d.readByte()
+		b, err := p.readByte()
 		if err != nil {
 			return 0, err
 		}
@@ -1285,18 +1279,18 @@ func (d *bytecodeDecoder) readUleb128(maxBytes int) (uint64, error) {
 	}
 }
 
-func (d *bytecodeDecoder) readByte() (byte, error) {
-	b, err := d.reader.ReadByte()
+func (p *parser) readByte() (byte, error) {
+	b, err := p.reader.ReadByte()
 	if err != nil {
 		return 0, err
 	}
 	return b, nil
 }
 
-func (d *bytecodeDecoder) readBytes(n uint) ([]byte, error) {
+func (p *parser) readBytes(n uint) ([]byte, error) {
 	var bytes []byte
 	for range n {
-		b, err := d.readByte()
+		b, err := p.readByte()
 		if err != nil {
 			return nil, err
 		}
