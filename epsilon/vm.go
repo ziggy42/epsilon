@@ -1913,7 +1913,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 }
 
 func (vm *vm) invokeInitExpression(
-	expression []byte,
+	expression []uint64,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
 ) (value, error) {

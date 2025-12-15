@@ -15,11 +15,8 @@
 package epsilon
 
 import (
-	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
-	"math"
 )
 
 var (
@@ -42,11 +39,11 @@ const (
 var immediatesBuffer []uint64 = make([]uint64, 16)
 
 type decoder struct {
-	code []byte
+	code []uint64
 	pc   uint
 }
 
-func newDecoder(code []byte) *decoder {
+func newDecoder(code []uint64) *decoder {
 	return &decoder{code: code, pc: 0}
 }
 
@@ -69,14 +66,14 @@ func (d *decoder) decode() (instruction, error) {
 func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 	switch opcode {
 	case block, loop, ifOp:
-		immediate, err := d.readBlockType()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case i32Const:
-		immediate, err := d.readInt32()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
@@ -114,25 +111,33 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		i64x2ReplaceLane,
 		f32x4ReplaceLane,
 		f64x2ReplaceLane:
-		immediate, err := d.readUint32()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case memorySize, memoryGrow:
-		immediate, err := d.readByte()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-		immediatesBuffer[0] = uint64(immediate)
+		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case brTable:
-		vector, err := d.readImmediateVector()
+		size, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-		immediate, err := d.readUint32()
+		// TODO remove this allocation
+		vector := make([]uint64, size)
+		for i := uint64(0); i < size; i++ {
+			vector[i], err = d.next()
+			if err != nil {
+				return nil, err
+			}
+		}
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
@@ -142,11 +147,11 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		memoryCopy,
 		tableInit,
 		tableCopy:
-		immediate1, err := d.readUint32()
+		immediate1, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-		immediate2, err := d.readUint32()
+		immediate2, err := d.next()
 		if err != nil {
 			return nil, err
 		}
@@ -190,46 +195,68 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		v128Load32x2S,
 		v128Load32x2U,
 		v128Store:
-		align, memoryIndex, offset, err := d.readMemArg()
+		align, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-
+		memoryIndex, err := d.next()
+		if err != nil {
+			return nil, err
+		}
+		offset, err := d.next()
+		if err != nil {
+			return nil, err
+		}
 		immediatesBuffer[0] = align
 		immediatesBuffer[1] = memoryIndex
 		immediatesBuffer[2] = offset
 		return immediatesBuffer[:3], nil
 	case selectT:
-		return d.readImmediateVector()
+		size, err := d.next()
+		if err != nil {
+			return nil, err
+		}
+		// TODO remove this allocation
+		vector := make([]uint64, size)
+		for i := uint64(0); i < size; i++ {
+			vector[i], err = d.next()
+			if err != nil {
+				return nil, err
+			}
+		}
+		return vector, nil
 	case i64Const:
-		immediate, err := d.readSleb128(10)
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case f32Const:
-		immediate, err := d.readFloat32()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case f64Const:
-		immediate, err := d.readFloat64()
+		immediate, err := d.next()
 		if err != nil {
 			return nil, err
 		}
 		immediatesBuffer[0] = immediate
 		return immediatesBuffer[:1], nil
 	case v128Const:
-		bytes, err := d.readBytes(16)
+		immediate1, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-
-		immediatesBuffer[0] = binary.LittleEndian.Uint64(bytes[0:8])
-		immediatesBuffer[1] = binary.LittleEndian.Uint64(bytes[8:16])
+		immediate2, err := d.next()
+		if err != nil {
+			return nil, err
+		}
+		immediatesBuffer[0] = immediate1
+		immediatesBuffer[1] = immediate2
 		return immediatesBuffer[:2], nil
 	case v128Load8Lane,
 		v128Load16Lane,
@@ -239,12 +266,19 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		v128Store16Lane,
 		v128Store32Lane,
 		v128Store64Lane:
-		align, memoryIndex, offset, err := d.readMemArg()
+		align, err := d.next()
 		if err != nil {
 			return nil, err
 		}
-
-		laneIndex, err := d.readUint8()
+		memoryIndex, err := d.next()
+		if err != nil {
+			return nil, err
+		}
+		offset, err := d.next()
+		if err != nil {
+			return nil, err
+		}
+		laneIndex, err := d.next()
 		if err != nil {
 			return nil, err
 		}
@@ -255,7 +289,7 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		return immediatesBuffer[:4], nil
 	case i8x16Shuffle:
 		for i := range 16 {
-			val, err := d.readUint8()
+			val, err := d.next()
 			if err != nil {
 				return nil, err
 			}
@@ -269,255 +303,240 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 
 // readOpcode reads the next Opcode from the byte stream.
 func (d *decoder) readOpcode() (opcode, error) {
-	opcodeByte, err := d.readByte()
+	opcodeValue, err := d.next()
 	if err != nil {
 		return 0, err
 	}
-
-	// Standard single-byte opcode.
-	if opcodeByte < 0xFC {
-		return opcode(opcodeByte), nil
-	}
-
-	// Multi-byte opcode (prefixed with 0xFC or 0xFD).
-	val, err := d.readUint32()
-	if err != nil {
-		return 0, err
-	}
-
-	var compositeOpcode uint32
-	switch opcodeByte {
-	case 0xFC:
-		compositeOpcode = 0xFC00 + uint32(val)
-	case 0xFD:
-		compositeOpcode = 0xFD00 + uint32(val)
-	default:
-		// This case should ideally not be reached if opcodeByte is guaranteed to be
-		// < 0xFC or 0xFD. However, as a safeguard, we can return an error.
-		return 0, fmt.Errorf("unrecognized opcode prefix: 0x%X", opcodeByte)
-	}
-
-	return opcode(compositeOpcode), nil
+	return opcode(opcodeValue), nil
 }
 
-func (d *decoder) readImmediateVector() ([]uint64, error) {
-	size, err := d.readUint32()
-	if err != nil {
-		return nil, err
-	}
-
-	var immediates []uint64
-	if int(size) <= len(immediatesBuffer) {
-		immediates = immediatesBuffer[:size]
-	} else {
-		immediates = make([]uint64, size)
-	}
-
-	for i := range size {
-		val, err := d.readUint32()
-		if err != nil {
-			return nil, err
-		}
-		immediates[i] = val
-	}
-	return immediates, nil
-}
-
-func (d *decoder) readFloat32() (uint64, error) {
-	bytes, err := d.readBytes(4)
-	if err != nil {
-		return 0, err
-	}
-	return uint64(binary.LittleEndian.Uint32(bytes)), nil
-}
-
-func (d *decoder) readFloat64() (uint64, error) {
-	bytes, err := d.readBytes(8)
-	if err != nil {
-		return 0, err
-	}
-	return binary.LittleEndian.Uint64(bytes), nil
-}
-
-func (d *decoder) readMemArg() (uint64, uint64, uint64, error) {
-	align, err := d.readUint32()
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	// The alignment exponent must be < 32.
-	// We also have to remove bit 6, used for multi memory.
-	if (align & ^sixthBitMask) >= 32 {
-		return 0, 0, 0, errMalformedMemopFlags
-	}
-
-	memoryIndex := uint64(0)
-	// If bit 6 is set, this instruction is using an explicit memory index.
-	// This is relevant in WASM 3.
-	if align&sixthBitMask != 0 {
-		memoryIndex, err = d.readUint32()
-		if err != nil {
-			return 0, 0, 0, err
-		}
-	}
-
-	offset, err := d.readUleb128(10)
-	if err != nil {
-		return 0, 0, 0, err
-	}
-
-	return align, memoryIndex, offset, nil
-}
-
-func (d *decoder) readBlockType() (uint64, error) {
-	blockType, err := d.readSleb128(5)
-	if err != nil {
-		return 0, err
-	}
-	// BlockType is encoded as a 33 bit, signed integer.
-	val := int64(blockType)
-	const minS33 = -1 << 32
-	const maxS33 = (1 << 32) - 1
-	if val < minS33 || val > maxS33 {
-		return 0, errIntegerTooLarge
-	}
-	return blockType, nil
-}
-
-// readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
-func (d *decoder) readSleb128(maxBytes int) (uint64, error) {
-	var result int64
-	var shift uint
-	var b byte
-	var err error
-	bytesRead := 0
-
-	for {
-		b, err = d.readByte()
-		if err != nil {
-			return 0, err
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, errIntRepresentationTooLong
-		}
-
-		// Each byte read contains 7 bits of "integer" and 1 bit to signal if the
-		// parsing should continue. When reading int64, we can read up to
-		// ceil(64/7) = 10 bytes. The last 10th byte will contain 1 continuation bit
-		// (the most significant bit), 6 bits we should not use and the final, least
-		// significant bit that we should interpret as the last 64th bit of the
-		// integer we are tying to parse, the sign bit. The remaining 6 bits should
-		// be all 0s for positive integers and all 1s for negative integers.
-		if bytesRead == 10 {
-			sign := b & 1
-			remainingBits := (b & 0x7E) >> 1
-			if sign == 0 && remainingBits != 0 {
-				return 0, errIntegerTooLarge
-			} else if sign == 1 && remainingBits != 0x3F {
-				return 0, errIntegerTooLarge
-			}
-		}
-
-		result |= int64(b&payloadMask) << shift
-
-		// Check the continuation bit (MSB). If it's 0, this is the last byte.
-		if (b & continuationBit) == 0 {
-			break
-		}
-
-		shift += 7
-	}
-
-	if (b & signBit) != 0 {
-		result |= -1 << (shift + 7)
-	}
-
-	return uint64(result), nil
-}
-
-// readUint32 still returns a uint64, but checks that the value can be
-// interpreted as a WASM u32.
-func (d *decoder) readUint32() (uint64, error) {
-	val, err := d.readUleb128(5)
-	if err != nil {
-		return 0, err
-	}
-	if val > math.MaxUint32 {
-		return 0, errIntegerTooLarge
-	}
-	return val, nil
-}
-
-func (d *decoder) readInt32() (uint64, error) {
-	val, err := d.readSleb128(5)
-	if err != nil {
-		return 0, err
-	}
-	if int64(val) < math.MinInt32 || int64(val) > math.MaxInt32 {
-		return 0, errIntegerTooLarge
-	}
-	return val, nil
-}
-
-// readUint8 still returns a uint64, but checks that the value can be
-// interpreted as a WASM u8.
-func (d *decoder) readUint8() (uint64, error) {
-	val, err := d.readUleb128(5)
-	if err != nil {
-		return 0, err
-	}
-	if val > math.MaxUint8 {
-		return 0, errIntegerTooLarge
-	}
-	return val, nil
-}
-
-// readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (d *decoder) readUleb128(maxBytes int) (uint64, error) {
-	var result uint64
-	var shift uint
-	bytesRead := 0
-
-	for {
-		b, err := d.readByte()
-		if err != nil {
-			return 0, err
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, errIntRepresentationTooLong
-		}
-
-		group := uint64(b & payloadMask)
-		result |= group << shift
-
-		// If the continuation bit (MSB) is 0, we are done.
-		if (b & continuationBit) == 0 {
-			return result, nil
-		}
-
-		shift += 7
-	}
-}
-
-func (d *decoder) readByte() (byte, error) {
-	if !d.hasMore() {
+func (d *decoder) next() (uint64, error) {
+	if d.pc >= uint(len(d.code)) {
 		return 0, io.EOF
 	}
-	b := d.code[d.pc]
+	val := d.code[d.pc]
 	d.pc++
-	return b, nil
+	return val, nil
 }
 
-func (d *decoder) readBytes(n uint) ([]byte, error) {
-	if d.pc+n > uint(len(d.code)) {
-		return nil, io.EOF
-	}
-	bytes := d.code[d.pc : d.pc+n]
-	d.pc += n
-	return bytes, nil
-}
+// func (d *decoder) readImmediateVector() ([]uint64, error) {
+// 	size, err := d.readUint32()
+// 	if err != nil {
+// 		return nil, err
+// 	}
+
+// 	var immediates []uint64
+// 	if int(size) <= len(immediatesBuffer) {
+// 		immediates = immediatesBuffer[:size]
+// 	} else {
+// 		immediates = make([]uint64, size)
+// 	}
+
+// 	for i := range size {
+// 		val, err := d.readUint32()
+// 		if err != nil {
+// 			return nil, err
+// 		}
+// 		immediates[i] = val
+// 	}
+// 	return immediates, nil
+// }
+
+// func (d *decoder) readFloat32() (uint64, error) {
+// 	bytes, err := d.readBytes(4)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	return uint64(binary.LittleEndian.Uint32(bytes)), nil
+// }
+
+// func (d *decoder) readFloat64() (uint64, error) {
+// 	bytes, err := d.readBytes(8)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	return binary.LittleEndian.Uint64(bytes), nil
+// }
+
+// func (d *decoder) readMemArg() (uint64, uint64, uint64, error) {
+// 	align, err := d.readUint32()
+// 	if err != nil {
+// 		return 0, 0, 0, err
+// 	}
+
+// 	// The alignment exponent must be < 32.
+// 	// We also have to remove bit 6, used for multi memory.
+// 	if (align & ^sixthBitMask) >= 32 {
+// 		return 0, 0, 0, errMalformedMemopFlags
+// 	}
+
+// 	memoryIndex := uint64(0)
+// 	// If bit 6 is set, this instruction is using an explicit memory index.
+// 	// This is relevant in WASM 3.
+// 	if align&sixthBitMask != 0 {
+// 		memoryIndex, err = d.readUint32()
+// 		if err != nil {
+// 			return 0, 0, 0, err
+// 		}
+// 	}
+
+// 	offset, err := d.readUleb128(10)
+// 	if err != nil {
+// 		return 0, 0, 0, err
+// 	}
+
+// 	return align, memoryIndex, offset, nil
+// }
+
+// func (d *decoder) readBlockType() (uint64, error) {
+// 	blockType, err := d.readSleb128(5)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	// BlockType is encoded as a 33 bit, signed integer.
+// 	val := int64(blockType)
+// 	const minS33 = -1 << 32
+// 	const maxS33 = (1 << 32) - 1
+// 	if val < minS33 || val > maxS33 {
+// 		return 0, errIntegerTooLarge
+// 	}
+// 	return blockType, nil
+// }
+
+// // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
+// func (d *decoder) readSleb128(maxBytes int) (uint64, error) {
+// 	var result int64
+// 	var shift uint
+// 	var b byte
+// 	var err error
+// 	bytesRead := 0
+
+// 	for {
+// 		b, err = d.readByte()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		bytesRead++
+// 		if bytesRead > maxBytes {
+// 			return 0, errIntRepresentationTooLong
+// 		}
+
+// 		// Each byte read contains 7 bits of "integer" and 1 bit to signal if the
+// 		// parsing should continue. When reading int64, we can read up to
+// 		// ceil(64/7) = 10 bytes. The last 10th byte will contain 1 continuation bit
+// 		// (the most significant bit), 6 bits we should not use and the final, least
+// 		// significant bit that we should interpret as the last 64th bit of the
+// 		// integer we are tying to parse, the sign bit. The remaining 6 bits should
+// 		// be all 0s for positive integers and all 1s for negative integers.
+// 		if bytesRead == 10 {
+// 			sign := b & 1
+// 			remainingBits := (b & 0x7E) >> 1
+// 			if sign == 0 && remainingBits != 0 {
+// 				return 0, errIntegerTooLarge
+// 			} else if sign == 1 && remainingBits != 0x3F {
+// 				return 0, errIntegerTooLarge
+// 			}
+// 		}
+
+// 		result |= int64(b&payloadMask) << shift
+
+// 		// Check the continuation bit (MSB). If it's 0, this is the last byte.
+// 		if (b & continuationBit) == 0 {
+// 			break
+// 		}
+
+// 		shift += 7
+// 	}
+
+// 	if (b & signBit) != 0 {
+// 		result |= -1 << (shift + 7)
+// 	}
+
+// 	return uint64(result), nil
+// }
+
+// // readUint32 still returns a uint64, but checks that the value can be
+// // interpreted as a WASM u32.
+// func (d *decoder) readUint32() (uint64, error) {
+// 	val, err := d.readUleb128(5)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	if val > math.MaxUint32 {
+// 		return 0, errIntegerTooLarge
+// 	}
+// 	return val, nil
+// }
+
+// func (d *decoder) readInt32() (uint64, error) {
+// 	val, err := d.readSleb128(5)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	if int64(val) < math.MinInt32 || int64(val) > math.MaxInt32 {
+// 		return 0, errIntegerTooLarge
+// 	}
+// 	return val, nil
+// }
+
+// // readUint8 still returns a uint64, but checks that the value can be
+// // interpreted as a WASM u8.
+// func (d *decoder) readUint8() (uint64, error) {
+// 	val, err := d.readUleb128(5)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	if val > math.MaxUint8 {
+// 		return 0, errIntegerTooLarge
+// 	}
+// 	return val, nil
+// }
+
+// // readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
+// func (d *decoder) readUleb128(maxBytes int) (uint64, error) {
+// 	var result uint64
+// 	var shift uint
+// 	bytesRead := 0
+
+// 	for {
+// 		b, err := d.readByte()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+// 		bytesRead++
+// 		if bytesRead > maxBytes {
+// 			return 0, errIntRepresentationTooLong
+// 		}
+
+// 		group := uint64(b & payloadMask)
+// 		result |= group << shift
+
+// 		// If the continuation bit (MSB) is 0, we are done.
+// 		if (b & continuationBit) == 0 {
+// 			return result, nil
+// 		}
+
+// 		shift += 7
+// 	}
+// }
+
+// func (d *decoder) readByte() (byte, error) {
+// 	if !d.hasMore() {
+// 		return 0, io.EOF
+// 	}
+// 	b := d.code[d.pc]
+// 	d.pc++
+// 	return b, nil
+// }
+
+// func (d *decoder) readBytes(n uint) ([]byte, error) {
+// 	if d.pc+n > uint(len(d.code)) {
+// 		return nil, io.EOF
+// 	}
+// 	bytes := d.code[d.pc : d.pc+n]
+// 	d.pc += n
+// 	return bytes, nil
+// }
 
 // decodeUntilMatchingEnd continues decoding instructions until the matching
 // 'end' of the current block is found. The next instruction to be decoded will

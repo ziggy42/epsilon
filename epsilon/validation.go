@@ -334,7 +334,7 @@ func (v *validator) validateFunction(function *function) error {
 }
 
 func (v *validator) validateConstExpression(
-	data []byte,
+	data []uint64,
 	expectedReturnType ValueType,
 ) error {
 	v.locals = nil
