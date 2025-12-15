@@ -237,7 +237,7 @@ func (p *parser) parseHeader() error {
 func (p *parser) parseCustomSection(payloadLen uint32) error {
 	// Custom section is ignored, but we still parse it to return parsing errors
 	// if it's not valid.
-	nameLength, bytesRead, err := p.parseUleb128(5)
+	nameLength, bytesRead, err := p.readUleb128(5)
 	if err != nil {
 		return fmt.Errorf("failed to read custom section name length: %w", err)
 	}
@@ -739,7 +739,7 @@ func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 }
 
 func (p *parser) parseUint32() (uint32, error) {
-	val, _, err := p.parseUleb128(5)
+	val, _, err := p.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -750,33 +750,8 @@ func (p *parser) parseUint32() (uint32, error) {
 }
 
 func (p *parser) parseUint64() (uint64, error) {
-	val, _, err := p.parseUleb128(9)
+	val, _, err := p.readUleb128(9)
 	return val, err
-}
-
-func (p *parser) parseUleb128(maxBytes int) (uint64, int, error) {
-	bytesRead := 0
-
-	var value uint64
-	var shift uint
-	for {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			return 0, bytesRead, err
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, bytesRead, fmt.Errorf("uleb128 value too large")
-		}
-
-		group := b & 0b01111111
-		value |= uint64(group) << shift
-		shift += 7
-		if b&0b10000000 == 0 {
-			break
-		}
-	}
-	return value, bytesRead, nil
 }
 
 func (p *parser) parseUtf8String() (string, error) {
@@ -1139,7 +1114,7 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 		}
 	}
 
-	offset, _, err := p.parseUleb128(10)
+	offset, _, err := p.readUleb128(10)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1162,10 +1137,18 @@ func (p *parser) readBlockType() (uint64, error) {
 	return blockType, nil
 }
 
+func (p *parser) readBytes(n uint) ([]byte, error) {
+	bytes := make([]byte, n)
+	if _, err := io.ReadFull(p.reader, bytes); err != nil {
+		return nil, err
+	}
+	return bytes, nil
+}
+
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
 func (p *parser) readUint32() (uint64, error) {
-	val, _, err := p.parseUleb128(5)
+	val, _, err := p.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1189,7 +1172,7 @@ func (p *parser) readInt32() (uint64, error) {
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
 func (p *parser) readUint8() (uint64, error) {
-	val, _, err := p.parseUleb128(5)
+	val, _, err := p.readUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1197,6 +1180,32 @@ func (p *parser) readUint8() (uint64, error) {
 		return 0, errIntegerTooLarge
 	}
 	return val, nil
+}
+
+// readUleb128 decodes an unsigned LEB128-encoded integer.
+func (p *parser) readUleb128(maxBytes int) (uint64, int, error) {
+	bytesRead := 0
+
+	var value uint64
+	var shift uint
+	for {
+		b, err := p.reader.ReadByte()
+		if err != nil {
+			return 0, bytesRead, err
+		}
+		bytesRead++
+		if bytesRead > maxBytes {
+			return 0, bytesRead, fmt.Errorf("uleb128 value too large")
+		}
+
+		group := b & 0b01111111
+		value |= uint64(group) << shift
+		shift += 7
+		if b&0b10000000 == 0 {
+			break
+		}
+	}
+	return value, bytesRead, nil
 }
 
 // readSleb128 decodes a signed 64-bit integer immediate (SLEB128).
@@ -1249,12 +1258,4 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	}
 
 	return uint64(result), nil
-}
-
-func (p *parser) readBytes(n uint) ([]byte, error) {
-	bytes := make([]byte, n)
-	if _, err := io.ReadFull(p.reader, bytes); err != nil {
-		return nil, err
-	}
-	return bytes, nil
 }
