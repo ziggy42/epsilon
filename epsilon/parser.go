@@ -831,9 +831,6 @@ func getSectionOrder(id sectionId) int {
 	}
 }
 
-// =============================================================================
-// Bytecode
-// =============================================================================
 func (p *parser) decodeBytecode() ([]uint64, error) {
 	bytecode := []uint64{}
 	for {
@@ -908,7 +905,7 @@ func (p *parser) readInstruction() ([]uint64, error) {
 		}
 		bytecode = append(bytecode, immediate)
 	case memorySize, memoryGrow:
-		immediate, err := p.readByte()
+		immediate, err := p.reader.ReadByte()
 		if err != nil {
 			return nil, err
 		}
@@ -1012,8 +1009,11 @@ func (p *parser) readInstruction() ([]uint64, error) {
 			return nil, err
 		}
 
-		bytecode = append(bytecode, binary.LittleEndian.Uint64(bytes[0:8]))
-		bytecode = append(bytecode, binary.LittleEndian.Uint64(bytes[8:16]))
+		bytecode = append(
+			bytecode,
+			binary.LittleEndian.Uint64(bytes[0:8]),
+			binary.LittleEndian.Uint64(bytes[8:16]),
+		)
 	case v128Load8Lane,
 		v128Load16Lane,
 		v128Load32Lane,
@@ -1208,7 +1208,7 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	bytesRead := 0
 
 	for {
-		b, err = p.readByte()
+		b, err = p.reader.ReadByte()
 		if err != nil {
 			return 0, err
 		}
@@ -1251,22 +1251,10 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	return uint64(result), nil
 }
 
-func (p *parser) readByte() (byte, error) {
-	b, err := p.reader.ReadByte()
-	if err != nil {
-		return 0, err
-	}
-	return b, nil
-}
-
 func (p *parser) readBytes(n uint) ([]byte, error) {
-	var bytes []byte
-	for range n {
-		b, err := p.readByte()
-		if err != nil {
-			return nil, err
-		}
-		bytes = append(bytes, b)
+	bytes := make([]byte, n)
+	if _, err := io.ReadFull(p.reader, bytes); err != nil {
+		return nil, err
 	}
 	return bytes, nil
 }
