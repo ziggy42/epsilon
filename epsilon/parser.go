@@ -1139,7 +1139,7 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 		}
 	}
 
-	offset, err := p.readUleb128(10)
+	offset, _, err := p.parseUleb128(10)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1165,7 +1165,7 @@ func (p *parser) readBlockType() (uint64, error) {
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
 func (p *parser) readUint32() (uint64, error) {
-	val, err := p.readUleb128(5)
+	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1189,7 +1189,7 @@ func (p *parser) readInt32() (uint64, error) {
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
 func (p *parser) readUint8() (uint64, error) {
-	val, err := p.readUleb128(5)
+	val, _, err := p.parseUleb128(5)
 	if err != nil {
 		return 0, err
 	}
@@ -1249,34 +1249,6 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	}
 
 	return uint64(result), nil
-}
-
-// readUleb128 decodes an unsigned 64-bit integer immediate (ULEB128).
-func (p *parser) readUleb128(maxBytes int) (uint64, error) {
-	var result uint64
-	var shift uint
-	bytesRead := 0
-
-	for {
-		b, err := p.readByte()
-		if err != nil {
-			return 0, err
-		}
-		bytesRead++
-		if bytesRead > maxBytes {
-			return 0, errIntRepresentationTooLong
-		}
-
-		group := uint64(b & payloadMask)
-		result |= group << shift
-
-		// If the continuation bit (MSB) is 0, we are done.
-		if (b & continuationBit) == 0 {
-			return result, nil
-		}
-
-		shift += 7
-	}
 }
 
 func (p *parser) readByte() (byte, error) {
