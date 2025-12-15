@@ -52,10 +52,11 @@ func (d *decoder) hasMore() bool {
 }
 
 func (d *decoder) decode() (instruction, error) {
-	opcode, err := d.readOpcode()
+	opcodeValue, err := d.next()
 	if err != nil {
 		return instruction{}, err
 	}
+	opcode := opcode(opcodeValue)
 	immediates, err := d.readOpcodeImmediates(opcode)
 	if err != nil {
 		return instruction{}, err
@@ -299,15 +300,6 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 	default:
 		return []uint64{}, nil
 	}
-}
-
-// readOpcode reads the next Opcode from the byte stream.
-func (d *decoder) readOpcode() (opcode, error) {
-	opcodeValue, err := d.next()
-	if err != nil {
-		return 0, err
-	}
-	return opcode(opcodeValue), nil
 }
 
 func (d *decoder) next() (uint64, error) {
