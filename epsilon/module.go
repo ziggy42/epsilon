@@ -17,7 +17,14 @@ package epsilon
 type function struct {
 	typeIndex uint32
 	locals    []ValueType
-	body      []byte
+	body      []uint64
+	// jumpCache maps the position of the first instruction inside a block/if to
+	// the position of the instruction after the matching 'end'.
+	jumpCache map[uint]uint
+	// jumpElseCache maps the position of the first instruction inside an 'if' to
+	// the position of the instruction after the matching 'else' (or 'end' if no
+	// else).
+	jumpElseCache map[uint]uint
 }
 
 type exportIndexKind int
@@ -81,7 +88,7 @@ type elementSegment struct {
 
 	// functionIndexesExpressions is a list of constant expressions that produce
 	// function references. Used when functionIndexes is empty.
-	functionIndexesExpressions [][]byte
+	functionIndexesExpressions [][]uint64
 
 	// tableIndex is the index of the table to initialize. Only used when
 	// Mode == ActiveElementMode.
@@ -89,14 +96,14 @@ type elementSegment struct {
 
 	// offsetExpression is a constant expression that computes the starting offset
 	// in the table. Only used when Mode == ActiveElementMode.
-	offsetExpression []byte
+	offsetExpression []uint64
 }
 
 // globalVariable represents a global variable in a WebAssembly module.
 // See https://webassembly.github.io/spec/core/syntax/modules.html#globals
 type globalVariable struct {
 	globalType     GlobalType
-	initExpression []byte
+	initExpression []uint64
 }
 
 // dataMode specifies how a data segment should be handled.
@@ -119,7 +126,7 @@ type dataSegment struct {
 
 	// offsetExpression is a constant expression that computes the starting offset
 	// in memory. Only used when Mode == ActiveDataMode.
-	offsetExpression []byte
+	offsetExpression []uint64
 }
 
 // moduleDefinition represents a non-instantiated WASM module.

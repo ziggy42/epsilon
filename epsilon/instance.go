@@ -131,27 +131,6 @@ type wasmFunction struct {
 	functionType FunctionType
 	module       *ModuleInstance
 	code         function
-	// We cache the continuation pc for each block-like opcde we encounter so we
-	// can compute it only once. The key is the pc of the first instruction inside
-	// the block.
-	// These caches are stored in a WasmFunction and not in e.g. a callFrame so
-	// that multiple invocation of the same WasmFunction share the same caches.
-	jumpCache     map[uint]uint
-	jumpElseCache map[uint]uint
-}
-
-func newWasmFunction(
-	funType FunctionType,
-	module *ModuleInstance,
-	function function,
-) *wasmFunction {
-	return &wasmFunction{
-		functionType:  funType,
-		module:        module,
-		code:          function,
-		jumpCache:     map[uint]uint{},
-		jumpElseCache: map[uint]uint{},
-	}
 }
 
 func (wf *wasmFunction) GetType() *FunctionType { return &wf.functionType }

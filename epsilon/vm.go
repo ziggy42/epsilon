@@ -49,10 +49,17 @@ type store struct {
 }
 
 type callFrame struct {
-	decoder      decoder
+	code         []uint64
+	pc           uint
 	controlStack []controlFrame
 	locals       []value
 	function     *wasmFunction
+}
+
+func (f *callFrame) next() uint64 {
+	val := f.code[f.pc]
+	f.pc++
+	return val
 }
 
 // controlFrame represents a block of code that can be branched to.
@@ -76,7 +83,11 @@ type vm struct {
 }
 
 func newVm() *vm {
-	return &vm{store: &store{}, stack: newValueStack()}
+	return &vm{
+		store:     &store{},
+		stack:     newValueStack(),
+		callStack: make([]callFrame, 0, maxCallStackDepth),
+	}
 }
 
 func (vm *vm) instantiate(
@@ -106,7 +117,11 @@ func (vm *vm) instantiate(
 	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.types[function.typeIndex]
-		wasmFunc := newWasmFunction(funType, moduleInstance, function)
+		wasmFunc := &wasmFunction{
+			functionType: funType,
+			module:       moduleInstance,
+			code:         function,
+		}
 		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
@@ -257,25 +272,20 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		stackHeight:    vm.stack.size(),
 	})
 
-	callFrame := callFrame{
-		decoder:      decoder{code: function.code.body, pc: 0},
+	vm.callStack = append(vm.callStack, callFrame{
+		code:         function.code.body,
+		pc:           0,
 		controlStack: controlStack,
 		locals:       locals,
 		function:     function,
-	}
-	vm.callStack = append(vm.callStack, callFrame)
+	})
+	frame := &vm.callStack[len(vm.callStack)-1]
 
-	for vm.currentCallFrame().decoder.hasMore() {
-		instruction, err := vm.currentCallFrame().decoder.decode()
-		if err != nil {
-			return err
-		}
-
-		if err = vm.handleInstruction(instruction); err != nil {
+	for frame.pc < uint(len(frame.code)) {
+		if err := vm.executeInstruction(frame); err != nil {
 			if errors.Is(err, errReturn) {
 				break // A 'return' instruction was executed.
 			}
-
 			return err
 		}
 	}
@@ -284,113 +294,116 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	return nil
 }
 
-func (vm *vm) handleInstruction(instruction instruction) error {
+func (vm *vm) executeInstruction(frame *callFrame) error {
+	op := opcode(frame.next())
 	var err error
 	// Using a switch instead of a map of opcode -> Handler is significantly
 	// faster.
-	switch instruction.opcode {
+	switch op {
 	case unreachable:
 		err = errUnreachable
 	case nop:
 		// Do nothing.
 	case block, loop:
-		err = vm.handleStructured(instruction)
+		vm.pushBlockFrame(op, int32(frame.next()))
 	case ifOp:
-		err = vm.handleIf(instruction)
+		vm.handleIf(frame)
 	case elseOp:
-		vm.handleElse()
+		vm.handleElse(frame)
 	case end:
 		vm.handleEnd()
 	case br:
-		vm.handleBr(instruction)
+		vm.brToLabel(uint32(frame.next()))
 	case brIf:
-		vm.handleBrIf(instruction)
+		vm.handleBrIf(frame)
 	case brTable:
-		vm.handleBrTable(instruction)
+		vm.handleBrTable(frame)
 	case returnOp:
 		err = errReturn
 	case call:
-		err = vm.handleCall(instruction)
+		err = vm.handleCall(frame)
 	case callIndirect:
-		err = vm.handleCallIndirect(instruction)
+		err = vm.handleCallIndirect(frame)
 	case drop:
 		vm.stack.drop()
 	case selectOp:
 		vm.handleSelect()
 	case selectT:
+		count := frame.next()
+		frame.pc += uint(count)
 		vm.handleSelect()
 	case localGet:
-		vm.handleLocalGet(instruction)
+		vm.stack.push(frame.locals[frame.next()])
 	case localSet:
-		vm.handleLocalSet(instruction)
+		frame.locals[frame.next()] = vm.stack.pop()
 	case localTee:
-		vm.handleLocalTee(instruction)
+		frame.locals[frame.next()] = vm.stack.data[len(vm.stack.data)-1]
 	case globalGet:
-		vm.handleGlobalGet(instruction)
+		vm.handleGlobalGet(frame)
 	case globalSet:
-		vm.handleGlobalSet(instruction)
+		vm.handleGlobalSet(frame)
 	case tableGet:
-		err = vm.handleTableGet(instruction)
+		err = vm.handleTableGet(frame)
 	case tableSet:
-		err = vm.handleTableSet(instruction)
+		err = vm.handleTableSet(frame)
 	case i32Load:
-		err = handleLoad(vm, instruction, vm.stack.pushInt32, (*Memory).LoadUint32, uint32ToInt32)
+		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint32, uint32ToInt32)
 	case i64Load:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadUint64, uint64ToInt64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint64, uint64ToInt64)
 	case f32Load:
-		err = handleLoad(vm, instruction, vm.stack.pushFloat32, (*Memory).LoadUint32, math.Float32frombits)
+		err = handleLoad(vm, frame, vm.stack.pushFloat32, (*Memory).LoadUint32, math.Float32frombits)
 	case f64Load:
-		err = handleLoad(vm, instruction, vm.stack.pushFloat64, (*Memory).LoadUint64, math.Float64frombits)
+		err = handleLoad(vm, frame, vm.stack.pushFloat64, (*Memory).LoadUint64, math.Float64frombits)
 	case i32Load8S:
-		err = handleLoad(vm, instruction, vm.stack.pushInt32, (*Memory).LoadByte, signExtend8To32)
+		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadByte, signExtend8To32)
 	case i32Load8U:
-		err = handleLoad(vm, instruction, vm.stack.pushInt32, (*Memory).LoadByte, zeroExtend8To32)
+		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadByte, zeroExtend8To32)
 	case i32Load16S:
-		err = handleLoad(vm, instruction, vm.stack.pushInt32, (*Memory).LoadUint16, signExtend16To32)
+		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint16, signExtend16To32)
 	case i32Load16U:
-		err = handleLoad(vm, instruction, vm.stack.pushInt32, (*Memory).LoadUint16, zeroExtend16To32)
+		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint16, zeroExtend16To32)
 	case i64Load8S:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadByte, signExtend8To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadByte, signExtend8To64)
 	case i64Load8U:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadByte, zeroExtend8To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadByte, zeroExtend8To64)
 	case i64Load16S:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadUint16, signExtend16To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint16, signExtend16To64)
 	case i64Load16U:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadUint16, zeroExtend16To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint16, zeroExtend16To64)
 	case i64Load32S:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadUint32, signExtend32To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint32, signExtend32To64)
 	case i64Load32U:
-		err = handleLoad(vm, instruction, vm.stack.pushInt64, (*Memory).LoadUint32, zeroExtend32To64)
+		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint32, zeroExtend32To64)
 	case i32Store:
-		err = handleStore(vm, instruction, uint32(vm.stack.popInt32()), (*Memory).StoreUint32)
+		err = handleStore(vm, frame, uint32(vm.stack.popInt32()), (*Memory).StoreUint32)
 	case i64Store:
-		err = handleStore(vm, instruction, uint64(vm.stack.popInt64()), (*Memory).StoreUint64)
+		err = handleStore(vm, frame, uint64(vm.stack.popInt64()), (*Memory).StoreUint64)
 	case f32Store:
-		err = handleStore(vm, instruction, math.Float32bits(vm.stack.popFloat32()), (*Memory).StoreUint32)
+		err = handleStore(vm, frame, math.Float32bits(vm.stack.popFloat32()), (*Memory).StoreUint32)
 	case f64Store:
-		err = handleStore(vm, instruction, math.Float64bits(vm.stack.popFloat64()), (*Memory).StoreUint64)
+		err = handleStore(vm, frame, math.Float64bits(vm.stack.popFloat64()), (*Memory).StoreUint64)
 	case i32Store8:
-		err = handleStore(vm, instruction, byte(vm.stack.popInt32()), (*Memory).StoreByte)
+		err = handleStore(vm, frame, byte(vm.stack.popInt32()), (*Memory).StoreByte)
 	case i32Store16:
-		err = handleStore(vm, instruction, uint16(vm.stack.popInt32()), (*Memory).StoreUint16)
+		err = handleStore(vm, frame, uint16(vm.stack.popInt32()), (*Memory).StoreUint16)
 	case i64Store8:
-		err = handleStore(vm, instruction, byte(vm.stack.popInt64()), (*Memory).StoreByte)
+		err = handleStore(vm, frame, byte(vm.stack.popInt64()), (*Memory).StoreByte)
 	case i64Store16:
-		err = handleStore(vm, instruction, uint16(vm.stack.popInt64()), (*Memory).StoreUint16)
+		err = handleStore(vm, frame, uint16(vm.stack.popInt64()), (*Memory).StoreUint16)
 	case i64Store32:
-		err = handleStore(vm, instruction, uint32(vm.stack.popInt64()), (*Memory).StoreUint32)
+		err = handleStore(vm, frame, uint32(vm.stack.popInt64()), (*Memory).StoreUint32)
 	case memorySize:
-		vm.handleMemorySize(instruction)
+		vm.handleMemorySize(frame)
 	case memoryGrow:
-		vm.handleMemoryGrow(instruction)
+		vm.handleMemoryGrow(frame)
 	case i32Const:
-		vm.stack.pushInt32(int32(instruction.immediates[0]))
+		vm.stack.pushInt32(int32(frame.next()))
 	case i64Const:
-		vm.stack.pushInt64(int64(instruction.immediates[0]))
+		vm.stack.pushInt64(int64(frame.next()))
 	case f32Const:
-		vm.stack.pushFloat32(math.Float32frombits(uint32(instruction.immediates[0])))
+		vm.stack.pushFloat32(math.Float32frombits(uint32(frame.next())))
 	case f64Const:
-		vm.stack.pushFloat64(math.Float64frombits(instruction.immediates[0]))
+		vm.stack.pushFloat64(math.Float64frombits(frame.next()))
 	case i32Eqz:
 		vm.stack.pushInt32(boolToInt32(vm.stack.popInt32() == 0))
 	case i32Eq:
@@ -648,11 +661,12 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64Extend32S:
 		vm.stack.pushInt64(extend32STo64(vm.stack.popInt64()))
 	case refNull:
+		frame.next() // type immediate
 		vm.stack.pushInt32(NullReference)
 	case refIsNull:
 		vm.handleRefIsNull()
 	case refFunc:
-		vm.handleRefFunc(instruction)
+		vm.handleRefFunc(frame)
 	case i32TruncSatF32S:
 		vm.stack.pushInt32(truncSatF32SToI32(vm.stack.popFloat32()))
 	case i32TruncSatF32U:
@@ -670,53 +684,53 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case i64TruncSatF64U:
 		vm.stack.pushInt64(truncSatF64UToI64(vm.stack.popFloat64()))
 	case memoryInit:
-		err = vm.handleMemoryInit(instruction)
+		err = vm.handleMemoryInit(frame)
 	case dataDrop:
-		vm.handleDataDrop(instruction)
+		vm.handleDataDrop(frame)
 	case memoryCopy:
-		err = vm.handleMemoryCopy(instruction)
+		err = vm.handleMemoryCopy(frame)
 	case memoryFill:
-		err = vm.handleMemoryFill(instruction)
+		err = vm.handleMemoryFill(frame)
 	case tableInit:
-		err = vm.handleTableInit(instruction)
+		err = vm.handleTableInit(frame)
 	case elemDrop:
-		vm.handleElemDrop(instruction)
+		vm.handleElemDrop(frame)
 	case tableCopy:
-		err = vm.handleTableCopy(instruction)
+		err = vm.handleTableCopy(frame)
 	case tableGrow:
-		vm.handleTableGrow(instruction)
+		vm.handleTableGrow(frame)
 	case tableSize:
-		vm.handleTableSize(instruction)
+		vm.handleTableSize(frame)
 	case tableFill:
-		err = vm.handleTableFill(instruction)
+		err = vm.handleTableFill(frame)
 	case v128Load:
-		err = handleLoad(vm, instruction, vm.stack.pushV128, (*Memory).LoadV128, identityV128)
+		err = handleLoad(vm, frame, vm.stack.pushV128, (*Memory).LoadV128, identityV128)
 	case v128Load8x8S:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load8x8S, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load8x8S, 8)
 	case v128Load8x8U:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load8x8U, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load8x8U, 8)
 	case v128Load16x4S:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load16x4S, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load16x4S, 8)
 	case v128Load16x4U:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load16x4U, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load16x4U, 8)
 	case v128Load32x2S:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load32x2S, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load32x2S, 8)
 	case v128Load32x2U:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load32x2U, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load32x2U, 8)
 	case v128Load8Splat:
-		err = vm.handleLoadV128FromBytes(instruction, simdI8x16SplatFromBytes, 1)
+		err = vm.handleLoadV128FromBytes(frame, simdI8x16SplatFromBytes, 1)
 	case v128Load16Splat:
-		err = vm.handleLoadV128FromBytes(instruction, simdI16x8SplatFromBytes, 2)
+		err = vm.handleLoadV128FromBytes(frame, simdI16x8SplatFromBytes, 2)
 	case v128Load32Splat:
-		err = vm.handleLoadV128FromBytes(instruction, simdI32x4SplatFromBytes, 4)
+		err = vm.handleLoadV128FromBytes(frame, simdI32x4SplatFromBytes, 4)
 	case v128Load64Splat:
-		err = vm.handleLoadV128FromBytes(instruction, simdI64x2SplatFromBytes, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdI64x2SplatFromBytes, 8)
 	case v128Store:
-		err = handleStore(vm, instruction, vm.stack.popV128(), (*Memory).StoreV128)
+		err = handleStore(vm, frame, vm.stack.popV128(), (*Memory).StoreV128)
 	case v128Const:
-		vm.handleSimdConst(instruction)
+		vm.stack.pushV128(V128Value{Low: frame.next(), High: frame.next()})
 	case i8x16Shuffle:
-		vm.handleI8x16Shuffle(instruction)
+		vm.handleI8x16Shuffle(frame)
 	case i8x16Swizzle:
 		vm.handleBinaryV128(simdI8x16Swizzle)
 	case i8x16Splat:
@@ -732,33 +746,33 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64x2Splat:
 		vm.stack.pushV128(simdF64x2Splat(vm.stack.popFloat64()))
 	case i8x16ExtractLaneS:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI8x16ExtractLaneS)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI8x16ExtractLaneS)
 	case i8x16ExtractLaneU:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI8x16ExtractLaneU)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI8x16ExtractLaneU)
 	case i8x16ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popInt32, simdI8x16ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI8x16ReplaceLane)
 	case i16x8ExtractLaneS:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI16x8ExtractLaneS)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI16x8ExtractLaneS)
 	case i16x8ExtractLaneU:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI16x8ExtractLaneU)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI16x8ExtractLaneU)
 	case i16x8ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popInt32, simdI16x8ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI16x8ReplaceLane)
 	case i32x4ExtractLane:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt32, simdI32x4ExtractLane)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI32x4ExtractLane)
 	case i32x4ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popInt32, simdI32x4ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI32x4ReplaceLane)
 	case i64x2ExtractLane:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushInt64, simdI64x2ExtractLane)
+		handleSimdExtractLane(vm, frame, vm.stack.pushInt64, simdI64x2ExtractLane)
 	case i64x2ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popInt64, simdI64x2ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popInt64, simdI64x2ReplaceLane)
 	case f32x4ExtractLane:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushFloat32, simdF32x4ExtractLane)
+		handleSimdExtractLane(vm, frame, vm.stack.pushFloat32, simdF32x4ExtractLane)
 	case f32x4ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popFloat32, simdF32x4ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popFloat32, simdF32x4ReplaceLane)
 	case f64x2ExtractLane:
-		handleSimdExtractLane(vm, instruction, vm.stack.pushFloat64, simdF64x2ExtractLane)
+		handleSimdExtractLane(vm, frame, vm.stack.pushFloat64, simdF64x2ExtractLane)
 	case f64x2ReplaceLane:
-		handleSimdReplaceLane(vm, instruction, vm.stack.popFloat64, simdF64x2ReplaceLane)
+		handleSimdReplaceLane(vm, frame, vm.stack.popFloat64, simdF64x2ReplaceLane)
 	case i8x16Eq:
 		vm.handleBinaryV128(simdI8x16Eq)
 	case i8x16Ne:
@@ -858,25 +872,25 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case v128AnyTrue:
 		vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(vm.stack.popV128())))
 	case v128Load8Lane:
-		err = vm.handleSimdLoadLane(instruction, 8)
+		err = vm.handleSimdLoadLane(frame, 8)
 	case v128Load16Lane:
-		err = vm.handleSimdLoadLane(instruction, 16)
+		err = vm.handleSimdLoadLane(frame, 16)
 	case v128Load32Lane:
-		err = vm.handleSimdLoadLane(instruction, 32)
+		err = vm.handleSimdLoadLane(frame, 32)
 	case v128Load64Lane:
-		err = vm.handleSimdLoadLane(instruction, 64)
+		err = vm.handleSimdLoadLane(frame, 64)
 	case v128Store8Lane:
-		err = vm.handleSimdStoreLane(instruction, 8)
+		err = vm.handleSimdStoreLane(frame, 8)
 	case v128Store16Lane:
-		err = vm.handleSimdStoreLane(instruction, 16)
+		err = vm.handleSimdStoreLane(frame, 16)
 	case v128Store32Lane:
-		err = vm.handleSimdStoreLane(instruction, 32)
+		err = vm.handleSimdStoreLane(frame, 32)
 	case v128Store64Lane:
-		err = vm.handleSimdStoreLane(instruction, 64)
+		err = vm.handleSimdStoreLane(frame, 64)
 	case v128Load32Zero:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load32Zero, 4)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load32Zero, 4)
 	case v128Load64Zero:
-		err = vm.handleLoadV128FromBytes(instruction, simdV128Load64Zero, 8)
+		err = vm.handleLoadV128FromBytes(frame, simdV128Load64Zero, 8)
 	case f32x4DemoteF64x2Zero:
 		vm.stack.pushV128(simdF32x4DemoteF64x2Zero(vm.stack.popV128()))
 	case f64x2PromoteLowF32x4:
@@ -1162,7 +1176,7 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case f64x2ConvertLowI32x4U:
 		vm.stack.pushV128(simdF64x2ConvertLowI32x4U(vm.stack.popV128()))
 	default:
-		err = fmt.Errorf("unknown opcode %d", instruction.opcode)
+		err = fmt.Errorf("unknown opcode %d", op)
 	}
 	return err
 }
@@ -1175,9 +1189,9 @@ func (vm *vm) currentModuleInstance() *ModuleInstance {
 	return vm.currentCallFrame().function.module
 }
 
-func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
+func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	callFrame := vm.currentCallFrame()
-	originalPc := callFrame.decoder.pc
+	originalPc := callFrame.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
 	frame := controlFrame{
 		opcode:      opcode,
@@ -1190,75 +1204,33 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
 	if opcode == loop {
 		frame.continuationPc = originalPc
 	} else {
-		if cachedPc, ok := callFrame.function.jumpCache[originalPc]; ok {
-			frame.continuationPc = cachedPc
-		} else {
-			// Cache miss: we need to scan forward to find the matching 'end'.
-			if err := callFrame.decoder.decodeUntilMatchingEnd(); err != nil {
-				return err
-			}
-
-			callFrame.function.jumpCache[originalPc] = callFrame.decoder.pc
-			frame.continuationPc = callFrame.decoder.pc
-			callFrame.decoder.pc = originalPc
-		}
+		frame.continuationPc = callFrame.function.code.jumpCache[originalPc]
 	}
 
 	vm.pushControlFrame(frame)
-	return nil
 }
 
-func (vm *vm) handleStructured(instruction instruction) error {
-	blockType := int32(instruction.immediates[0])
-	return vm.pushBlockFrame(instruction.opcode, blockType)
-}
-
-func (vm *vm) handleIf(instruction instruction) error {
-	frame := vm.currentCallFrame()
-	blockType := int32(instruction.immediates[0])
-	originalPc := frame.decoder.pc
+func (vm *vm) handleIf(frame *callFrame) {
+	blockType := int32(frame.next())
+	originalPc := frame.pc
 
 	condition := vm.stack.popInt32()
 
-	if err := vm.pushBlockFrame(ifOp, blockType); err != nil {
-		return err
-	}
+	vm.pushBlockFrame(ifOp, blockType)
 
 	if condition != 0 {
-		return nil
+		return
 	}
 
-	// We need to jump to the 'else' or 'end'.
-	if elsePc, ok := frame.function.jumpElseCache[originalPc]; ok {
-		frame.decoder.pc = elsePc
-		return nil
-	}
-
-	// Cache miss, we need to find the matching Else or End.
-	matchingOpcode, err := frame.decoder.decodeUntilMatchingElseOrEnd()
-	if err != nil {
-		return err
-	}
-
-	if matchingOpcode == elseOp {
-		// We need to consume the Else instruction and jump to the next "actual"
-		// instruction after it.
-		if _, err := frame.decoder.decode(); err != nil {
-			return err
-		}
-	}
-
-	frame.function.jumpElseCache[originalPc] = frame.decoder.pc
-	return nil
+	frame.pc = frame.function.code.jumpElseCache[originalPc]
 }
 
-func (vm *vm) handleElse() {
-	callFrame := vm.currentCallFrame()
+func (vm *vm) handleElse(frame *callFrame) {
 	// When we encounter an 'else' instruction, it means we have just finished
 	// executing the 'then' block of an 'if' statement. We need to jump to the
 	// 'end' of the 'if' block, skipping the 'else' block.
 	ifFrame := vm.popControlFrame()
-	callFrame.decoder.pc = ifFrame.continuationPc
+	frame.pc = ifFrame.continuationPc
 }
 
 func (vm *vm) handleEnd() {
@@ -1266,13 +1238,8 @@ func (vm *vm) handleEnd() {
 	vm.stack.unwind(frame.stackHeight, frame.outputCount)
 }
 
-func (vm *vm) handleBr(instruction instruction) {
-	labelIndex := uint32(instruction.immediates[0])
-	vm.brToLabel(labelIndex)
-}
-
-func (vm *vm) handleBrIf(instruction instruction) {
-	labelIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleBrIf(frame *callFrame) {
+	labelIndex := uint32(frame.next())
 	val := vm.stack.popInt32()
 	if val == 0 {
 		return
@@ -1280,16 +1247,17 @@ func (vm *vm) handleBrIf(instruction instruction) {
 	vm.brToLabel(labelIndex)
 }
 
-func (vm *vm) handleBrTable(instruction instruction) {
-	immediates := instruction.immediates
-	table := immediates[:len(immediates)-1]
-	defaultTarget := uint32(immediates[len(immediates)-1])
+func (vm *vm) handleBrTable(frame *callFrame) {
+	size := frame.next()
 	index := vm.stack.popInt32()
-	if index >= 0 && int(index) < len(table) {
-		vm.brToLabel(uint32(table[index]))
+	var targetLabel uint32
+	if index >= 0 && uint64(index) < size {
+		targetLabel = uint32(frame.code[frame.pc+uint(index)])
 	} else {
-		vm.brToLabel(defaultTarget)
+		targetLabel = uint32(frame.code[frame.pc+uint(size)])
 	}
+	frame.pc += uint(size) + 1
+	vm.brToLabel(targetLabel)
 }
 
 func (vm *vm) brToLabel(labelIndex uint32) {
@@ -1311,18 +1279,18 @@ func (vm *vm) brToLabel(labelIndex uint32) {
 		vm.pushControlFrame(targetFrame)
 	}
 
-	callFrame.decoder.pc = targetFrame.continuationPc
+	callFrame.pc = targetFrame.continuationPc
 }
 
-func (vm *vm) handleCall(instruction instruction) error {
-	localIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleCall(frame *callFrame) error {
+	localIndex := uint32(frame.next())
 	function := vm.getFunction(localIndex)
 	return vm.invokeFunction(function)
 }
 
-func (vm *vm) handleCallIndirect(instruction instruction) error {
-	typeIndex := uint32(instruction.immediates[0])
-	tableIndex := uint32(instruction.immediates[1])
+func (vm *vm) handleCallIndirect(frame *callFrame) error {
+	typeIndex := uint32(frame.next())
+	tableIndex := uint32(frame.next())
 
 	expectedType := vm.currentModuleInstance().types[typeIndex]
 	table := vm.getTable(tableIndex)
@@ -1358,38 +1326,20 @@ func (vm *vm) handleSelect() {
 	vm.stack.data = data[:n-2]
 }
 
-func (vm *vm) handleLocalGet(instruction instruction) {
-	callFrame := vm.currentCallFrame()
-	localIndex := int32(instruction.immediates[0])
-	vm.stack.push(callFrame.locals[localIndex])
-}
-
-func (vm *vm) handleLocalSet(instruction instruction) {
-	frame := vm.currentCallFrame()
-	localIndex := int32(instruction.immediates[0])
-	frame.locals[localIndex] = vm.stack.pop()
-}
-
-func (vm *vm) handleLocalTee(instruction instruction) {
-	frame := vm.currentCallFrame()
-	localIndex := int32(instruction.immediates[0])
-	frame.locals[localIndex] = vm.stack.data[len(vm.stack.data)-1]
-}
-
-func (vm *vm) handleGlobalGet(instruction instruction) {
-	localIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleGlobalGet(frame *callFrame) {
+	localIndex := uint32(frame.next())
 	global := vm.getGlobal(localIndex)
 	vm.stack.push(global.value)
 }
 
-func (vm *vm) handleGlobalSet(instruction instruction) {
-	localIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleGlobalSet(frame *callFrame) {
+	localIndex := uint32(frame.next())
 	global := vm.getGlobal(localIndex)
 	global.value = vm.stack.pop()
 }
 
-func (vm *vm) handleTableGet(instruction instruction) error {
-	tableIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleTableGet(frame *callFrame) error {
+	tableIndex := uint32(frame.next())
 	table := vm.getTable(tableIndex)
 	index := vm.stack.popInt32()
 
@@ -1402,28 +1352,28 @@ func (vm *vm) handleTableGet(instruction instruction) error {
 	return nil
 }
 
-func (vm *vm) handleTableSet(instruction instruction) error {
-	tableIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleTableSet(frame *callFrame) error {
+	tableIndex := uint32(frame.next())
 	table := vm.getTable(tableIndex)
 	reference := vm.stack.popInt32()
 	index := vm.stack.popInt32()
 	return table.Set(index, reference)
 }
 
-func (vm *vm) handleMemorySize(instruction instruction) {
-	memory := vm.getMemory(uint32(instruction.immediates[0]))
+func (vm *vm) handleMemorySize(frame *callFrame) {
+	memory := vm.getMemory(uint32(frame.next()))
 	vm.stack.pushInt32(memory.Size())
 }
 
-func (vm *vm) handleMemoryGrow(instruction instruction) {
-	memory := vm.getMemory(uint32(instruction.immediates[0]))
+func (vm *vm) handleMemoryGrow(frame *callFrame) {
+	memory := vm.getMemory(uint32(frame.next()))
 	pages := vm.stack.popInt32()
 	oldSize := memory.Grow(pages)
 	vm.stack.pushInt32(oldSize)
 }
 
-func (vm *vm) handleRefFunc(instruction instruction) {
-	funcIndex := uint32(instruction.immediates[0])
+func (vm *vm) handleRefFunc(frame *callFrame) {
+	funcIndex := uint32(frame.next())
 	storeIndex := vm.currentModuleInstance().funcAddrs[funcIndex]
 	vm.stack.pushInt32(int32(storeIndex))
 }
@@ -1433,34 +1383,34 @@ func (vm *vm) handleRefIsNull() {
 	vm.stack.pushInt32(boolToInt32(top == NullReference))
 }
 
-func (vm *vm) handleMemoryInit(instruction instruction) error {
-	data := vm.getData(uint32(instruction.immediates[0]))
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
+func (vm *vm) handleMemoryInit(frame *callFrame) error {
+	data := vm.getData(uint32(frame.next()))
+	memory := vm.getMemory(uint32(frame.next()))
 	n, s, d := vm.stack.pop3Int32()
 	return memory.Init(uint32(n), uint32(s), uint32(d), data.content)
 }
 
-func (vm *vm) handleDataDrop(instruction instruction) {
-	dataSegment := vm.getData(uint32(instruction.immediates[0]))
+func (vm *vm) handleDataDrop(frame *callFrame) {
+	dataSegment := vm.getData(uint32(frame.next()))
 	dataSegment.content = nil
 }
 
-func (vm *vm) handleMemoryCopy(instruction instruction) error {
-	destMemory := vm.getMemory(uint32(instruction.immediates[0]))
-	srcMemory := vm.getMemory(uint32(instruction.immediates[1]))
+func (vm *vm) handleMemoryCopy(frame *callFrame) error {
+	destMemory := vm.getMemory(uint32(frame.next()))
+	srcMemory := vm.getMemory(uint32(frame.next()))
 	n, s, d := vm.stack.pop3Int32()
 	return srcMemory.Copy(destMemory, uint32(n), uint32(s), uint32(d))
 }
 
-func (vm *vm) handleMemoryFill(instruction instruction) error {
-	memory := vm.getMemory(uint32(instruction.immediates[0]))
+func (vm *vm) handleMemoryFill(frame *callFrame) error {
+	memory := vm.getMemory(uint32(frame.next()))
 	n, val, offset := vm.stack.pop3Int32()
 	return memory.Fill(uint32(n), uint32(offset), byte(val))
 }
 
-func (vm *vm) handleTableInit(instruction instruction) error {
-	element := vm.getElement(uint32(instruction.immediates[0]))
-	table := vm.getTable(uint32(instruction.immediates[1]))
+func (vm *vm) handleTableInit(frame *callFrame) error {
+	element := vm.getElement(uint32(frame.next()))
+	table := vm.getTable(uint32(frame.next()))
 	n, s, d := vm.stack.pop3Int32()
 
 	switch element.mode {
@@ -1480,44 +1430,44 @@ func (vm *vm) handleTableInit(instruction instruction) error {
 	}
 }
 
-func (vm *vm) handleElemDrop(instruction instruction) {
-	element := vm.getElement(uint32(instruction.immediates[0]))
+func (vm *vm) handleElemDrop(frame *callFrame) {
+	element := vm.getElement(uint32(frame.next()))
 	element.functionIndexes = nil
 	element.functionIndexesExpressions = nil
 }
 
-func (vm *vm) handleTableCopy(instruction instruction) error {
-	destTable := vm.getTable(uint32(instruction.immediates[0]))
-	srcTable := vm.getTable(uint32(instruction.immediates[1]))
+func (vm *vm) handleTableCopy(frame *callFrame) error {
+	destTable := vm.getTable(uint32(frame.next()))
+	srcTable := vm.getTable(uint32(frame.next()))
 	n, s, d := vm.stack.pop3Int32()
 	return srcTable.Copy(destTable, n, s, d)
 }
 
-func (vm *vm) handleTableGrow(instruction instruction) {
-	table := vm.getTable(uint32(instruction.immediates[0]))
+func (vm *vm) handleTableGrow(frame *callFrame) {
+	table := vm.getTable(uint32(frame.next()))
 	n := vm.stack.popInt32()
 	val := vm.stack.popInt32()
 	vm.stack.pushInt32(table.Grow(n, val))
 }
 
-func (vm *vm) handleTableSize(instruction instruction) {
-	table := vm.getTable(uint32(instruction.immediates[0]))
+func (vm *vm) handleTableSize(frame *callFrame) {
+	table := vm.getTable(uint32(frame.next()))
 	vm.stack.pushInt32(table.Size())
 }
 
-func (vm *vm) handleTableFill(instruction instruction) error {
-	table := vm.getTable(uint32(instruction.immediates[0]))
+func (vm *vm) handleTableFill(frame *callFrame) error {
+	table := vm.getTable(uint32(frame.next()))
 	n, val, i := vm.stack.pop3Int32()
 	return table.Fill(n, i, val)
 }
 
-func (vm *vm) handleI8x16Shuffle(instruction instruction) {
+func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
 
 	var lanes [16]byte
-	for i, imm := range instruction.immediates {
-		lanes[i] = byte(imm)
+	for i := range 16 {
+		lanes[i] = byte(frame.next())
 	}
 
 	vm.stack.pushV128(simdI8x16Shuffle(v1, v2, lanes))
@@ -1654,36 +1604,38 @@ func (vm *vm) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 
 func handleSimdExtractLane[R wasmNumber](
 	vm *vm,
-	instruction instruction,
+	frame *callFrame,
 	push func(R),
 	op func(v V128Value, laneIndex uint32) R,
 ) {
-	laneIndex := uint32(instruction.immediates[0])
+	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()
 	push(op(v, laneIndex))
 }
 
 func handleStore[T any](
 	vm *vm,
-	instruction instruction,
+	frame *callFrame,
 	val T,
 	store func(*Memory, uint32, uint32, T) error,
 ) error {
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
-	offset := uint32(instruction.immediates[2])
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(uint32(frame.next()))
+	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return store(memory, offset, index, val)
 }
 
 func handleLoad[T any, R any](
 	vm *vm,
-	instruction instruction,
+	frame *callFrame,
 	push func(R),
 	load func(*Memory, uint32, uint32) (T, error),
 	convert func(T) R,
 ) error {
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
-	offset := uint32(instruction.immediates[2])
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(uint32(frame.next()))
+	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := load(memory, offset, index)
 	if err != nil {
@@ -1694,12 +1646,13 @@ func handleLoad[T any, R any](
 }
 
 func (vm *vm) handleLoadV128FromBytes(
-	instruction instruction,
+	frame *callFrame,
 	fromBytes func(bytes []byte) V128Value,
 	sizeBytes uint32,
 ) error {
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
-	offset := uint32(instruction.immediates[2])
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(uint32(frame.next()))
+	offset := uint32(frame.next())
 	index := vm.stack.popInt32()
 
 	data, err := memory.Get(offset, uint32(index), sizeBytes)
@@ -1710,21 +1663,14 @@ func (vm *vm) handleLoadV128FromBytes(
 	return nil
 }
 
-func (vm *vm) handleSimdConst(instruction instruction) {
-	v := V128Value{
-		Low:  instruction.immediates[0],
-		High: instruction.immediates[1],
-	}
-	vm.stack.pushV128(v)
-}
-
 func (vm *vm) handleSimdLoadLane(
-	instruction instruction,
+	frame *callFrame,
 	laneSize uint32,
 ) error {
-	offset := uint32(instruction.immediates[2])
-	laneIndex := uint32(instruction.immediates[3])
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(uint32(frame.next()))
+	offset := uint32(frame.next())
+	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()
 	index := vm.stack.popInt32()
 
@@ -1738,26 +1684,26 @@ func (vm *vm) handleSimdLoadLane(
 }
 
 func (vm *vm) handleSimdStoreLane(
-	instruction instruction,
+	frame *callFrame,
 	laneSize uint32,
 ) error {
-	offset := uint32(instruction.immediates[2])
-	laneIndex := uint32(instruction.immediates[3])
-	memory := vm.getMemory(uint32(instruction.immediates[1]))
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(uint32(frame.next()))
+	offset := uint32(frame.next())
+	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()
 	index := vm.stack.popInt32()
 
 	laneData := extractLane(v, laneSize, laneIndex)
 	return memory.Set(offset, uint32(index), laneData)
 }
-
 func handleSimdReplaceLane[T wasmNumber](
 	vm *vm,
-	instruction instruction,
+	frame *callFrame,
 	pop func() T,
 	replaceLane func(V128Value, uint32, T) V128Value,
 ) {
-	laneIndex := uint32(instruction.immediates[0])
+	laneIndex := uint32(frame.next())
 	laneValue := pop()
 	vector := vm.stack.popV128()
 	vm.stack.pushV128(replaceLane(vector, laneIndex, laneValue))
@@ -1913,7 +1859,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 }
 
 func (vm *vm) invokeInitExpression(
-	expression []byte,
+	expression []uint64,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
 ) (value, error) {
