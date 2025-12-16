@@ -130,19 +130,25 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		if err != nil {
 			return nil, err
 		}
-		// TODO remove this allocation
-		vector := make([]uint64, size)
-		for i := uint64(0); i < size; i++ {
-			vector[i], err = d.next()
+		// Use the shared buffer if the table fits, otherwise allocate.
+		totalSize := int(size) + 1 // +1 for default label
+		var result []uint64
+		if totalSize <= len(immediatesBuffer) {
+			result = immediatesBuffer[:totalSize]
+		} else {
+			result = make([]uint64, totalSize)
+		}
+		for i := range size {
+			result[i], err = d.next()
 			if err != nil {
 				return nil, err
 			}
 		}
-		immediate, err := d.next()
+		result[size], err = d.next() // default label
 		if err != nil {
 			return nil, err
 		}
-		return append(vector, immediate), nil
+		return result, nil
 	case callIndirect,
 		memoryInit,
 		memoryCopy,
