@@ -296,7 +296,7 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	body, err := p.decodeBytecode()
+	body, err := p.readBytecode(nil)
 	if err != nil {
 		return function{}, fmt.Errorf("failed to read function body: %w", err)
 	}
@@ -685,18 +685,9 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	var bytecode []uint64
-	for {
-		instruction, err := p.readInstruction()
-		if err != nil {
-			return nil, err
-		}
-		if opcode(instruction[0]) == end {
-			break
-		}
-		bytecode = append(bytecode, instruction...)
-	}
-	return bytecode, nil
+	return p.readBytecode(func(instruction []uint64) bool {
+		return opcode(instruction[0]) == end
+	})
 }
 
 func (p *parser) parseLimits() (Limits, error) {
@@ -806,217 +797,216 @@ func getSectionOrder(id sectionId) int {
 	}
 }
 
-func (p *parser) decodeBytecode() ([]uint64, error) {
+func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 	bytecode := []uint64{}
+
 	for {
-		instruction, err := p.readInstruction()
-		if err == io.EOF {
-			break
-		}
+		// Start of inlined readInstruction
+		opcodeVal, err := p.readOpcode()
 		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, instruction...)
-	}
-	return bytecode, nil
-}
-
-func (p *parser) readInstruction() ([]uint64, error) {
-	bytecode := []uint64{}
-	opcode, err := p.readOpcode()
-	if err != nil {
-		return nil, err
-	}
-	bytecode = append(bytecode, uint64(opcode))
-
-	switch opcode {
-	case block, loop, ifOp:
-		immediate, err := p.readBlockType()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case i32Const:
-		immediate, err := p.readInt32()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case br,
-		brIf,
-		call,
-		localGet,
-		localSet,
-		localTee,
-		globalGet,
-		globalSet,
-		tableGet,
-		tableSet,
-		memoryFill,
-		dataDrop,
-		elemDrop,
-		tableGrow,
-		tableSize,
-		tableFill,
-		refNull,
-		refFunc,
-		i8x16ExtractLaneS,
-		i8x16ExtractLaneU,
-		i16x8ExtractLaneS,
-		i16x8ExtractLaneU,
-		i32x4ExtractLane,
-		i64x2ExtractLane,
-		f32x4ExtractLane,
-		f64x2ExtractLane,
-		i8x16ReplaceLane,
-		i16x8ReplaceLane,
-		i32x4ReplaceLane,
-		i64x2ReplaceLane,
-		f32x4ReplaceLane,
-		f64x2ReplaceLane:
-		immediate, err := p.readUint32()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case memorySize, memoryGrow:
-		immediate, err := p.reader.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, uint64(immediate))
-	case brTable:
-		vector, err := p.readImmediateVector()
-		if err != nil {
-			return nil, err
-		}
-		immediate, err := p.readUint32()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, uint64(len(vector)))
-		bytecode = append(bytecode, vector...)
-		bytecode = append(bytecode, immediate)
-	case callIndirect,
-		memoryInit,
-		memoryCopy,
-		tableInit,
-		tableCopy:
-		immediate1, err := p.readUint32()
-		if err != nil {
-			return nil, err
-		}
-		immediate2, err := p.readUint32()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate1, immediate2)
-	case i32Load,
-		i64Load,
-		f32Load,
-		f64Load,
-		i32Load8S,
-		i32Load8U,
-		i32Load16S,
-		i32Load16U,
-		i64Load8S,
-		i64Load8U,
-		i64Load16S,
-		i64Load16U,
-		i64Load32S,
-		i64Load32U,
-		i32Store,
-		i64Store,
-		f32Store,
-		f64Store,
-		i32Store8,
-		i32Store16,
-		i64Store8,
-		i64Store16,
-		i64Store32,
-		v128Load,
-		v128Load32Zero,
-		v128Load64Zero,
-		v128Load8Splat,
-		v128Load16Splat,
-		v128Load32Splat,
-		v128Load64Splat,
-		v128Load8x8S,
-		v128Load8x8U,
-		v128Load16x4S,
-		v128Load16x4U,
-		v128Load32x2S,
-		v128Load32x2U,
-		v128Store:
-		align, memoryIndex, offset, err := p.readMemArg()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, align, memoryIndex, offset)
-	case selectT:
-		vector, err := p.readImmediateVector()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, uint64(len(vector)))
-		bytecode = append(bytecode, vector...)
-	case i64Const:
-		immediate, err := p.readSleb128(10)
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case f32Const:
-		immediate, err := p.readFloat32()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case f64Const:
-		immediate, err := p.readFloat64()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, immediate)
-	case v128Const:
-		bytes, err := p.readBytes(16)
-		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			return nil, err
 		}
 
-		bytecode = append(
-			bytecode,
-			binary.LittleEndian.Uint64(bytes[0:8]),
-			binary.LittleEndian.Uint64(bytes[8:16]),
-		)
-	case v128Load8Lane,
-		v128Load16Lane,
-		v128Load32Lane,
-		v128Load64Lane,
-		v128Store8Lane,
-		v128Store16Lane,
-		v128Store32Lane,
-		v128Store64Lane:
-		align, memoryIndex, offset, err := p.readMemArg()
-		if err != nil {
-			return nil, err
-		}
+		currentInstructionStart := len(bytecode)
+		bytecode = append(bytecode, uint64(opcodeVal))
 
-		laneIndex, err := p.readUint8()
-		if err != nil {
-			return nil, err
-		}
-		bytecode = append(bytecode, align, memoryIndex, offset, laneIndex)
-	case i8x16Shuffle:
-		for range 16 {
-			val, err := p.readUint8()
+		switch opcodeVal {
+		case block, loop, ifOp:
+			immediate, err := p.readBlockType()
 			if err != nil {
 				return nil, err
 			}
-			bytecode = append(bytecode, uint64(val))
+			bytecode = append(bytecode, immediate)
+		case i32Const:
+			immediate, err := p.readInt32()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate)
+		case br,
+			brIf,
+			call,
+			localGet,
+			localSet,
+			localTee,
+			globalGet,
+			globalSet,
+			tableGet,
+			tableSet,
+			memoryFill,
+			dataDrop,
+			elemDrop,
+			tableGrow,
+			tableSize,
+			tableFill,
+			refNull,
+			refFunc,
+			i8x16ExtractLaneS,
+			i8x16ExtractLaneU,
+			i16x8ExtractLaneS,
+			i16x8ExtractLaneU,
+			i32x4ExtractLane,
+			i64x2ExtractLane,
+			f32x4ExtractLane,
+			f64x2ExtractLane,
+			i8x16ReplaceLane,
+			i16x8ReplaceLane,
+			i32x4ReplaceLane,
+			i64x2ReplaceLane,
+			f32x4ReplaceLane,
+			f64x2ReplaceLane:
+			immediate, err := p.readUint32()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate)
+		case memorySize, memoryGrow:
+			immediate, err := p.reader.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, uint64(immediate))
+		case brTable:
+			vector, err := p.readImmediateVector()
+			if err != nil {
+				return nil, err
+			}
+			immediate, err := p.readUint32()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, uint64(len(vector)))
+			bytecode = append(bytecode, vector...)
+			bytecode = append(bytecode, immediate)
+		case callIndirect,
+			memoryInit,
+			memoryCopy,
+			tableInit,
+			tableCopy:
+			immediate1, err := p.readUint32()
+			if err != nil {
+				return nil, err
+			}
+			immediate2, err := p.readUint32()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate1, immediate2)
+		case i32Load,
+			i64Load,
+			f32Load,
+			f64Load,
+			i32Load8S,
+			i32Load8U,
+			i32Load16S,
+			i32Load16U,
+			i64Load8S,
+			i64Load8U,
+			i64Load16S,
+			i64Load16U,
+			i64Load32S,
+			i64Load32U,
+			i32Store,
+			i64Store,
+			f32Store,
+			f64Store,
+			i32Store8,
+			i32Store16,
+			i64Store8,
+			i64Store16,
+			i64Store32,
+			v128Load,
+			v128Load32Zero,
+			v128Load64Zero,
+			v128Load8Splat,
+			v128Load16Splat,
+			v128Load32Splat,
+			v128Load64Splat,
+			v128Load8x8S,
+			v128Load8x8U,
+			v128Load16x4S,
+			v128Load16x4U,
+			v128Load32x2S,
+			v128Load32x2U,
+			v128Store:
+			align, memoryIndex, offset, err := p.readMemArg()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, align, memoryIndex, offset)
+		case selectT:
+			vector, err := p.readImmediateVector()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, uint64(len(vector)))
+			bytecode = append(bytecode, vector...)
+		case i64Const:
+			immediate, err := p.readSleb128(10)
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate)
+		case f32Const:
+			immediate, err := p.readFloat32()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate)
+		case f64Const:
+			immediate, err := p.readFloat64()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, immediate)
+		case v128Const:
+			bytes, err := p.readBytes(16)
+			if err != nil {
+				return nil, err
+			}
+
+			bytecode = append(
+				bytecode,
+				binary.LittleEndian.Uint64(bytes[0:8]),
+				binary.LittleEndian.Uint64(bytes[8:16]),
+			)
+		case v128Load8Lane,
+			v128Load16Lane,
+			v128Load32Lane,
+			v128Load64Lane,
+			v128Store8Lane,
+			v128Store16Lane,
+			v128Store32Lane,
+			v128Store64Lane:
+			align, memoryIndex, offset, err := p.readMemArg()
+			if err != nil {
+				return nil, err
+			}
+
+			laneIndex, err := p.readUint8()
+			if err != nil {
+				return nil, err
+			}
+			bytecode = append(bytecode, align, memoryIndex, offset, laneIndex)
+		case i8x16Shuffle:
+			for range 16 {
+				val, err := p.readUint8()
+				if err != nil {
+					return nil, err
+				}
+				bytecode = append(bytecode, uint64(val))
+			}
+		default:
+			// No operands
 		}
-	default:
-		return bytecode, nil
+
+		if isEnd != nil && isEnd(bytecode[currentInstructionStart:]) {
+			bytecode = bytecode[:currentInstructionStart]
+			break
+		}
 	}
 	return bytecode, nil
 }
