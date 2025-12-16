@@ -458,9 +458,3 @@ const (
 	f64x2ConvertLowI32x4S     opcode = 0xFDFE
 	f64x2ConvertLowI32x4U     opcode = 0xFDFF
 )
-
-// instruction represents a single decoded WASM instruction.
-type instruction struct {
-	opcode     opcode
-	immediates []uint64
-}
