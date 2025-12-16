@@ -60,7 +60,13 @@ func TestParseExportedFunction(t *testing.T) {
 			{
 				typeIndex: 0,
 				locals:    []ValueType{},
-				body:      []uint64{uint64(localGet), 0, uint64(localGet), 1, uint64(i32Add)},
+				body: []uint64{
+					uint64(localGet), 0,
+					uint64(localGet), 1,
+					uint64(i32Add),
+				},
+				jumpCache:     map[uint]uint{},
+				jumpElseCache: map[uint]uint{},
 			},
 		},
 		exports: []export{

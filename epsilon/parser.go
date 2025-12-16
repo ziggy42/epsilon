@@ -296,16 +296,22 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	body, err := p.readBytecode(nil)
+	result, err := p.readCode(nil)
 	if err != nil {
 		return function{}, fmt.Errorf("failed to read function body: %w", err)
 	}
 
+	body := result.bytecode
 	if len(body) == 0 || body[len(body)-1] != uint64(end) {
 		return function{}, fmt.Errorf("function body must end with End opcode")
 	}
 
-	return function{locals: locals, body: body[:len(body)-1]}, nil
+	return function{
+		locals:        locals,
+		body:          body[:len(body)-1],
+		jumpCache:     result.jumpCache,
+		jumpElseCache: result.jumpElseCache,
+	}, nil
 }
 
 func (p *parser) parseLocalVariables() (localEntry, error) {
@@ -685,9 +691,13 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	return p.readBytecode(func(instruction []uint64) bool {
+	result, err := p.readCode(func(instruction []uint64) bool {
 		return opcode(instruction[0]) == end
 	})
+	if err != nil {
+		return nil, err
+	}
+	return result.bytecode, nil
 }
 
 func (p *parser) parseLimits() (Limits, error) {
@@ -797,17 +807,33 @@ func getSectionOrder(id sectionId) int {
 	}
 }
 
-func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
+// controlEntry tracks a control flow instruction's position for building jump
+// caches.
+type controlEntry struct {
+	opcode opcode
+	pc     uint // Program counter of the first instruction in the block.
+}
+
+// bytecodeResult contains the parsed bytecode and precomputed jump caches.
+type bytecodeResult struct {
+	bytecode      []uint64
+	jumpCache     map[uint]uint
+	jumpElseCache map[uint]uint
+}
+
+func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 	bytecode := []uint64{}
+	jumpCache := map[uint]uint{}
+	jumpElseCache := map[uint]uint{}
+	controlStack := []controlEntry{}
 
 	for {
-		// Start of inlined readInstruction
 		opcodeVal, err := p.readOpcode()
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			return nil, err
+			return bytecodeResult{}, err
 		}
 
 		currentInstructionStart := len(bytecode)
@@ -817,13 +843,44 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 		case block, loop, ifOp:
 			immediate, err := p.readBlockType()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
+			controlStack = append(controlStack, controlEntry{
+				opcode: opcodeVal,
+				pc:     uint(len(bytecode)),
+			})
+		case elseOp:
+			if len(controlStack) > 0 {
+				top := &controlStack[len(controlStack)-1]
+				if top.opcode == ifOp {
+					jumpElseCache[top.pc] = uint(len(bytecode))
+				}
+			}
+		case end:
+			if len(controlStack) > 0 {
+				top := controlStack[len(controlStack)-1]
+				controlStack = controlStack[:len(controlStack)-1]
+
+				// Loops branch back to their start so we do not need to cache their end
+				// position.
+				if top.opcode != loop {
+					jumpCache[top.pc] = uint(len(bytecode))
+				}
+
+				// If this is an if without an else, record the position of the end
+				// opcode in the jumpElseCache as this is the opcode to execute if the
+				// if is not taken.
+				if top.opcode == ifOp {
+					if _, hasElse := jumpElseCache[top.pc]; !hasElse {
+						jumpElseCache[top.pc] = uint(len(bytecode)) - 1
+					}
+				}
+			}
 		case i32Const:
 			immediate, err := p.readInt32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
 		case br,
@@ -860,23 +917,23 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 			f64x2ReplaceLane:
 			immediate, err := p.readUint32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
 		case memorySize, memoryGrow:
 			immediate, err := p.reader.ReadByte()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, uint64(immediate))
 		case brTable:
 			vector, err := p.readImmediateVector()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			immediate, err := p.readUint32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, uint64(len(vector)))
 			bytecode = append(bytecode, vector...)
@@ -888,11 +945,11 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 			tableCopy:
 			immediate1, err := p.readUint32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			immediate2, err := p.readUint32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate1, immediate2)
 		case i32Load,
@@ -934,38 +991,38 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 			v128Store:
 			align, memoryIndex, offset, err := p.readMemArg()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, align, memoryIndex, offset)
 		case selectT:
 			vector, err := p.readImmediateVector()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, uint64(len(vector)))
 			bytecode = append(bytecode, vector...)
 		case i64Const:
 			immediate, err := p.readSleb128(10)
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
 		case f32Const:
 			immediate, err := p.readFloat32()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
 		case f64Const:
 			immediate, err := p.readFloat64()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, immediate)
 		case v128Const:
 			bytes, err := p.readBytes(16)
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 
 			bytecode = append(
@@ -983,19 +1040,19 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 			v128Store64Lane:
 			align, memoryIndex, offset, err := p.readMemArg()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 
 			laneIndex, err := p.readUint8()
 			if err != nil {
-				return nil, err
+				return bytecodeResult{}, err
 			}
 			bytecode = append(bytecode, align, memoryIndex, offset, laneIndex)
 		case i8x16Shuffle:
 			for range 16 {
 				val, err := p.readUint8()
 				if err != nil {
-					return nil, err
+					return bytecodeResult{}, err
 				}
 				bytecode = append(bytecode, uint64(val))
 			}
@@ -1008,7 +1065,11 @@ func (p *parser) readBytecode(isEnd func([]uint64) bool) ([]uint64, error) {
 			break
 		}
 	}
-	return bytecode, nil
+	return bytecodeResult{
+		bytecode:      bytecode,
+		jumpCache:     jumpCache,
+		jumpElseCache: jumpElseCache,
+	}, nil
 }
 
 func (p *parser) readOpcode() (opcode, error) {

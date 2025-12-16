@@ -18,6 +18,13 @@ type function struct {
 	typeIndex uint32
 	locals    []ValueType
 	body      []uint64
+	// jumpCache maps the position of the first instruction inside a block/if to
+	// the position of the instruction after the matching 'end'.
+	jumpCache map[uint]uint
+	// jumpElseCache maps the position of the first instruction inside an 'if' to
+	// the position of the instruction after the matching 'else' (or 'end' if no
+	// else).
+	jumpElseCache map[uint]uint
 }
 
 type exportIndexKind int

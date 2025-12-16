@@ -106,7 +106,11 @@ func (vm *vm) instantiate(
 	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.types[function.typeIndex]
-		wasmFunc := newWasmFunction(funType, moduleInstance, function)
+		wasmFunc := &wasmFunction{
+			functionType: funType,
+			module:       moduleInstance,
+			code:         function,
+		}
 		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
@@ -294,9 +298,9 @@ func (vm *vm) handleInstruction(instruction instruction) error {
 	case nop:
 		// Do nothing.
 	case block, loop:
-		err = vm.handleStructured(instruction)
+		vm.handleStructured(instruction)
 	case ifOp:
-		err = vm.handleIf(instruction)
+		vm.handleIf(instruction)
 	case elseOp:
 		vm.handleElse()
 	case end:
@@ -1175,7 +1179,7 @@ func (vm *vm) currentModuleInstance() *ModuleInstance {
 	return vm.currentCallFrame().function.module
 }
 
-func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
+func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	callFrame := vm.currentCallFrame()
 	originalPc := callFrame.decoder.pc
 	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
@@ -1190,66 +1194,31 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) error {
 	if opcode == loop {
 		frame.continuationPc = originalPc
 	} else {
-		if cachedPc, ok := callFrame.function.jumpCache[originalPc]; ok {
-			frame.continuationPc = cachedPc
-		} else {
-			// Cache miss: we need to scan forward to find the matching 'end'.
-			if err := callFrame.decoder.decodeUntilMatchingEnd(); err != nil {
-				return err
-			}
-
-			callFrame.function.jumpCache[originalPc] = callFrame.decoder.pc
-			frame.continuationPc = callFrame.decoder.pc
-			callFrame.decoder.pc = originalPc
-		}
+		frame.continuationPc = callFrame.function.code.jumpCache[originalPc]
 	}
 
 	vm.pushControlFrame(frame)
-	return nil
 }
 
-func (vm *vm) handleStructured(instruction instruction) error {
+func (vm *vm) handleStructured(instruction instruction) {
 	blockType := int32(instruction.immediates[0])
-	return vm.pushBlockFrame(instruction.opcode, blockType)
+	vm.pushBlockFrame(instruction.opcode, blockType)
 }
 
-func (vm *vm) handleIf(instruction instruction) error {
+func (vm *vm) handleIf(instruction instruction) {
 	frame := vm.currentCallFrame()
 	blockType := int32(instruction.immediates[0])
 	originalPc := frame.decoder.pc
 
 	condition := vm.stack.popInt32()
 
-	if err := vm.pushBlockFrame(ifOp, blockType); err != nil {
-		return err
-	}
+	vm.pushBlockFrame(ifOp, blockType)
 
 	if condition != 0 {
-		return nil
+		return
 	}
 
-	// We need to jump to the 'else' or 'end'.
-	if elsePc, ok := frame.function.jumpElseCache[originalPc]; ok {
-		frame.decoder.pc = elsePc
-		return nil
-	}
-
-	// Cache miss, we need to find the matching Else or End.
-	matchingOpcode, err := frame.decoder.decodeUntilMatchingElseOrEnd()
-	if err != nil {
-		return err
-	}
-
-	if matchingOpcode == elseOp {
-		// We need to consume the Else instruction and jump to the next "actual"
-		// instruction after it.
-		if _, err := frame.decoder.decode(); err != nil {
-			return err
-		}
-	}
-
-	frame.function.jumpElseCache[originalPc] = frame.decoder.pc
-	return nil
+	frame.decoder.pc = frame.function.code.jumpElseCache[originalPc]
 }
 
 func (vm *vm) handleElse() {
