@@ -305,7 +305,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case nop:
 		// Do nothing.
 	case block, loop:
-		vm.handleStructured(frame, op)
+		vm.pushBlockFrame(op, int32(frame.next()))
 	case ifOp:
 		vm.handleIf(frame)
 	case elseOp:
@@ -313,7 +313,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case end:
 		vm.handleEnd()
 	case br:
-		vm.handleBr(frame)
+		vm.brToLabel(uint32(frame.next()))
 	case brIf:
 		vm.handleBrIf(frame)
 	case brTable:
@@ -728,7 +728,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case v128Store:
 		err = handleStore(vm, frame, vm.stack.popV128(), (*Memory).StoreV128)
 	case v128Const:
-		vm.handleSimdConst(frame)
+		vm.stack.pushV128(V128Value{Low: frame.next(), High: frame.next()})
 	case i8x16Shuffle:
 		vm.handleI8x16Shuffle(frame)
 	case i8x16Swizzle:
@@ -1210,11 +1210,6 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	vm.pushControlFrame(frame)
 }
 
-func (vm *vm) handleStructured(frame *callFrame, op opcode) {
-	blockType := int32(frame.next())
-	vm.pushBlockFrame(op, blockType)
-}
-
 func (vm *vm) handleIf(frame *callFrame) {
 	blockType := int32(frame.next())
 	originalPc := frame.pc
@@ -1243,11 +1238,6 @@ func (vm *vm) handleEnd() {
 	vm.stack.unwind(frame.stackHeight, frame.outputCount)
 }
 
-func (vm *vm) handleBr(frame *callFrame) {
-	labelIndex := uint32(frame.next())
-	vm.brToLabel(labelIndex)
-}
-
 func (vm *vm) handleBrIf(frame *callFrame) {
 	labelIndex := uint32(frame.next())
 	val := vm.stack.popInt32()
@@ -1260,18 +1250,13 @@ func (vm *vm) handleBrIf(frame *callFrame) {
 func (vm *vm) handleBrTable(frame *callFrame) {
 	size := frame.next()
 	index := vm.stack.popInt32()
-	// Read table entries to find the target
 	var targetLabel uint32
-	for i := range size {
-		label := uint32(frame.next())
-		if int32(i) == index {
-			targetLabel = label
-		}
+	if index >= 0 && uint64(index) < size {
+		targetLabel = uint32(frame.code[frame.pc+uint(index)])
+	} else {
+		targetLabel = uint32(frame.code[frame.pc+uint(size)])
 	}
-	defaultLabel := uint32(frame.next())
-	if index < 0 || int(index) >= int(size) {
-		targetLabel = defaultLabel
-	}
+	frame.pc += uint(size) + 1
 	vm.brToLabel(targetLabel)
 }
 
@@ -1676,14 +1661,6 @@ func (vm *vm) handleLoadV128FromBytes(
 	}
 	vm.stack.pushV128(fromBytes(data))
 	return nil
-}
-
-func (vm *vm) handleSimdConst(frame *callFrame) {
-	v := V128Value{
-		Low:  frame.next(),
-		High: frame.next(),
-	}
-	vm.stack.pushV128(v)
 }
 
 func (vm *vm) handleSimdLoadLane(
