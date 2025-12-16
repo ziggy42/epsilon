@@ -1117,13 +1117,7 @@ func (p *parser) readImmediateVector() ([]uint64, error) {
 		return nil, err
 	}
 
-	var immediates []uint64
-	if int(size) <= len(immediatesBuffer) {
-		immediates = immediatesBuffer[:size]
-	} else {
-		immediates = make([]uint64, size)
-	}
-
+	immediates := make([]uint64, size)
 	for i := range size {
 		val, err := p.readUint32()
 		if err != nil {
