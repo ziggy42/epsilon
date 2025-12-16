@@ -207,15 +207,19 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		if err != nil {
 			return nil, err
 		}
-		// TODO remove this allocation
-		vector := make([]uint64, size)
-		for i := uint64(0); i < size; i++ {
-			vector[i], err = d.next()
+		var result []uint64
+		if int(size) <= len(immediatesBuffer) {
+			result = immediatesBuffer[:size]
+		} else {
+			result = make([]uint64, size)
+		}
+		for i := range size {
+			result[i], err = d.next()
 			if err != nil {
 				return nil, err
 			}
 		}
-		return vector, nil
+		return result, nil
 	case i64Const:
 		immediate, err := d.next()
 		if err != nil {
