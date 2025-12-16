@@ -27,10 +27,6 @@ type decoder struct {
 	pc   uint
 }
 
-func newDecoder(code []uint64) *decoder {
-	return &decoder{code: code, pc: 0}
-}
-
 func (d *decoder) hasMore() bool {
 	return d.pc < uint(len(d.code))
 }
