@@ -28,12 +28,19 @@ import (
 var (
 	errElementKindNotZero                = errors.New("element kind for passive element segment must be 0x00")
 	errIncompatibleNumberOfFunctionTypes = errors.New("incompatible number of function types")
+	errIntRepresentationTooLong          = errors.New("integer representation too long")
+	errIntegerTooLarge                   = errors.New("integer too large")
+	errMalformedMemopFlags               = errors.New("malformed memop flags")
 )
 
 const (
 	wasmMagicNumber      = "\x00asm"
 	supportedWasmVersion = 1
 	defaultTableIndex    = 0
+	continuationBit      = 0x80
+	payloadMask          = 0x7F
+	signBit              = 0x40
+	sixthBitMask         = uint64(1 << 6)
 )
 
 // sectionId represents the different sections of a WebAssembly module.

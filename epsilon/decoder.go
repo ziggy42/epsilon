@@ -14,23 +14,7 @@
 
 package epsilon
 
-import (
-	"errors"
-	"io"
-)
-
-var (
-	errIntRepresentationTooLong = errors.New("integer representation too long")
-	errIntegerTooLarge          = errors.New("integer too large")
-	errMalformedMemopFlags      = errors.New("malformed memop flags")
-)
-
-const (
-	continuationBit = 0x80
-	payloadMask     = 0x7F
-	signBit         = 0x40
-	sixthBitMask    = uint64(1 << 6)
-)
+import "io"
 
 // This buffer exists for performance reasons: it makes sure only a single
 // allocation is done to parse the immediates across multiple Decode invocations
