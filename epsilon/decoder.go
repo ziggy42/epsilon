@@ -50,21 +50,11 @@ func (d *decoder) decode() (instruction, error) {
 
 func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 	switch opcode {
-	case block, loop, ifOp:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case i32Const:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case br,
+	case block,
+		loop,
+		ifOp,
+		i32Const,
+		br,
 		brIf,
 		call,
 		localGet,
@@ -82,6 +72,8 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		tableFill,
 		refNull,
 		refFunc,
+		memorySize,
+		memoryGrow,
 		i8x16ExtractLaneS,
 		i8x16ExtractLaneU,
 		i16x8ExtractLaneS,
@@ -95,14 +87,10 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		i32x4ReplaceLane,
 		i64x2ReplaceLane,
 		f32x4ReplaceLane,
-		f64x2ReplaceLane:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case memorySize, memoryGrow:
+		f64x2ReplaceLane,
+		i64Const,
+		f32Const,
+		f64Const:
 		immediate, err := d.next()
 		if err != nil {
 			return nil, err
@@ -137,7 +125,8 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 		memoryInit,
 		memoryCopy,
 		tableInit,
-		tableCopy:
+		tableCopy,
+		v128Const:
 		immediate1, err := d.next()
 		if err != nil {
 			return nil, err
@@ -220,39 +209,6 @@ func (d *decoder) readOpcodeImmediates(opcode opcode) ([]uint64, error) {
 			}
 		}
 		return result, nil
-	case i64Const:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case f32Const:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case f64Const:
-		immediate, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate
-		return immediatesBuffer[:1], nil
-	case v128Const:
-		immediate1, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediate2, err := d.next()
-		if err != nil {
-			return nil, err
-		}
-		immediatesBuffer[0] = immediate1
-		immediatesBuffer[1] = immediate2
-		return immediatesBuffer[:2], nil
 	case v128Load8Lane,
 		v128Load16Lane,
 		v128Load32Lane,
