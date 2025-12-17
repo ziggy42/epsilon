@@ -50,7 +50,7 @@ type store struct {
 
 type callFrame struct {
 	code         []uint64
-	pc           uint
+	pc           uint32
 	controlStack []controlFrame
 	locals       []value
 	function     *wasmFunction
@@ -64,11 +64,10 @@ func (f *callFrame) next() uint64 {
 
 // controlFrame represents a block of code that can be branched to.
 type controlFrame struct {
-	opcode         opcode // The opcode that created this control frame.
-	continuationPc uint   // The address to jump to when `br` targets this frame.
-	inputCount     uint   // Count of inputs this control instruction consumes.
-	outputCount    uint   // Count of outputs this control instruction produces.
-	stackHeight    uint
+	isLoop         bool
+	blockType      int32
+	continuationPc uint32 // The address to jump to when `br` targets this frame.
+	stackHeight    uint32
 }
 
 // vm is the WebAssembly Virtual Machine.
@@ -265,10 +264,9 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	max := blockDepth + controlStackCacheSlotSize
 	controlStack := vm.controlStackCache[blockDepth:blockDepth:max]
 	controlStack = append(controlStack, controlFrame{
-		opcode:         block,
-		continuationPc: uint(len(function.code.body)),
-		inputCount:     uint(len(function.functionType.ParamTypes)),
-		outputCount:    uint(len(function.functionType.ResultTypes)),
+		isLoop:         false,
+		blockType:      int32(function.code.typeIndex),
+		continuationPc: uint32(len(function.code.body)),
 		stackHeight:    vm.stack.size(),
 	})
 
@@ -281,7 +279,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	})
 	frame := &vm.callStack[len(vm.callStack)-1]
 
-	for frame.pc < uint(len(frame.code)) {
+	for frame.pc < uint32(len(frame.code)) {
 		if err := vm.executeInstruction(frame); err != nil {
 			if errors.Is(err, errReturn) {
 				break // A 'return' instruction was executed.
@@ -330,7 +328,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		vm.handleSelect()
 	case selectT:
 		count := frame.next()
-		frame.pc += uint(count)
+		frame.pc += uint32(count)
 		vm.handleSelect()
 	case localGet:
 		vm.stack.push(frame.locals[frame.next()])
@@ -1191,23 +1189,20 @@ func (vm *vm) currentModuleInstance() *ModuleInstance {
 
 func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	callFrame := vm.currentCallFrame()
-	originalPc := callFrame.pc
-	inputCount, outputCount := vm.getBlockInputOutputCount(blockType)
-	frame := controlFrame{
-		opcode:      opcode,
-		inputCount:  inputCount,
-		outputCount: outputCount,
-		stackHeight: vm.stack.size(),
-	}
-
 	// For loops, the continuation is a branch back to the start of the block.
+	var continuationPc uint32
 	if opcode == loop {
-		frame.continuationPc = originalPc
+		continuationPc = callFrame.pc
 	} else {
-		frame.continuationPc = callFrame.function.code.jumpCache[originalPc]
+		continuationPc = callFrame.function.code.jumpCache[callFrame.pc]
 	}
 
-	vm.pushControlFrame(frame)
+	vm.pushControlFrame(controlFrame{
+		isLoop:         opcode == loop,
+		blockType:      blockType,
+		stackHeight:    vm.stack.size(),
+		continuationPc: continuationPc,
+	})
 }
 
 func (vm *vm) handleIf(frame *callFrame) {
@@ -1235,7 +1230,9 @@ func (vm *vm) handleElse(frame *callFrame) {
 
 func (vm *vm) handleEnd() {
 	frame := vm.popControlFrame()
-	vm.stack.unwind(frame.stackHeight, frame.outputCount)
+	callFrame := vm.currentCallFrame()
+	outputCount := vm.getOutputCount(callFrame.function.module, frame.blockType)
+	vm.stack.unwind(frame.stackHeight, outputCount)
 }
 
 func (vm *vm) handleBrIf(frame *callFrame) {
@@ -1252,11 +1249,11 @@ func (vm *vm) handleBrTable(frame *callFrame) {
 	index := vm.stack.popInt32()
 	var targetLabel uint32
 	if index >= 0 && uint64(index) < size {
-		targetLabel = uint32(frame.code[frame.pc+uint(index)])
+		targetLabel = uint32(frame.code[frame.pc+uint32(index)])
 	} else {
-		targetLabel = uint32(frame.code[frame.pc+uint(size)])
+		targetLabel = uint32(frame.code[frame.pc+uint32(size)])
 	}
-	frame.pc += uint(size) + 1
+	frame.pc += uint32(size) + 1
 	vm.brToLabel(targetLabel)
 }
 
@@ -1267,15 +1264,15 @@ func (vm *vm) brToLabel(labelIndex uint32) {
 	targetFrame := callFrame.controlStack[targetIndex]
 	callFrame.controlStack = callFrame.controlStack[:targetIndex]
 
-	var arity uint
-	if targetFrame.opcode == loop {
-		arity = targetFrame.inputCount
+	var arity uint32
+	if targetFrame.isLoop {
+		arity = vm.getInputCount(callFrame.function.module, targetFrame.blockType)
 	} else {
-		arity = targetFrame.outputCount
+		arity = vm.getOutputCount(callFrame.function.module, targetFrame.blockType)
 	}
 
 	vm.stack.unwind(targetFrame.stackHeight, arity)
-	if targetFrame.opcode == loop {
+	if targetFrame.isLoop {
 		vm.pushControlFrame(targetFrame)
 	}
 
@@ -1709,17 +1706,30 @@ func handleSimdReplaceLane[T wasmNumber](
 	vm.stack.pushV128(replaceLane(vector, laneIndex, laneValue))
 }
 
-func (vm *vm) getBlockInputOutputCount(blockType int32) (uint, uint) {
+func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
 	if blockType == -0x40 { // empty block type.
-		return 0, 0
+		return 0
 	}
 
 	if blockType >= 0 { // type index.
-		funcType := vm.currentModuleInstance().types[blockType]
-		return uint(len(funcType.ParamTypes)), uint(len(funcType.ResultTypes))
+		funcType := module.types[blockType]
+		return uint32(len(funcType.ParamTypes))
 	}
 
-	return 0, 1 // value type.
+	return 0 // value type.
+}
+
+func (vm *vm) getOutputCount(module *ModuleInstance, blockType int32) uint32 {
+	if blockType == -0x40 { // empty block type.
+		return 0
+	}
+
+	if blockType >= 0 { // type index.
+		funcType := module.types[blockType]
+		return uint32(len(funcType.ResultTypes))
+	}
+
+	return 1 // value type.
 }
 
 func (vm *vm) pushControlFrame(frame controlFrame) {

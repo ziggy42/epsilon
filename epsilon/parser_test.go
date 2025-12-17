@@ -65,8 +65,8 @@ func TestParseExportedFunction(t *testing.T) {
 					uint64(localGet), 1,
 					uint64(i32Add),
 				},
-				jumpCache:     map[uint]uint{},
-				jumpElseCache: map[uint]uint{},
+				jumpCache:     map[uint32]uint32{},
+				jumpElseCache: map[uint32]uint32{},
 			},
 		},
 		exports: []export{

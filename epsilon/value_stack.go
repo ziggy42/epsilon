@@ -120,12 +120,12 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 	return result
 }
 
-func (s *valueStack) unwind(targetHeight, preserveCount uint) {
+func (s *valueStack) unwind(targetHeight, preserveCount uint32) {
 	valuesToPreserve := s.data[s.size()-preserveCount:]
 	s.data = s.data[:targetHeight]
 	s.data = append(s.data, valuesToPreserve...)
 }
 
-func (s *valueStack) size() uint {
-	return uint(len(s.data))
+func (s *valueStack) size() uint32 {
+	return uint32(len(s.data))
 }

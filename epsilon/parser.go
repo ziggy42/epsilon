@@ -818,20 +818,20 @@ func getSectionOrder(id sectionId) int {
 // caches.
 type controlEntry struct {
 	opcode opcode
-	pc     uint // Program counter of the first instruction in the block.
+	pc     uint32 // Program counter of the first instruction in the block.
 }
 
 // bytecodeResult contains the parsed bytecode and precomputed jump caches.
 type bytecodeResult struct {
 	bytecode      []uint64
-	jumpCache     map[uint]uint
-	jumpElseCache map[uint]uint
+	jumpCache     map[uint32]uint32
+	jumpElseCache map[uint32]uint32
 }
 
 func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 	bytecode := []uint64{}
-	jumpCache := map[uint]uint{}
-	jumpElseCache := map[uint]uint{}
+	jumpCache := map[uint32]uint32{}
+	jumpElseCache := map[uint32]uint32{}
 	controlStack := []controlEntry{}
 
 	for {
@@ -855,13 +855,13 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 			bytecode = append(bytecode, immediate)
 			controlStack = append(controlStack, controlEntry{
 				opcode: opcodeVal,
-				pc:     uint(len(bytecode)),
+				pc:     uint32(len(bytecode)),
 			})
 		case elseOp:
 			if len(controlStack) > 0 {
 				top := &controlStack[len(controlStack)-1]
 				if top.opcode == ifOp {
-					jumpElseCache[top.pc] = uint(len(bytecode))
+					jumpElseCache[top.pc] = uint32(len(bytecode))
 				}
 			}
 		case end:
@@ -872,7 +872,7 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 				// Loops branch back to their start so we do not need to cache their end
 				// position.
 				if top.opcode != loop {
-					jumpCache[top.pc] = uint(len(bytecode))
+					jumpCache[top.pc] = uint32(len(bytecode))
 				}
 
 				// If this is an if without an else, record the position of the end
@@ -880,7 +880,7 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 				// if is not taken.
 				if top.opcode == ifOp {
 					if _, hasElse := jumpElseCache[top.pc]; !hasElse {
-						jumpElseCache[top.pc] = uint(len(bytecode)) - 1
+						jumpElseCache[top.pc] = uint32(len(bytecode)) - 1
 					}
 				}
 			}
