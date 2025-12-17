@@ -29,9 +29,9 @@ var (
 
 const (
 	maxCallStackDepth         = 1000
-	controlStackCacheSlotSize = 16 // Control stack slot size per call frame.
+	controlStackCacheSlotSize = 14 // Control stack slot size per call frame.
 	controlStackCacheSize     = maxCallStackDepth * controlStackCacheSlotSize
-	localsCacheSlotSize       = 16 // Locals slot size per call frame.
+	localsCacheSlotSize       = 12 // Locals slot size per call frame.
 	localsCacheSize           = maxCallStackDepth * localsCacheSlotSize
 )
 
