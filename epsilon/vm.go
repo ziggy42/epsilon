@@ -75,7 +75,6 @@ type vm struct {
 	store             *store
 	stack             *valueStack
 	callStack         []callFrame
-	callStackDepth    int
 	controlStackCache [controlStackCacheSize]controlFrame
 	localsCache       [localsCacheSize]value
 	features          ExperimentalFeatures
@@ -230,17 +229,15 @@ func (vm *vm) invokeFunction(function FunctionInstance) error {
 }
 
 func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
-	if vm.callStackDepth >= maxCallStackDepth {
+	if len(vm.callStack) >= maxCallStackDepth {
 		return errCallStackExhausted
 	}
-	vm.callStackDepth++
-	defer func() { vm.callStackDepth-- }()
 
 	numParams := len(function.functionType.ParamTypes)
 	numLocals := numParams + len(function.code.locals)
 	var locals []value
 	if numLocals <= localsCacheSlotSize {
-		blockDepth := (vm.callStackDepth - 1) * localsCacheSlotSize
+		blockDepth := len(vm.callStack) * localsCacheSlotSize
 		max := blockDepth + localsCacheSlotSize
 		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
 		// Clear non-parameter locals to their zero values. WASM allows reading
@@ -259,7 +256,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	vm.stack.data = vm.stack.data[:newLen]
 
 	// Use part of the cache for the control stack to avoid allocations.
-	blockDepth := (vm.callStackDepth - 1) * controlStackCacheSlotSize
+	blockDepth := len(vm.callStack) * controlStackCacheSlotSize
 	// Slice cap to prevent appending into the next slot.
 	max := blockDepth + controlStackCacheSlotSize
 	controlStack := vm.controlStackCache[blockDepth:blockDepth:max]
@@ -284,6 +281,8 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 			if errors.Is(err, errReturn) {
 				break // A 'return' instruction was executed.
 			}
+			// Ensure we pop the stack frame even if executeInstruction fails.
+			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return err
 		}
 	}
