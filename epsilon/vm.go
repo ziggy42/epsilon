@@ -1190,10 +1190,6 @@ func (vm *vm) currentCallFrame() *callFrame {
 	return &vm.callStack[len(vm.callStack)-1]
 }
 
-func (vm *vm) currentModuleInstance() *ModuleInstance {
-	return vm.currentCallFrame().module
-}
-
 func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	callFrame := vm.currentCallFrame()
 	// For loops, the continuation is a branch back to the start of the block.
@@ -1293,7 +1289,7 @@ func (vm *vm) handleCallIndirect(frame *callFrame) error {
 	typeIndex := uint32(frame.next())
 	tableIndex := uint32(frame.next())
 
-	expectedType := vm.currentModuleInstance().types[typeIndex]
+	expectedType := vm.currentCallFrame().module.types[typeIndex]
 	table := vm.getTable(tableIndex)
 
 	elementIndex := vm.stack.popInt32()
@@ -1375,7 +1371,7 @@ func (vm *vm) handleMemoryGrow(frame *callFrame) {
 
 func (vm *vm) handleRefFunc(frame *callFrame) {
 	funcIndex := uint32(frame.next())
-	storeIndex := vm.currentModuleInstance().funcAddrs[funcIndex]
+	storeIndex := vm.currentCallFrame().module.funcAddrs[funcIndex]
 	vm.stack.pushInt32(int32(storeIndex))
 }
 
@@ -1423,7 +1419,7 @@ func (vm *vm) handleTableInit(frame *callFrame) error {
 		}
 		return table.Init(n, d, s, element.functionIndexes)
 	case passiveElementMode:
-		moduleInstance := vm.currentModuleInstance()
+		moduleInstance := vm.currentCallFrame().module
 		storeIndexes := toStoreFuncIndexes(moduleInstance, element.functionIndexes)
 		return table.Init(n, d, s, storeIndexes)
 	default:
@@ -1905,31 +1901,31 @@ func toStoreFuncIndexes(
 }
 
 func (vm *vm) getFunction(localIndex uint32) FunctionInstance {
-	functionIndex := vm.currentModuleInstance().funcAddrs[localIndex]
+	functionIndex := vm.currentCallFrame().module.funcAddrs[localIndex]
 	return vm.store.funcs[functionIndex]
 }
 
 func (vm *vm) getTable(localIndex uint32) *Table {
-	tableIndex := vm.currentModuleInstance().tableAddrs[localIndex]
+	tableIndex := vm.currentCallFrame().module.tableAddrs[localIndex]
 	return vm.store.tables[tableIndex]
 }
 
 func (vm *vm) getMemory(localIndex uint32) *Memory {
-	memoryIndex := vm.currentModuleInstance().memAddrs[localIndex]
+	memoryIndex := vm.currentCallFrame().module.memAddrs[localIndex]
 	return vm.store.memories[memoryIndex]
 }
 
 func (vm *vm) getGlobal(localIndex uint32) *Global {
-	globalIndex := vm.currentModuleInstance().globalAddrs[localIndex]
+	globalIndex := vm.currentCallFrame().module.globalAddrs[localIndex]
 	return vm.store.globals[globalIndex]
 }
 
 func (vm *vm) getElement(localIndex uint32) *elementSegment {
-	elementIndex := vm.currentModuleInstance().elemAddrs[localIndex]
+	elementIndex := vm.currentCallFrame().module.elemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 
 func (vm *vm) getData(localIndex uint32) *dataSegment {
-	dataIndex := vm.currentModuleInstance().dataAddrs[localIndex]
+	dataIndex := vm.currentCallFrame().module.dataAddrs[localIndex]
 	return &vm.store.datas[dataIndex]
 }
