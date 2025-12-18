@@ -274,9 +274,17 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		locals:       locals,
 		function:     function,
 	})
-	frame := &vm.callStack[len(vm.callStack)-1]
 
-	for frame.pc < uint32(len(frame.code)) {
+	for {
+		// We must re-fetch the frame pointer on each iteration because nested calls
+		// may append to vm.callStack, causing the slice to reallocate and
+		// invalidate any previously held pointers. This pointer is safe to use
+		// within a single instruction execution since no handler uses it after
+		// invoking a nested call.
+		frame := &vm.callStack[len(vm.callStack)-1]
+		if frame.pc >= uint32(len(frame.code)) {
+			break
+		}
 		if err := vm.executeInstruction(frame); err != nil {
 			if errors.Is(err, errReturn) {
 				break // A 'return' instruction was executed.
