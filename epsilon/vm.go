@@ -1213,18 +1213,15 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 }
 
 func (vm *vm) handleIf(frame *callFrame) {
-	blockType := int32(frame.next())
-	originalPc := frame.pc
-
 	condition := vm.stack.popInt32()
 
-	vm.pushBlockFrame(ifOp, blockType)
+	vm.pushBlockFrame(ifOp, int32(frame.next()))
 
 	if condition != 0 {
 		return
 	}
 
-	frame.pc = frame.function.code.jumpElseCache[originalPc]
+	frame.pc = frame.function.code.jumpElseCache[frame.pc]
 }
 
 func (vm *vm) handleElse(frame *callFrame) {
