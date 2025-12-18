@@ -49,15 +49,15 @@ type store struct {
 }
 
 type callFrame struct {
-	code         []uint64
 	pc           uint32
 	controlStack []controlFrame
 	locals       []value
-	function     *wasmFunction
+	function     *function
+	module       *ModuleInstance
 }
 
 func (f *callFrame) next() uint64 {
-	val := f.code[f.pc]
+	val := f.function.body[f.pc]
 	f.pc++
 	return val
 }
@@ -268,11 +268,11 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	})
 
 	vm.callStack = append(vm.callStack, callFrame{
-		code:         function.code.body,
 		pc:           0,
 		controlStack: controlStack,
 		locals:       locals,
-		function:     function,
+		function:     &function.code,
+		module:       function.module,
 	})
 
 	for {
@@ -282,7 +282,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		// within a single instruction execution since no handler uses it after
 		// invoking a nested call.
 		frame := &vm.callStack[len(vm.callStack)-1]
-		if frame.pc >= uint32(len(frame.code)) {
+		if frame.pc >= uint32(len(frame.function.body)) {
 			break
 		}
 		if err := vm.executeInstruction(frame); err != nil {
@@ -1191,7 +1191,7 @@ func (vm *vm) currentCallFrame() *callFrame {
 }
 
 func (vm *vm) currentModuleInstance() *ModuleInstance {
-	return vm.currentCallFrame().function.module
+	return vm.currentCallFrame().module
 }
 
 func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
@@ -1201,7 +1201,7 @@ func (vm *vm) pushBlockFrame(opcode opcode, blockType int32) {
 	if opcode == loop {
 		continuationPc = callFrame.pc
 	} else {
-		continuationPc = callFrame.function.code.jumpCache[callFrame.pc]
+		continuationPc = callFrame.function.jumpCache[callFrame.pc]
 	}
 
 	vm.pushControlFrame(controlFrame{
@@ -1221,7 +1221,7 @@ func (vm *vm) handleIf(frame *callFrame) {
 		return
 	}
 
-	frame.pc = frame.function.code.jumpElseCache[frame.pc]
+	frame.pc = frame.function.jumpElseCache[frame.pc]
 }
 
 func (vm *vm) handleElse(frame *callFrame) {
@@ -1235,7 +1235,7 @@ func (vm *vm) handleElse(frame *callFrame) {
 func (vm *vm) handleEnd() {
 	frame := vm.popControlFrame()
 	callFrame := vm.currentCallFrame()
-	outputCount := vm.getOutputCount(callFrame.function.module, frame.blockType)
+	outputCount := vm.getOutputCount(callFrame.module, frame.blockType)
 	vm.stack.unwind(frame.stackHeight, outputCount)
 }
 
@@ -1253,9 +1253,9 @@ func (vm *vm) handleBrTable(frame *callFrame) {
 	index := vm.stack.popInt32()
 	var targetLabel uint32
 	if index >= 0 && uint64(index) < size {
-		targetLabel = uint32(frame.code[frame.pc+uint32(index)])
+		targetLabel = uint32(frame.function.body[frame.pc+uint32(index)])
 	} else {
-		targetLabel = uint32(frame.code[frame.pc+uint32(size)])
+		targetLabel = uint32(frame.function.body[frame.pc+uint32(size)])
 	}
 	frame.pc += uint32(size) + 1
 	vm.brToLabel(targetLabel)
@@ -1270,9 +1270,9 @@ func (vm *vm) brToLabel(labelIndex uint32) {
 
 	var arity uint32
 	if targetFrame.isLoop {
-		arity = vm.getInputCount(callFrame.function.module, targetFrame.blockType)
+		arity = vm.getInputCount(callFrame.module, targetFrame.blockType)
 	} else {
-		arity = vm.getOutputCount(callFrame.function.module, targetFrame.blockType)
+		arity = vm.getOutputCount(callFrame.module, targetFrame.blockType)
 	}
 
 	vm.stack.unwind(targetFrame.stackHeight, arity)
