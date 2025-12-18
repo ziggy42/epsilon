@@ -28,11 +28,8 @@ var (
 )
 
 const (
-	maxCallStackDepth         = 1000
 	controlStackCacheSlotSize = 14 // Control stack slot size per call frame.
-	controlStackCacheSize     = maxCallStackDepth * controlStackCacheSlotSize
 	localsCacheSlotSize       = 12 // Locals slot size per call frame.
-	localsCacheSize           = maxCallStackDepth * localsCacheSlotSize
 )
 
 // store represents all global state that can be manipulated by the vm. It
@@ -75,16 +72,21 @@ type vm struct {
 	store             *store
 	stack             *valueStack
 	callStack         []callFrame
-	controlStackCache [controlStackCacheSize]controlFrame
-	localsCache       [localsCacheSize]value
-	features          ExperimentalFeatures
+	controlStackCache []controlFrame
+	localsCache       []value
+	config            Config
 }
 
-func newVm() *vm {
+func newVm(config Config) *vm {
+	ctrlCacheSize := config.CallStackPreallocationSize * controlStackCacheSlotSize
+	localsCacheSize := config.CallStackPreallocationSize * localsCacheSlotSize
 	return &vm{
-		store:     &store{},
-		stack:     newValueStack(),
-		callStack: make([]callFrame, 0, maxCallStackDepth),
+		store:             &store{},
+		stack:             newValueStack(),
+		callStack:         make([]callFrame, 0, config.CallStackPreallocationSize),
+		controlStackCache: make([]controlFrame, ctrlCacheSize),
+		localsCache:       make([]value, localsCacheSize),
+		config:            config,
 	}
 }
 
@@ -92,7 +94,7 @@ func (vm *vm) instantiate(
 	module *moduleDefinition,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	validator := newValidator(vm.features)
+	validator := newValidator(vm.config)
 	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
@@ -229,15 +231,18 @@ func (vm *vm) invokeFunction(function FunctionInstance) error {
 }
 
 func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
-	if len(vm.callStack) >= maxCallStackDepth {
+	if len(vm.callStack) >= vm.config.MaxCallStackDepth {
 		return errCallStackExhausted
 	}
+
+	callDepth := len(vm.callStack)
+	withinPreallocation := callDepth < vm.config.CallStackPreallocationSize
 
 	numParams := len(function.functionType.ParamTypes)
 	numLocals := numParams + len(function.code.locals)
 	var locals []value
-	if numLocals <= localsCacheSlotSize {
-		blockDepth := len(vm.callStack) * localsCacheSlotSize
+	if withinPreallocation && numLocals <= localsCacheSlotSize {
+		blockDepth := callDepth * localsCacheSlotSize
 		max := blockDepth + localsCacheSlotSize
 		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
 		// Clear non-parameter locals to their zero values. WASM allows reading
@@ -245,8 +250,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		// from previous invocations. Parameters are overwritten below.
 		clear(locals[numParams:])
 	} else {
-		// The cache is not large enough to fit the amount of locals for the current
-		// function, therefore we need a new allocation.
+		// Beyond preallocation or too many locals: heap allocate.
 		locals = make([]value, numLocals)
 	}
 
@@ -255,11 +259,14 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	copy(locals[:numParams], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
-	// Use part of the cache for the control stack to avoid allocations.
-	blockDepth := len(vm.callStack) * controlStackCacheSlotSize
-	// Slice cap to prevent appending into the next slot.
-	max := blockDepth + controlStackCacheSlotSize
-	controlStack := vm.controlStackCache[blockDepth:blockDepth:max]
+	var controlStack []controlFrame
+	if withinPreallocation {
+		// Use part of the cache for the control stack to avoid allocations.
+		blockDepth := callDepth * controlStackCacheSlotSize
+		// Slice cap to prevent appending into the next slot.
+		max := blockDepth + controlStackCacheSlotSize
+		controlStack = vm.controlStackCache[blockDepth:blockDepth:max]
+	}
 	controlStack = append(controlStack, controlFrame{
 		isLoop:         false,
 		blockType:      int32(function.code.typeIndex),

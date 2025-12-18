@@ -22,16 +22,19 @@ import (
 // Runtime provides the main API for instantiating and interacting with WASM
 // modules.
 type Runtime struct {
-	vm *vm
+	vm     *vm
+	config Config
 }
 
 // NewRuntime creates a new Runtime with default settings.
 func NewRuntime() *Runtime {
-	return &Runtime{vm: newVm()}
+	return &Runtime{config: DefaultConfig()}
 }
 
-func (r *Runtime) WithFeatures(features ExperimentalFeatures) *Runtime {
-	r.vm.features = features
+// WithConfig sets the configuration for the runtime. Must be called before
+// instantiating any modules.
+func (r *Runtime) WithConfig(config Config) *Runtime {
+	r.config = config
 	return r
 }
 
@@ -46,6 +49,7 @@ func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
 	imports map[string]map[string]any,
 ) (*ModuleInstance, error) {
+	r.ensureVm()
 	module, err := newParser(wasm).parse()
 	if err != nil {
 		return nil, err
@@ -60,6 +64,12 @@ func (r *Runtime) InstantiateModuleFromBytes(
 	data []byte,
 ) (*ModuleInstance, error) {
 	return r.InstantiateModule(bytes.NewReader(data))
+}
+
+func (r *Runtime) ensureVm() {
+	if r.vm == nil {
+		r.vm = newVm(r.config)
+	}
 }
 
 // ImportBuilder provides a fluent, type-safe API for building import objects

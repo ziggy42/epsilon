@@ -39,7 +39,7 @@ func TestInvalidDataUnknownGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(ExperimentalFeatures{})
+	validator := newValidator(Config{})
 
 	err = validator.validateModule(module)
 
@@ -54,7 +54,7 @@ func TestInvalidDataUnknownMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(ExperimentalFeatures{})
+	validator := newValidator(Config{})
 
 	err = validator.validateModule(module)
 
@@ -69,7 +69,7 @@ func TestValidDataMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(ExperimentalFeatures{})
+	validator := newValidator(Config{})
 
 	err = validator.validateModule(module)
 

@@ -89,19 +89,19 @@ type validator struct {
 	elemTypes           []ReferenceType
 	dataCount           *uint64
 	referencedFunctions map[uint32]bool
-	features            ExperimentalFeatures
+	config              Config
 	code                []uint64
 	pc                  uint
 }
 
-func newValidator(features ExperimentalFeatures) *validator {
+func newValidator(config Config) *validator {
 	return &validator{
 		valueStack:          make([]ValueType, 0),
 		controlStack:        make([]validationControlFrame, 0),
 		locals:              make([]ValueType, 0),
 		returnType:          make([]ValueType, 0),
 		referencedFunctions: make(map[uint32]bool),
-		features:            features,
+		config:              config,
 	}
 }
 
@@ -156,7 +156,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 		v.memTypes = append(v.memTypes, memoryType)
 	}
 
-	if !v.features.MultipleMemories && len(v.memTypes) > 1 {
+	if !v.config.ExperimentalMultipleMemories && len(v.memTypes) > 1 {
 		return errMultipleMemoriesNotEnabled
 	}
 
@@ -997,7 +997,7 @@ func (v *validator) validateMemArg(align uint64, nBytes uint32) error {
 
 func (v *validator) validateMemorySize() error {
 	memoryIndex := uint32(v.next())
-	if !v.features.MultipleMemories && memoryIndex != 0 {
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
 		return errMultipleMemoriesNotEnabled
 	}
 
@@ -1010,7 +1010,7 @@ func (v *validator) validateMemorySize() error {
 
 func (v *validator) validateMemoryGrow() error {
 	memoryIndex := uint32(v.next())
-	if !v.features.MultipleMemories && memoryIndex != 0 {
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
 		return errMultipleMemoriesNotEnabled
 	}
 

@@ -24,7 +24,7 @@ import (
 func instantiate(
 	wat string,
 	imports map[string]map[string]any,
-	features *ExperimentalFeatures,
+	config *Config,
 ) (*ModuleInstance, error) {
 	wasm, err := wabt.Wat2Wasm(wat)
 	if err != nil {
@@ -35,10 +35,11 @@ func instantiate(
 		return nil, err
 	}
 
-	vm := newVm()
-	if features != nil {
-		vm.features = *features
+	cfg := DefaultConfig()
+	if config != nil {
+		cfg = *config
 	}
+	vm := newVm(cfg)
 
 	return vm.instantiate(module, imports)
 }
@@ -222,6 +223,47 @@ func TestExecuteRecursive(t *testing.T) {
 		t.Fatalf("failed to execute function: %v", err)
 	}
 	expected := int32(120)
+	if result[0] != expected {
+		t.Fatalf("expected %d, got %d", expected, result[0])
+	}
+}
+
+// TestRecursionWithZeroPreallocation verifies that the VM gracefully falls back
+// to heap allocation when CallStackPreallocationSize is 0. This tests the
+// embedded environment configuration path.
+func TestRecursionWithZeroPreallocation(t *testing.T) {
+	wat := `(module
+		(func $fac (export "fac") (param i32) (result i32)
+			local.get 0
+			i32.const 1
+			i32.lt_s
+			if (result i32)
+				i32.const 1
+			else
+				local.get 0
+				local.get 0
+				i32.const 1
+				i32.sub
+				call $fac
+				i32.mul
+			end)
+	)`
+	config := &Config{
+		MaxCallStackDepth:          100,
+		CallStackPreallocationSize: 0, // Force heap allocation for all calls.
+	}
+	moduleInstance, err := instantiate(wat, nil, config)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	// factorial(10) requires 11 stack frames - should work via heap allocation.
+	result, err := moduleInstance.Invoke("fac", int32(10))
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	expected := int32(3628800) // 10!
 	if result[0] != expected {
 		t.Fatalf("expected %d, got %d", expected, result[0])
 	}
@@ -813,8 +855,12 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem0) (i32.const 0) "hello")
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
-	features := &ExperimentalFeatures{MultipleMemories: true}
-	moduleInstance, err := instantiate(wat, nil, features)
+	config := &Config{
+		MaxCallStackDepth:            1000,
+		CallStackPreallocationSize:   1000,
+		ExperimentalMultipleMemories: true,
+	}
+	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -859,8 +905,12 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 			i32.load8_u $mem1
 		)
 	)`
-	features := &ExperimentalFeatures{MultipleMemories: true}
-	moduleInstance, err := instantiate(wat, nil, features)
+	config := &Config{
+		MaxCallStackDepth:            1000,
+		CallStackPreallocationSize:   1000,
+		ExperimentalMultipleMemories: true,
+	}
+	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -897,8 +947,12 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 			i32x4.extract_lane 0
 		)
 	)`
-	features := &ExperimentalFeatures{MultipleMemories: true}
-	moduleInstance, err := instantiate(wat, nil, features)
+	config := &Config{
+		MaxCallStackDepth:            1000,
+		CallStackPreallocationSize:   1000,
+		ExperimentalMultipleMemories: true,
+	}
+	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
@@ -932,8 +986,12 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 			i32.load $mem2
 		)
 	)`
-	features := &ExperimentalFeatures{MultipleMemories: true}
-	moduleInstance, err := instantiate(wat, nil, features)
+	config := &Config{
+		MaxCallStackDepth:            1000,
+		CallStackPreallocationSize:   1000,
+		ExperimentalMultipleMemories: true,
+	}
+	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}
