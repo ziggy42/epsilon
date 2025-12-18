@@ -484,11 +484,17 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i32Popcnt:
 		vm.stack.pushInt32(popcnt32(vm.stack.popInt32()))
 	case i32Add:
-		vm.handleBinaryInt32(add)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() + b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Sub:
-		vm.handleBinaryInt32(sub)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() - b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Mul:
-		vm.handleBinaryInt32(mul)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() * b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32DivS:
 		err = vm.handleBinarySafeInt32(divS32)
 	case i32DivU:
@@ -498,21 +504,37 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i32RemU:
 		err = vm.handleBinarySafeInt32(remU32)
 	case i32And:
-		vm.handleBinaryInt32(and)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() & b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Or:
-		vm.handleBinaryInt32(or)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() | b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Xor:
-		vm.handleBinaryInt32(xor)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() ^ b
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Shl:
-		vm.handleBinaryInt32(shl32)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() << (uint32(b) % 32)
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32ShrS:
-		vm.handleBinaryInt32(shrS32)
+		b := vm.stack.popInt32()
+		res := vm.stack.data[len(vm.stack.data)-1].int32() >> (uint32(b) % 32)
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32ShrU:
-		vm.handleBinaryInt32(shrU32)
+		b := vm.stack.popInt32()
+		res := shrU32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Rotl:
-		vm.handleBinaryInt32(rotl32)
+		b := vm.stack.popInt32()
+		res := rotl32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Rotr:
-		vm.handleBinaryInt32(rotr32)
+		b := vm.stack.popInt32()
+		res := rotr32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i64Clz:
 		vm.stack.pushInt64(clz64(vm.stack.popInt64()))
 	case i64Ctz:
@@ -520,11 +542,17 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i64Popcnt:
 		vm.stack.pushInt64(popcnt64(vm.stack.popInt64()))
 	case i64Add:
-		vm.handleBinaryInt64(add)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() + b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Sub:
-		vm.handleBinaryInt64(sub)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() - b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Mul:
-		vm.handleBinaryInt64(mul)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() * b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64DivS:
 		err = vm.handleBinarySafeInt64(divS64)
 	case i64DivU:
@@ -534,21 +562,37 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i64RemU:
 		err = vm.handleBinarySafeInt64(remU64)
 	case i64And:
-		vm.handleBinaryInt64(and)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() & b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Or:
-		vm.handleBinaryInt64(or)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() | b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Xor:
-		vm.handleBinaryInt64(xor)
+		b := vm.stack.popInt64()
+		res := vm.stack.data[len(vm.stack.data)-1].int64() ^ b
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Shl:
-		vm.handleBinaryInt64(shl64)
+		b := vm.stack.popInt64()
+		res := shl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64ShrS:
-		vm.handleBinaryInt64(shrS64)
+		b := vm.stack.popInt64()
+		res := shrS64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64ShrU:
-		vm.handleBinaryInt64(shrU64)
+		b := vm.stack.popInt64()
+		res := shrU64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Rotl:
-		vm.handleBinaryInt64(rotl64)
+		b := vm.stack.popInt64()
+		res := rotl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Rotr:
-		vm.handleBinaryInt64(rotr64)
+		b := vm.stack.popInt64()
+		res := rotr64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case f32Abs:
 		vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
 	case f32Neg:
@@ -1468,18 +1512,6 @@ func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	}
 
 	vm.stack.pushV128(simdI8x16Shuffle(v1, v2, lanes))
-}
-
-func (vm *vm) handleBinaryInt32(op func(a, b int32) int32) {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(op(a, b))
-}
-
-func (vm *vm) handleBinaryInt64(op func(a, b int64) int64) {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt64(op(a, b))
 }
 
 func (vm *vm) handleBinaryFloat32(op func(a, b float32) float32) {

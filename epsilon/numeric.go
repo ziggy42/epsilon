@@ -42,10 +42,6 @@ type wasmFloat interface {
 	float32 | float64
 }
 
-type wasmInt interface {
-	int32 | int64
-}
-
 func equal[T wasmNumber](a, b T) bool {
 	return a == b
 }
@@ -178,26 +174,6 @@ func remU64(a, b int64) (int64, error) {
 		return 0, errIntegerDivideByZero
 	}
 	return int64(uint64(a) % uint64(b)), nil
-}
-
-func and[T wasmInt](a, b T) T {
-	return a & b
-}
-
-func or[T wasmInt](a, b T) T {
-	return a | b
-}
-
-func xor[T wasmInt](a, b T) T {
-	return a ^ b
-}
-
-func shl32(a, b int32) int32 {
-	return a << (uint32(b) % 32)
-}
-
-func shrS32(a, b int32) int32 {
-	return a >> (uint32(b) % 32)
 }
 
 func shrU32(a, b int32) int32 {
