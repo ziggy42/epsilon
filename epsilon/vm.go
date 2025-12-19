@@ -1347,7 +1347,7 @@ func (vm *vm) handleCallIndirect(frame *callFrame) error {
 	}
 
 	function := vm.store.funcs[uint32(tableElement)]
-	if !function.GetType().Equal(&expectedType) {
+	if !function.GetType().Equal(expectedType) {
 		return fmt.Errorf("indirect call type mismatch")
 	}
 

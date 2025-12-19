@@ -93,7 +93,7 @@ func resolveFunctionImport(
 	imp moduleImport,
 ) (FunctionInstance, error) {
 	if f, ok := obj.(FunctionInstance); ok {
-		if !f.GetType().Equal(&functionType) {
+		if !f.GetType().Equal(functionType) {
 			return nil, fmt.Errorf(
 				"type mismatch for %s.%s", imp.moduleName, imp.name,
 			)
