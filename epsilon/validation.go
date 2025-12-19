@@ -1144,7 +1144,10 @@ func (v *validator) validateTableGet() error {
 	return v.validateUnaryOp(I32, v.tableTypes[tableIndex].ReferenceType)
 }
 
-func (v *validator) validateSimdExtractLane(rangeVal uint64, scalarType ValueType) error {
+func (v *validator) validateSimdExtractLane(
+	rangeVal uint64,
+	scalarType ValueType,
+) error {
 	laneIndex := v.next()
 	if laneIndex >= rangeVal {
 		return errSimdLaneIndexOutOfBounds
@@ -1152,7 +1155,10 @@ func (v *validator) validateSimdExtractLane(rangeVal uint64, scalarType ValueTyp
 	return v.validateUnaryOp(V128, scalarType)
 }
 
-func (v *validator) validateSimdReplaceLane(rangeVal uint64, scalarType ValueType) error {
+func (v *validator) validateSimdReplaceLane(
+	rangeVal uint64,
+	scalarType ValueType,
+) error {
 	laneIndex := v.next()
 	if laneIndex >= rangeVal {
 		return errSimdLaneIndexOutOfBounds

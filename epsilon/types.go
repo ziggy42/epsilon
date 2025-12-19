@@ -41,9 +41,7 @@ func (NumberType) isValueType() {}
 // See https://webassembly.github.io/spec/core/syntax/types.html#vector-types.
 type VectorType int
 
-const (
-	V128 VectorType = 0x7b
-)
+const V128 VectorType = 0x7b
 
 func (VectorType) isValueType() {}
 
@@ -96,13 +94,7 @@ type FunctionType struct {
 	ResultTypes []ValueType
 }
 
-func (ft *FunctionType) Equal(other *FunctionType) bool {
-	if ft == other {
-		return true
-	}
-	if ft == nil || other == nil {
-		return false
-	}
+func (ft *FunctionType) Equal(other FunctionType) bool {
 	return slices.Equal(ft.ParamTypes, other.ParamTypes) &&
 		slices.Equal(ft.ResultTypes, other.ResultTypes)
 }
