@@ -25,7 +25,7 @@ type Table struct {
 }
 
 // NewTable creates a new Table instance from a TableType.
-// The table is initialized with 'NullReference' elements up to the minimum size.
+// The table is initialized with 'NullReference' elements up to the min size.
 func NewTable(tt TableType) *Table {
 	elements := make([]int32, tt.Limits.Min)
 	for i := range elements {
@@ -68,11 +68,9 @@ func (t *Table) Grow(n int32, val int32) int32 {
 		}
 	}
 
-	newElements := make([]int32, n)
-	for i := range newElements {
-		newElements[i] = val
+	for range n {
+		t.elements = append(t.elements, val)
 	}
-	t.elements = append(t.elements, newElements...)
 
 	return previousSize
 }
