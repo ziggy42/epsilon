@@ -1,7 +1,9 @@
 # ε Epsilon
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/ziggy42/epsilon.svg)](https://pkg.go.dev/github.com/ziggy42/epsilon)
+[![CI](https://github.com/ziggy42/epsilon/actions/workflows/go.yml/badge.svg)](https://github.com/ziggy42/epsilon/actions/workflows/go.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/ziggy42/epsilon)](https://goreportcard.com/report/github.com/ziggy42/epsilon)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ziggy42/epsilon)](https://github.com/ziggy42/epsilon/blob/main/go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 **Epsilon** is a pure Go WebAssembly runtime with zero dependencies. 
