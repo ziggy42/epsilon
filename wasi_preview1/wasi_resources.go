@@ -43,6 +43,51 @@ const DefaultDirRights wasiRights = rightsAll &^
 // children.
 const DefaultDirInheritingRights wasiRights = rightsAll
 
+const preopenTypeDir uint8 = 0
+
+const (
+	whenceSet uint8 = 0 // Seek relative to start-of-file.
+	whenceCur uint8 = 1 // Seek relative to current position.
+	whenceEnd uint8 = 2 // Seek relative to end-of-file.
+)
+
+type wasiFileType uint8
+
+const (
+	fileTypeUnknown         wasiFileType = 0
+	fileTypeBlockDevice     wasiFileType = 1
+	fileTypeCharacterDevice wasiFileType = 2
+	fileTypeDirectory       wasiFileType = 3
+	fileTypeRegularFile     wasiFileType = 4
+	fileTypeSocketDgram     wasiFileType = 5
+	fileTypeSocketStream    wasiFileType = 6
+	fileTypeSymbolicLink    wasiFileType = 7
+)
+
+const (
+	oFlagsCreat     uint16 = 1 << 0
+	oFlagsDirectory uint16 = 1 << 1
+	oFlagsExcl      uint16 = 1 << 2
+	oFlagsTrunc     uint16 = 1 << 3
+)
+
+const (
+	fstFlagsAtim    int32 = 1 << 0
+	fstFlagsAtimNow int32 = 1 << 1
+	fstFlagsMtim    int32 = 1 << 2
+	fstFlagsMtimNow int32 = 1 << 3
+)
+
+const (
+	fdFlagsAppend   uint16 = 1 << 0
+	fdFlagsDsync    uint16 = 1 << 1
+	fdFlagsNonblock uint16 = 1 << 2
+	fdFlagsRsync    uint16 = 1 << 3
+	fdFlagsSync     uint16 = 1 << 4
+)
+
+const lookupFlagsSymlinkFollow int32 = 1 << 0
+
 type WasiPreopenDir struct {
 	HostPath         string
 	GuestPath        string
@@ -271,10 +316,10 @@ func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 	fd.flags = uint16(fdFlags)
 
 	var osFlags int
-	if fdFlags&int32(FdFlagsAppend) != 0 {
+	if fdFlags&int32(fdFlagsAppend) != 0 {
 		osFlags |= unix.O_APPEND
 	}
-	if fdFlags&int32(FdFlagsNonblock) != 0 {
+	if fdFlags&int32(fdFlagsNonblock) != 0 {
 		osFlags |= unix.O_NONBLOCK
 	}
 
@@ -435,7 +480,7 @@ func (w *wasiResourceTable) getPrestat(
 	// Write prestat struct directly to memory:
 	// - Byte 0: type (always PreopenTypeDir = 0)
 	// - Bytes 4-7: name length as uint32
-	err = memory.StoreByte(0, uint32(prestatPtr), PreopenTypeDir)
+	err = memory.StoreByte(0, uint32(prestatPtr), preopenTypeDir)
 	if err != nil {
 		return ErrnoFault
 	}
@@ -503,7 +548,7 @@ func (w *wasiResourceTable) pwrite(
 
 		var n int
 		var writeErr error
-		if fd.flags&FdFlagsAppend != 0 {
+		if fd.flags&fdFlagsAppend != 0 {
 			// Go's WriteAt returns error for O_APPEND files, but WASI expects it to
 			// work (even if it appends on Linux). Use unix.Pwrite directly to bypass
 			// Go's check.
@@ -607,13 +652,13 @@ func (w *wasiResourceTable) readdir(
 	if err != nil {
 		return mapError(err)
 	}
-	currentDir := dirEntry{name: ".", fileType: FileTypeDirectory, ino: dotIno}
+	currentDir := dirEntry{name: ".", fileType: fileTypeDirectory, ino: dotIno}
 
 	dotDotIno, err := getInode(filepath.Dir(fd.file.Name()))
 	if err != nil {
 		return mapError(err)
 	}
-	upperDir := dirEntry{name: "..", fileType: FileTypeDirectory, ino: dotDotIno}
+	upperDir := dirEntry{name: "..", fileType: fileTypeDirectory, ino: dotDotIno}
 
 	wasiEntries := []dirEntry{currentDir, upperDir}
 
@@ -726,11 +771,11 @@ func (w *wasiResourceTable) seek(
 
 	var goWhence int
 	switch uint8(whence) {
-	case WhenceSet:
+	case whenceSet:
 		goWhence = io.SeekStart
-	case WhenceCur:
+	case whenceCur:
 		goWhence = io.SeekCurrent
-	case WhenceEnd:
+	case whenceEnd:
 		goWhence = io.SeekEnd
 	default:
 		return ErrnoInval
@@ -861,7 +906,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 
 	// Get file info - follow symlinks unless LookupFlagsSymlinkFollow is NOT set
 	var info os.FileInfo
-	if flags&LookupFlagsSymlinkFollow != 0 {
+	if flags&lookupFlagsSymlinkFollow != 0 {
 		info, err = os.Stat(path)
 	} else {
 		info, err = os.Lstat(path)
@@ -873,7 +918,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	// Get actual timestamps using unix.Stat or unix.Lstat
 	// Follow symlinks based on the same flag used above
 	var unixStat unix.Stat_t
-	if flags&int32(LookupFlagsSymlinkFollow) != 0 {
+	if flags&int32(lookupFlagsSymlinkFollow) != 0 {
 		err = unix.Stat(path, &unixStat)
 	} else {
 		err = unix.Lstat(path, &unixStat)
@@ -900,7 +945,7 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 
 	// Determine utime flags based on symlink follow flag
 	utimeFlags := 0
-	if flags&int32(LookupFlagsSymlinkFollow) == 0 {
+	if flags&int32(lookupFlagsSymlinkFollow) == 0 {
 		utimeFlags = unix.AT_SYMLINK_NOFOLLOW
 	}
 
@@ -927,7 +972,7 @@ func (w *wasiResourceTable) pathLink(
 	oldIndex int32,
 	oldFlags, oldPathPtr, oldPathLen, newIndex, newPathPtr, newPathLen int32,
 ) int32 {
-	if oldFlags&LookupFlagsSymlinkFollow != 0 {
+	if oldFlags&lookupFlagsSymlinkFollow != 0 {
 		return ErrnoInval
 	}
 
@@ -972,7 +1017,7 @@ func (w *wasiResourceTable) pathOpen(
 		return errCode
 	}
 
-	isDirFlag := oflags&int32(OFlagsDirectory) != 0
+	isDirFlag := oflags&int32(oFlagsDirectory) != 0
 	if isDirFlag {
 		stat, err := os.Stat(path)
 		if err == nil && !stat.IsDir() {
@@ -982,23 +1027,23 @@ func (w *wasiResourceTable) pathOpen(
 
 	// Determine open flags
 	var osFlags int
-	if oflags&int32(OFlagsCreat) != 0 {
+	if oflags&int32(oFlagsCreat) != 0 {
 		osFlags |= os.O_CREATE
 	}
-	if oflags&int32(OFlagsExcl) != 0 {
+	if oflags&int32(oFlagsExcl) != 0 {
 		osFlags |= os.O_EXCL
 	}
-	if oflags&int32(OFlagsTrunc) != 0 {
+	if oflags&int32(oFlagsTrunc) != 0 {
 		// Truncation requires PATH_FILESTAT_SET_SIZE right
 		if fd.rights&RightsPathFilestatSetSize == 0 {
 			return ErrnoNotCapable
 		}
 		osFlags |= os.O_TRUNC
 	}
-	if fdflags&int32(FdFlagsAppend) != 0 {
+	if fdflags&int32(fdFlagsAppend) != 0 {
 		osFlags |= os.O_APPEND
 	}
-	if dirflags&int32(LookupFlagsSymlinkFollow) == 0 {
+	if dirflags&int32(lookupFlagsSymlinkFollow) == 0 {
 		osFlags |= syscall.O_NOFOLLOW
 	}
 
@@ -1267,7 +1312,7 @@ func (w *wasiResourceTable) sockAccept(fdIndex, flags, fdPtr int32) int32 {
 	if !ok {
 		return ErrnoBadF
 	}
-	if fd.fileType != FileTypeSocketDgram && fd.fileType != FileTypeSocketStream {
+	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return ErrnoNotSock
 	}
 	return ErrnoNotSup
@@ -1280,7 +1325,7 @@ func (w *wasiResourceTable) sockRecv(
 	if !ok {
 		return ErrnoBadF
 	}
-	if fd.fileType != FileTypeSocketDgram && fd.fileType != FileTypeSocketStream {
+	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return ErrnoNotSock
 	}
 	// TODO: implement
@@ -1294,7 +1339,7 @@ func (w *wasiResourceTable) sockSend(
 	if !ok {
 		return ErrnoBadF
 	}
-	if fd.fileType != FileTypeSocketDgram && fd.fileType != FileTypeSocketStream {
+	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return ErrnoNotSock
 	}
 	// TODO: implement
@@ -1306,7 +1351,7 @@ func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 	if !ok {
 		return ErrnoBadF
 	}
-	if fd.fileType != FileTypeSocketDgram && fd.fileType != FileTypeSocketStream {
+	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return ErrnoNotSock
 	}
 	// TODO: implement
@@ -1376,7 +1421,7 @@ func (w *wasiResourceTable) getFile(
 	if errCode != ErrnoSuccess {
 		return nil, errCode
 	}
-	if fd.fileType == FileTypeDirectory {
+	if fd.fileType == fileTypeDirectory {
 		return nil, ErrnoIsDir
 	}
 	return fd, ErrnoSuccess
@@ -1390,7 +1435,7 @@ func (w *wasiResourceTable) getDir(
 	if errCode != ErrnoSuccess {
 		return nil, errCode
 	}
-	if fd.fileType != FileTypeDirectory {
+	if fd.fileType != fileTypeDirectory {
 		return nil, ErrnoNotDir
 	}
 	return fd, ErrnoSuccess
@@ -1452,21 +1497,21 @@ func getInode(path string) (uint64, error) {
 func getModeFileType(mode os.FileMode) wasiFileType {
 	switch {
 	case mode.IsDir():
-		return FileTypeDirectory
+		return fileTypeDirectory
 	case mode.IsRegular():
-		return FileTypeRegularFile
+		return fileTypeRegularFile
 	case mode&os.ModeSymlink != 0:
-		return FileTypeSymbolicLink
+		return fileTypeSymbolicLink
 	case mode&os.ModeSocket != 0:
-		return FileTypeSocketStream
+		return fileTypeSocketStream
 	case mode&os.ModeNamedPipe != 0:
-		return FileTypeCharacterDevice
+		return fileTypeCharacterDevice
 	case mode&os.ModeCharDevice != 0:
-		return FileTypeCharacterDevice
+		return fileTypeCharacterDevice
 	case mode&os.ModeDevice != 0:
-		return FileTypeBlockDevice
+		return fileTypeBlockDevice
 	default:
-		return FileTypeUnknown
+		return fileTypeUnknown
 	}
 }
 
@@ -1528,16 +1573,16 @@ func computeAndSetTimestamps(
 	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
 ) int32 {
 	// Validate flags: cannot have both SET and NOW
-	if (fstFlags&FstFlagsAtim != 0) && (fstFlags&FstFlagsAtimNow != 0) {
+	if (fstFlags&fstFlagsAtim != 0) && (fstFlags&fstFlagsAtimNow != 0) {
 		return ErrnoInval
 	}
-	if (fstFlags&FstFlagsMtim != 0) && (fstFlags&FstFlagsMtimNow != 0) {
+	if (fstFlags&fstFlagsMtim != 0) && (fstFlags&fstFlagsMtimNow != 0) {
 		return ErrnoInval
 	}
 
 	// Check if we're actually setting any timestamps
-	settingAtim := (fstFlags&FstFlagsAtim != 0) || (fstFlags&FstFlagsAtimNow != 0)
-	settingMtim := (fstFlags&FstFlagsMtim != 0) || (fstFlags&FstFlagsMtimNow != 0)
+	settingAtim := (fstFlags&fstFlagsAtim != 0) || (fstFlags&fstFlagsAtimNow != 0)
+	settingMtim := (fstFlags&fstFlagsMtim != 0) || (fstFlags&fstFlagsMtimNow != 0)
 
 	// If not setting any timestamps, return success immediately
 	if !settingAtim && !settingMtim {
@@ -1558,17 +1603,17 @@ func computeAndSetTimestamps(
 	var finalAtimNs, finalMtimNs int64
 
 	now := time.Now()
-	if fstFlags&FstFlagsAtimNow != 0 {
+	if fstFlags&fstFlagsAtimNow != 0 {
 		finalAtimNs = now.UnixNano()
-	} else if fstFlags&FstFlagsAtim != 0 {
+	} else if fstFlags&fstFlagsAtim != 0 {
 		finalAtimNs = atim
 	} else {
 		finalAtimNs = currentAtimNs
 	}
 
-	if fstFlags&FstFlagsMtimNow != 0 {
+	if fstFlags&fstFlagsMtimNow != 0 {
 		finalMtimNs = now.UnixNano()
-	} else if fstFlags&FstFlagsMtim != 0 {
+	} else if fstFlags&fstFlagsMtim != 0 {
 		finalMtimNs = mtim
 	} else {
 		finalMtimNs = currentMtimNs

@@ -24,6 +24,12 @@ import (
 
 const subclockFlagsSubscriptionClockAbstime uint16 = 1 << 0
 
+const (
+	eventTypeClock   uint8 = 0
+	eventTypeFdRead  uint8 = 1
+	eventTypeFdWrite uint8 = 2
+)
+
 type subscriptionClock struct {
 	identifier uint64
 	clockId    uint32
@@ -137,7 +143,7 @@ func (w *WasiModule) pollOneoff(
 
 	for _, sub := range subscriptions {
 		switch sub.subscriptionType {
-		case EventTypeClock:
+		case eventTypeClock:
 			// Parse clock subscription
 			clockSub := parseSubscriptionClock(sub.body)
 
@@ -151,7 +157,7 @@ func (w *WasiModule) pollOneoff(
 					events = append(events, event{
 						userData:  sub.userData,
 						errorCode: int16(ErrnoInval),
-						eventType: EventTypeClock,
+						eventType: eventTypeClock,
 					})
 					continue
 				}
@@ -171,9 +177,9 @@ func (w *WasiModule) pollOneoff(
 			clockEvents = append(clockEvents, event{
 				userData:  sub.userData,
 				errorCode: int16(ErrnoSuccess),
-				eventType: EventTypeClock,
+				eventType: eventTypeClock,
 			})
-		case EventTypeFdRead, EventTypeFdWrite:
+		case eventTypeFdRead, eventTypeFdWrite:
 			fdSub := parseSubscriptionFdReadwrite(sub.body)
 			fdIndex := int32(fdSub.fd)
 
@@ -196,13 +202,13 @@ func (w *WasiModule) pollOneoff(
 			switch fdIndex {
 			case 0: // stdin
 				// stdin is readable (if there's data), but NOT writable
-				isReady = (sub.subscriptionType == EventTypeFdRead)
+				isReady = (sub.subscriptionType == eventTypeFdRead)
 			case 1, 2: // stdout, stderr
 				// stdout/stderr are writable, but NOT readable
-				isReady = (sub.subscriptionType == EventTypeFdWrite)
+				isReady = (sub.subscriptionType == eventTypeFdWrite)
 			default:
 				// Regular files are always ready for both read and write
-				if fd.fileType == FileTypeRegularFile {
+				if fd.fileType == fileTypeRegularFile {
 					isReady = true
 					// Try to get file size for regular files
 					if info, err := fd.file.Stat(); err == nil {
@@ -223,7 +229,7 @@ func (w *WasiModule) pollOneoff(
 					fdReadWrite: eventFdReadwrite{
 						nBytes: nbytes,
 						// TODO: Implement proper hangup detection using syscall.Select or
-						// unix.Poll to set EventRwFlagsFdReadwriteHangup when appropriate.
+						// unix.Poll to set eventRwFlagsFdReadwriteHangup when appropriate.
 						flags: 0,
 					},
 				})
