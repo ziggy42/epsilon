@@ -222,7 +222,6 @@ func (w *WasiModule) procRaise(sig int32) int32 {
 }
 
 func (w *WasiModule) schedYield() int32 {
-	// runtime.Gosched()
 	return errnoSuccess
 }
 
