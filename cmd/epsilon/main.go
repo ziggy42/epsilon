@@ -140,13 +140,11 @@ func runCLI(
 		})
 	}
 
-	// Create WASI module
 	wasiModule, err := wasi_preview1.NewWasiModule(fullArgs, wasiEnv, preopens)
 	if err != nil {
 		return err
 	}
 
-	// Instantiate with WASI imports
 	instance, err := epsilon.NewRuntime().
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())
 	if err != nil {

@@ -55,12 +55,7 @@ func (r *Runtime) InstantiateModuleWithImports(
 		return nil, err
 	}
 
-	instance, err := r.vm.instantiate(module, imports)
-	if err != nil {
-		return nil, err
-	}
-
-	return instance, nil
+	return r.vm.instantiate(module, imports)
 }
 
 // InstantiateModuleFromBytes is a convenience method to instantiate a WASM
