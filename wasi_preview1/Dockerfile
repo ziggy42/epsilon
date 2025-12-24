@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# This Dockerfile creates a test environment for running the WASI testsuite 
+# (https://github.com/WebAssembly/wasi-testsuite) against the epsilon runtime. 
+# It sets up a Linux amd64 environment with all necessary toolchains to build 
+# and run WASI conformance tests written in C, Rust, and AssemblyScript.
+
 FROM --platform=linux/amd64 debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
