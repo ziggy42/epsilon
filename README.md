@@ -64,12 +64,12 @@ func main() {
 ### Using Host Functions
 
 Extend your WebAssembly modules with custom Go functions and more using 
-`ImportBuilder`:
+`ModuleImportBuilder`:
 
 ```go
 // Create imports before instantiation
-imports := epsilon.NewImportBuilder().
-	AddHostFunc("env", "log", func(m *epsilon.ModuleInstance, args ...any) []any {
+imports := epsilon.NewModuleImportBuilder("env").
+	AddHostFunc("log", func(m *epsilon.ModuleInstance, args ...any) []any {
 		fmt.Printf("[WASM Log]: %v\n", args[0])
 		return nil
 	}).

@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -42,17 +41,16 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
 	tableLimitMax := uint32(20)
 
-	spectestImports := epsilon.NewImportBuilder().
-		AddGlobal("spectest", "global_i32", int32(666), false, epsilon.I32).
-		AddGlobal("spectest", "global_i64", int64(666), false, epsilon.I64).
-		AddGlobal("spectest", "global_f32", float32(666.6), false, epsilon.F32).
-		AddGlobal("spectest", "global_f64", float64(666.6), false, epsilon.F64).
-		AddTable("spectest", "table", epsilon.NewTable(epsilon.TableType{
+	spectestImports := epsilon.NewModuleImportBuilder("spectest").
+		AddGlobal("global_i32", int32(666), false, epsilon.I32).
+		AddGlobal("global_i64", int64(666), false, epsilon.I64).
+		AddGlobal("global_f32", float32(666.6), false, epsilon.F32).
+		AddGlobal("global_f64", float64(666.6), false, epsilon.F64).
+		AddTable("table", epsilon.NewTable(epsilon.TableType{
 			Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
 			ReferenceType: epsilon.FuncRefType,
 		})).
 		AddMemory(
-			"spectest",
 			"memory",
 			epsilon.NewMemory(
 				epsilon.MemoryType{
@@ -61,7 +59,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			),
 		).
 		AddHostFunc(
-			"spectest",
 			"print_i32",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%d", args[0].(int32))
@@ -69,7 +66,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_i64",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%d", args[0].(int64))
@@ -77,7 +73,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_f32",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%f", args[0].(float32))
@@ -85,7 +80,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_f64",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%f", args[0].(float64))
@@ -93,7 +87,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_i32_f32",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%d %f", args[0].(int32), args[1].(float32))
@@ -101,7 +94,6 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_i64_f64",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%d %f", args[0].(int64), args[1].(float64))
@@ -109,21 +101,16 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			},
 		).
 		AddHostFunc(
-			"spectest",
 			"print_f64_f64",
 			func(m *epsilon.ModuleInstance, args ...any) []any {
 				fmt.Printf("%f %f", args[0].(float64), args[1].(float64))
 				return nil
 			},
 		).
-		AddHostFunc(
-			"spectest",
-			"print",
-			func(m *epsilon.ModuleInstance, args ...any) []any {
-				fmt.Printf("Print called!")
-				return nil
-			},
-		).
+		AddHostFunc("print", func(m *epsilon.ModuleInstance, args ...any) []any {
+			fmt.Printf("Print called!")
+			return nil
+		}).
 		Build()
 
 	return &specTestRunner{
@@ -183,20 +170,21 @@ func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 	r.moduleInstanceMap[cmd.As] = r.lastModuleInstance
 }
 
-func (r *specTestRunner) buildImports() map[string]map[string]any {
-	builder := epsilon.NewImportBuilder()
+func (r *specTestRunner) buildImports() []map[string]map[string]any {
+	imports := []map[string]map[string]any{r.spectestImports}
 	for regName, moduleInstance := range r.moduleInstanceMap {
-		builder.AddModuleExports(regName, moduleInstance)
+		moduleImport := epsilon.NewModuleImportBuilder(regName).
+			AddModuleExports(moduleInstance).
+			Build()
+		imports = append(imports, moduleImport)
 	}
-	imports := builder.Build()
-	maps.Copy(imports, r.spectestImports)
 	return imports
 }
 
 func (r *specTestRunner) handleModule(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
+	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	instance, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		InstantiateModuleWithImports(wasm, r.buildImports()...)
 	if err != nil {
 		r.fatalf(cmd.Line, "failed to instantiate module %s: %v", cmd.Filename, err)
 	}
@@ -230,9 +218,8 @@ func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
 func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
-		wasmBytes := r.wasmDict[cmd.Filename]
-		_, err := r.runtime.
-			InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+		wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
+		_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 		if err == nil {
 			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
 		}
@@ -246,9 +233,8 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 }
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
-	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
+	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
@@ -261,27 +247,24 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 		return
 	}
 
-	wasmBytes := r.wasmDict[cmd.Filename]
-	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
+	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected validation error, but got no error")
 	}
 }
 
 func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
-	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
+	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
 	}
 }
 
 func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
-	wasmBytes := r.wasmDict[cmd.Filename]
-	_, err := r.runtime.
-		InstantiateModuleWithImports(bytes.NewReader(wasmBytes), r.buildImports())
+	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
+	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	if err == nil {
 		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
 	}

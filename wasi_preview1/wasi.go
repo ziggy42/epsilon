@@ -277,48 +277,72 @@ func (w *WasiModule) schedYield() int32 {
 }
 
 func (w *WasiModule) ToImports() map[string]map[string]any {
-	imports := map[string]any{
-		"args_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+	return epsilon.NewModuleImportBuilder(WASIModuleName).
+		AddHostFunc("args_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.argsGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"args_sizes_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("args_sizes_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.argsSizesGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"environ_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("environ_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.environGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"environ_sizes_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("environ_sizes_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.environSizesGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"clock_res_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("clock_res_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.clockResGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"clock_time_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("clock_time_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			_ = args[1].(int64) // precision is ignored
 			errCode := w.clockTimeGet(inst, args[0].(int32), args[2].(int32))
 			return []any{errCode}
-		},
-		"fd_close": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_close", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.close(args[0].(int32))
 			return []any{errCode}
-		},
-		"fd_fdstat_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_fdstat_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.getStat(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"fd_fdstat_set_flags": func(
+		}).
+		AddHostFunc("fd_fdstat_set_flags", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
 			errCode := w.fs.setStatFlags(args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"fd_fdstat_set_rights": func(
+		}).
+		AddHostFunc("fd_fdstat_set_rights", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -328,12 +352,15 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int64),
 			)
 			return []any{errCode}
-		},
-		"fd_prestat_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_prestat_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.getPrestat(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"fd_prestat_dir_name": func(
+		}).
+		AddHostFunc("fd_prestat_dir_name", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -344,8 +371,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_filestat_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_filestat_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathFilestatGet(
 				inst,
 				args[0].(int32),
@@ -355,8 +385,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_open": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_open", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathOpen(
 				inst,
 				args[0].(int32),
@@ -370,8 +403,8 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[8].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_remove_directory": func(
+		}).
+		AddHostFunc("path_remove_directory", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -382,8 +415,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_seek": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_seek", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.seek(
 				inst,
 				args[0].(int32),
@@ -392,8 +428,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_read": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_read", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.read(
 				inst,
 				args[0].(int32),
@@ -402,8 +441,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_write": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_write", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.write(
 				inst,
 				args[0].(int32),
@@ -412,8 +454,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_pwrite": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_pwrite", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pwrite(
 				inst,
 				args[0].(int32),
@@ -423,16 +468,25 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"proc_exit": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("proc_exit", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			os.Exit(int(args[0].(int32)))
 			return []any{}
-		},
-		"random_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("random_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.randomGet(inst, args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-		"fd_advise": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_advise", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.advise(
 				args[0].(int32),
 				args[1].(int64),
@@ -440,46 +494,61 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_allocate": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_allocate", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.allocate(
 				args[0].(int32),
 				args[1].(int64),
 				args[2].(int64),
 			)
 			return []any{errCode}
-		},
-		"fd_datasync": func(inst *epsilon.ModuleInstance, args ...any) []any {
-			errCode := w.fs.dataSync(args[0].(int32))
-			return []any{errCode}
-		},
-		"fd_sync": func(inst *epsilon.ModuleInstance, args ...any) []any {
-			errCode := w.fs.sync(args[0].(int32))
-			return []any{errCode}
-		},
-		"fd_tell": func(inst *epsilon.ModuleInstance, args ...any) []any {
-			errCode := w.fs.tell(inst, args[0].(int32), args[1].(int32))
-			return []any{errCode}
-		},
-		"fd_renumber": func(inst *epsilon.ModuleInstance, args ...any) []any {
-			errCode := w.fs.renumber(args[0].(int32), args[1].(int32))
-			return []any{errCode}
-		},
-		"fd_filestat_get": func(inst *epsilon.ModuleInstance, args ...any) []any {
-			errCode := w.fs.getFileStat(inst, args[0].(int32), args[1].(int32))
-			return []any{errCode}
-		},
-		"fd_filestat_set_size": func(
+		}).
+		AddHostFunc("fd_datasync", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
-			errCode := w.fs.setFileStatSize(
-				args[0].(int32),
-				args[1].(int64),
-			)
+			errCode := w.fs.dataSync(args[0].(int32))
 			return []any{errCode}
-		},
-		"fd_filestat_set_times": func(
+		}).
+		AddHostFunc("fd_sync", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
+			errCode := w.fs.sync(args[0].(int32))
+			return []any{errCode}
+		}).
+		AddHostFunc("fd_tell", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
+			errCode := w.fs.tell(inst, args[0].(int32), args[1].(int32))
+			return []any{errCode}
+		}).
+		AddHostFunc("fd_renumber", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
+			errCode := w.fs.renumber(args[0].(int32), args[1].(int32))
+			return []any{errCode}
+		}).
+		AddHostFunc("fd_filestat_get", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
+			errCode := w.fs.getFileStat(inst, args[0].(int32), args[1].(int32))
+			return []any{errCode}
+		}).
+		AddHostFunc("fd_filestat_set_size", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
+			errCode := w.fs.setFileStatSize(args[0].(int32), args[1].(int64))
+			return []any{errCode}
+		}).
+		AddHostFunc("fd_filestat_set_times", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -490,8 +559,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_pread": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_pread", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pread(
 				inst,
 				args[0].(int32),
@@ -501,8 +573,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"fd_readdir": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("fd_readdir", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.readdir(
 				inst,
 				args[0].(int32),
@@ -512,8 +587,8 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_create_directory": func(
+		}).
+		AddHostFunc("path_create_directory", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -524,8 +599,8 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_filestat_set_times": func(
+		}).
+		AddHostFunc("path_filestat_set_times", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
@@ -540,8 +615,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[6].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_link": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_link", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathLink(
 				inst,
 				args[0].(int32),
@@ -553,8 +631,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[6].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_readlink": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_readlink", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathReadlink(
 				inst,
 				args[0].(int32),
@@ -565,8 +646,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[5].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_rename": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_rename", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathRename(
 				inst,
 				args[0].(int32),
@@ -577,8 +661,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[5].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_symlink": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_symlink", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathSymlink(
 				inst,
 				args[0].(int32),
@@ -588,8 +675,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"path_unlink_file": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("path_unlink_file", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.pathUnlinkFile(
 				inst,
 				args[0].(int32),
@@ -597,8 +687,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 			)
 			return []any{errCode}
-		},
-		"poll_oneoff": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("poll_oneoff", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.pollOneoff(
 				inst,
 				args[0].(int32),
@@ -607,24 +700,36 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 			)
 			return []any{errCode}
-		},
-		"proc_raise": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("proc_raise", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.procRaise(args[0].(int32))
 			return []any{errCode}
-		},
-		"sched_yield": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("sched_yield", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.schedYield()
 			return []any{errCode}
-		},
-		"sock_accept": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("sock_accept", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.sockAccept(
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
 			)
 			return []any{errCode}
-		},
-		"sock_recv": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("sock_recv", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.sockRecv(
 				args[0].(int32),
 				args[1].(int32),
@@ -634,8 +739,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[5].(int32),
 			)
 			return []any{errCode}
-		},
-		"sock_send": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("sock_send", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.sockSend(
 				args[0].(int32),
 				args[1].(int32),
@@ -644,11 +752,13 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[4].(int32),
 			)
 			return []any{errCode}
-		},
-		"sock_shutdown": func(inst *epsilon.ModuleInstance, args ...any) []any {
+		}).
+		AddHostFunc("sock_shutdown", func(
+			inst *epsilon.ModuleInstance,
+			args ...any,
+		) []any {
 			errCode := w.fs.sockShutdown(args[0].(int32), args[1].(int32))
 			return []any{errCode}
-		},
-	}
-	return map[string]map[string]any{WASIModuleName: imports}
+		}).
+		Build()
 }
