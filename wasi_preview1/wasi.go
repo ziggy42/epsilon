@@ -57,23 +57,23 @@ func (w *WasiModule) argsGet(
 ) int32 {
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	bufOffset := uint32(argvBufPtr)
 	for i, arg := range w.args {
 		ptrIndex := uint32(argvPtr) + uint32(i*4)
 		if err := memory.StoreUint32(0, ptrIndex, bufOffset); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 		argBytes := append([]byte(arg), 0)
 		if err := memory.Set(0, bufOffset, argBytes); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 		bufOffset += uint32(len(argBytes))
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) argsSizesGet(
@@ -82,12 +82,12 @@ func (w *WasiModule) argsSizesGet(
 ) int32 {
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	argc := uint32(len(w.args))
 	if err := memory.StoreUint32(0, uint32(argcPtr), argc); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	bufSize := uint32(0)
@@ -95,9 +95,9 @@ func (w *WasiModule) argsSizesGet(
 		bufSize += uint32(len(arg)) + 1
 	}
 	if err := memory.StoreUint32(0, uint32(argvBufSizePtr), bufSize); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) environGet(
@@ -106,27 +106,27 @@ func (w *WasiModule) environGet(
 ) int32 {
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	bufOffset := uint32(envBufPtr)
 	ptrIndex := uint32(envPtr)
 	for key, value := range w.env {
 		if err := memory.StoreUint32(0, ptrIndex, bufOffset); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		// Write the environment variable as "KEY=VALUE\0"
 		envBytes := append([]byte(key+"="+value), 0)
 		if err := memory.Set(0, bufOffset, envBytes); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		bufOffset += uint32(len(envBytes))
 		ptrIndex += 4
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) environSizesGet(
@@ -135,12 +135,12 @@ func (w *WasiModule) environSizesGet(
 ) int32 {
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	environc := uint32(len(w.env))
 	if err := memory.StoreUint32(0, uint32(envcPtr), environc); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	bufSize := uint32(0)
@@ -149,9 +149,9 @@ func (w *WasiModule) environSizesGet(
 		bufSize += uint32(len(key)) + 1 + uint32(len(value)) + 1
 	}
 	if err := memory.StoreUint32(0, uint32(envBufSizePtr), bufSize); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) clockResGet(
@@ -159,20 +159,20 @@ func (w *WasiModule) clockResGet(
 	clockId, resPtr int32,
 ) int32 {
 	res, errCode := getClockResolution(uint32(clockId))
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	err = memory.StoreUint64(0, uint32(resPtr), res)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) clockTimeGet(
@@ -180,19 +180,19 @@ func (w *WasiModule) clockTimeGet(
 	clockId, resPtr int32,
 ) int32 {
 	res, errCode := getTimestamp(w.monotonicClockStartNs, uint32(clockId))
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	if err := memory.StoreUint64(0, uint32(resPtr), uint64(res)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) randomGet(
@@ -201,29 +201,29 @@ func (w *WasiModule) randomGet(
 ) int32 {
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	randBytes := make([]byte, bufLen)
 	_, err = rand.Read(randBytes)
 	if err != nil {
-		return ErrnoIO
+		return errnoIO
 	}
 
 	if err := memory.Set(0, uint32(bufPtr), randBytes); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) procRaise(sig int32) int32 {
-	return ErrnoNotSup
+	return errnoNotSup
 }
 
 func (w *WasiModule) schedYield() int32 {
 	// runtime.Gosched()
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *WasiModule) ToImports() map[string]map[string]any {

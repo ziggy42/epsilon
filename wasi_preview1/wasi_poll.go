@@ -118,12 +118,12 @@ func (w *WasiModule) pollOneoff(
 	inPtr, outPtr, nsubscriptions, neventsPtr int32,
 ) int32 {
 	if nsubscriptions == 0 {
-		return ErrnoInval
+		return errnoInval
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	subscriptions := make([]subscription, nsubscriptions)
@@ -131,7 +131,7 @@ func (w *WasiModule) pollOneoff(
 		offset := uint32(inPtr) + uint32(i)*uint32(unsafe.Sizeof(subscription{}))
 		sub, err := parseSubscription(memory, offset)
 		if err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 		subscriptions[i] = sub
 	}
@@ -152,11 +152,11 @@ func (w *WasiModule) pollOneoff(
 			if clockSub.flags&subclockFlagsSubscriptionClockAbstime != 0 {
 				// Absolute time
 				now, errCode := getTimestamp(w.monotonicClockStartNs, clockSub.clockId)
-				if errCode != ErrnoSuccess {
+				if errCode != errnoSuccess {
 					// Invalid clock ID
 					events = append(events, event{
 						userData:  sub.userData,
-						errorCode: int16(ErrnoInval),
+						errorCode: int16(errnoInval),
 						eventType: eventTypeClock,
 					})
 					continue
@@ -176,7 +176,7 @@ func (w *WasiModule) pollOneoff(
 			// Store clock event for later - only add it if we actually sleep
 			clockEvents = append(clockEvents, event{
 				userData:  sub.userData,
-				errorCode: int16(ErrnoSuccess),
+				errorCode: int16(errnoSuccess),
 				eventType: eventTypeClock,
 			})
 		case eventTypeFdRead, eventTypeFdWrite:
@@ -185,7 +185,7 @@ func (w *WasiModule) pollOneoff(
 
 			// Validate the FD and check rights
 			fd, errCode := w.fs.getFileOrDir(fdIndex, RightsPollFdReadwrite)
-			if errCode != ErrnoSuccess {
+			if errCode != errnoSuccess {
 				events = append(events, event{
 					userData:  sub.userData,
 					errorCode: int16(errCode),
@@ -224,7 +224,7 @@ func (w *WasiModule) pollOneoff(
 			if isReady {
 				events = append(events, event{
 					userData:  sub.userData,
-					errorCode: int16(ErrnoSuccess),
+					errorCode: int16(errnoSuccess),
 					eventType: sub.subscriptionType,
 					fdReadWrite: eventFdReadwrite{
 						nBytes: nbytes,
@@ -239,7 +239,7 @@ func (w *WasiModule) pollOneoff(
 			// Unknown event type
 			events = append(events, event{
 				userData:  sub.userData,
-				errorCode: int16(ErrnoInval),
+				errorCode: int16(errnoInval),
 				eventType: sub.subscriptionType,
 			})
 		}
@@ -259,15 +259,15 @@ func (w *WasiModule) pollOneoff(
 	for i, e := range events {
 		offset := uint32(outPtr) + uint32(i)*uint32(unsafe.Sizeof(event{}))
 		if err := writeEvent(memory, offset, e); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 	}
 
 	// Write the number of events
 	err = memory.StoreUint32(0, uint32(neventsPtr), uint32(len(events)))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }

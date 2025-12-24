@@ -221,10 +221,10 @@ func (w *wasiResourceTable) advise(
 	advice int32,
 ) int32 {
 	if _, ok := w.fds[fdIndex]; !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	// TODO: implement
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) allocate(
@@ -232,7 +232,7 @@ func (w *wasiResourceTable) allocate(
 	offset, length int64,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdAllocate)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -243,35 +243,35 @@ func (w *wasiResourceTable) allocate(
 
 	targetSize := offset + length
 	if targetSize <= info.Size() {
-		return ErrnoSuccess
+		return errnoSuccess
 	}
 
 	if err := fd.file.Truncate(targetSize); err != nil {
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) close(fdIndex int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	fd.file.Close()
 	delete(w.fds, fdIndex)
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) dataSync(fdIndex int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if err := fd.file.Sync(); err != nil {
 		return mapError(err)
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) getStat(
@@ -280,36 +280,36 @@ func (w *wasiResourceTable) getStat(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	err = memory.StoreByte(0, uint32(fdStatPtr), uint8(fd.fileType))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	err = memory.StoreUint16(0, uint32(fdStatPtr+2), fd.flags)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	err = memory.StoreUint64(0, uint32(fdStatPtr+8), uint64(fd.rights))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	err = memory.StoreUint64(0, uint32(fdStatPtr+16), uint64(fd.rightsInheriting))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFdstatSetFlags)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -327,7 +327,7 @@ func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) setStatRights(
@@ -336,20 +336,20 @@ func (w *wasiResourceTable) setStatRights(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	// Can only remove rights, not add them
 	if (rightsBase & ^fd.rights) != 0 {
-		return ErrnoNotCapable
+		return errnoNotCapable
 	}
 	if (rightsInheriting & ^fd.rightsInheriting) != 0 {
-		return ErrnoNotCapable
+		return errnoNotCapable
 	}
 
 	fd.rights = rightsBase
 	fd.rightsInheriting = rightsInheriting
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) getFileStat(
@@ -357,13 +357,13 @@ func (w *wasiResourceTable) getFileStat(
 	fdIndex, bufPtr int32,
 ) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFilestatGet)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	var stat unix.Stat_t
@@ -376,14 +376,14 @@ func (w *wasiResourceTable) getFileStat(
 
 func (w *wasiResourceTable) setFileStatSize(fdIndex int32, size int64) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFilestatSetSize)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	if err := fd.file.Truncate(size); err != nil {
 		return mapError(err)
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) setFileStatTimes(
@@ -392,7 +392,7 @@ func (w *wasiResourceTable) setFileStatTimes(
 	fstFlags int32,
 ) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFilestatSetTimes)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -421,20 +421,20 @@ func (w *wasiResourceTable) pread(
 	nPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdRead)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	var totalRead uint32
 	for i := range iovecLength {
 		ptr, length, err := readIovecItemPtr(memory, uint32(iovecPtr)+uint32(i*8))
 		if err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		buf := make([]byte, length)
@@ -444,7 +444,7 @@ func (w *wasiResourceTable) pread(
 		}
 
 		if err := memory.Set(0, ptr, buf[:n]); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		totalRead += uint32(n)
@@ -454,9 +454,9 @@ func (w *wasiResourceTable) pread(
 	}
 
 	if err := memory.StoreUint32(0, uint32(nPtr), totalRead); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) getPrestat(
@@ -465,16 +465,16 @@ func (w *wasiResourceTable) getPrestat(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	if !fd.isPreopen {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	// Write prestat struct directly to memory:
@@ -482,14 +482,14 @@ func (w *wasiResourceTable) getPrestat(
 	// - Bytes 4-7: name length as uint32
 	err = memory.StoreByte(0, uint32(prestatPtr), preopenTypeDir)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	err = memory.StoreUint32(0, uint32(prestatPtr+4), uint32(len(fd.guestPath)))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) prestatDirName(
@@ -498,23 +498,23 @@ func (w *wasiResourceTable) prestatDirName(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok || !fd.isPreopen {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	if int32(len(fd.guestPath)) > pathLen {
-		return ErrnoNameTooLong
+		return errnoNameTooLong
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	if err := memory.Set(0, uint32(pathPtr), []byte(fd.guestPath)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pwrite(
@@ -524,17 +524,17 @@ func (w *wasiResourceTable) pwrite(
 	nPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdWrite)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	if offset < 0 {
-		return ErrnoInval
+		return errnoInval
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	var totalWritten uint32
@@ -543,7 +543,7 @@ func (w *wasiResourceTable) pwrite(
 	for i := range ciovecLength {
 		data, err := readCiovecItem(memory, uint32(ciovecPtr)+uint32(i*8))
 		if err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		var n int
@@ -572,10 +572,10 @@ func (w *wasiResourceTable) pwrite(
 	}
 
 	if err := memory.StoreUint32(0, uint32(nPtr), totalWritten); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) read(
@@ -583,20 +583,20 @@ func (w *wasiResourceTable) read(
 	fdIndex, iovecPtr, iovecLength, nPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdRead)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	var totalRead uint32
 	for i := range iovecLength {
 		ptr, length, err := readIovecItemPtr(memory, uint32(iovecPtr)+uint32(i*8))
 		if err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		buf := make([]byte, length)
@@ -606,7 +606,7 @@ func (w *wasiResourceTable) read(
 		}
 
 		if err := memory.Set(0, ptr, buf[:n]); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		totalRead += uint32(n)
@@ -617,9 +617,9 @@ func (w *wasiResourceTable) read(
 	}
 
 	if err := memory.StoreUint32(0, uint32(nPtr), totalRead); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) readdir(
@@ -629,13 +629,13 @@ func (w *wasiResourceTable) readdir(
 	bufusedPtr int32,
 ) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdReaddir)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	// Open fresh handle to ensure full listing regardless of seek state
@@ -689,7 +689,7 @@ func (w *wasiResourceTable) readdir(
 	startIndex := int(cookie)
 	if startIndex >= len(wasiEntries) {
 		memory.StoreUint32(0, uint32(bufusedPtr), 0)
-		return ErrnoSuccess
+		return errnoSuccess
 	}
 
 	bufOffset := uint32(bufPtr)
@@ -719,7 +719,7 @@ func (w *wasiResourceTable) readdir(
 		toWrite := min(uint32(len(entryBytes)), available)
 
 		if err := memory.Set(0, bufOffset, entryBytes[:toWrite]); err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		bufOffset += toWrite
@@ -735,27 +735,27 @@ func (w *wasiResourceTable) readdir(
 	}
 
 	if err := memory.StoreUint32(0, uint32(bufusedPtr), written); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) renumber(fdIndex, toFdIndex int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	toFd, exists := w.fds[toFdIndex]
 	if !exists {
-		return ErrnoBadF
+		return errnoBadF
 	}
 
 	toFd.file.Close()
 	w.fds[toFdIndex] = fd
 	delete(w.fds, fdIndex)
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) seek(
@@ -765,7 +765,7 @@ func (w *wasiResourceTable) seek(
 	whence, newOffsetPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdSeek)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -778,7 +778,7 @@ func (w *wasiResourceTable) seek(
 	case whenceEnd:
 		goWhence = io.SeekEnd
 	default:
-		return ErrnoInval
+		return errnoInval
 	}
 
 	newOffset, err := fd.file.Seek(offset, goWhence)
@@ -788,25 +788,25 @@ func (w *wasiResourceTable) seek(
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	err = memory.StoreUint64(0, uint32(newOffsetPtr), uint64(newOffset))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) sync(fdIndex int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if err := fd.file.Sync(); err != nil {
-		return ErrnoIO
+		return errnoIO
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) tell(
@@ -814,7 +814,7 @@ func (w *wasiResourceTable) tell(
 	fdIndex, offsetPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdTell)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -826,14 +826,14 @@ func (w *wasiResourceTable) tell(
 
 	memory, memErr := inst.GetMemory(WASIMemoryExportName)
 	if memErr != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	err = memory.StoreUint64(0, uint32(offsetPtr), uint64(currentOffset))
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) write(
@@ -841,20 +841,20 @@ func (w *wasiResourceTable) write(
 	fdIndex, ciovecPtr, ciovecLength, nPtr int32,
 ) int32 {
 	fd, errCode := w.getFile(fdIndex, RightsFdWrite)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	var written uint32
 	for i := range ciovecLength {
 		data, err := readCiovecItem(memory, uint32(ciovecPtr)+uint32(i*8))
 		if err != nil {
-			return ErrnoFault
+			return errnoFault
 		}
 
 		n, err := fd.file.Write(data)
@@ -868,9 +868,9 @@ func (w *wasiResourceTable) write(
 	}
 
 	if err := memory.StoreUint32(0, uint32(nPtr), written); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathCreateDirectory(
@@ -879,14 +879,14 @@ func (w *wasiResourceTable) pathCreateDirectory(
 ) int32 {
 	rights := RightsPathCreateDirectory
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	if err := os.Mkdir(path, 0755); err != nil {
 		return mapError(err)
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathFilestatGet(
@@ -895,13 +895,13 @@ func (w *wasiResourceTable) pathFilestatGet(
 ) int32 {
 	rights := RightsPathFilestatGet
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	// Get file info - follow symlinks unless LookupFlagsSymlinkFollow is NOT set
@@ -939,7 +939,7 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 ) int32 {
 	rights := RightsPathFilestatSetTimes
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -973,18 +973,18 @@ func (w *wasiResourceTable) pathLink(
 	oldFlags, oldPathPtr, oldPathLen, newIndex, newPathPtr, newPathLen int32,
 ) int32 {
 	if oldFlags&lookupFlagsSymlinkFollow != 0 {
-		return ErrnoInval
+		return errnoInval
 	}
 
 	rights := RightsPathLinkSource
 	from, errCode := w.resolvePath(inst, oldIndex, oldPathPtr, oldPathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	rights = RightsPathLinkTarget
 	to, errCode := w.resolvePath(inst, newIndex, newPathPtr, newPathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -992,7 +992,7 @@ func (w *wasiResourceTable) pathLink(
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathOpen(
@@ -1002,18 +1002,18 @@ func (w *wasiResourceTable) pathOpen(
 	fdflags, newFdPtr int32,
 ) int32 {
 	fd, errCode := w.getDir(fdIndex, RightsPathOpen)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	rights := RightsPathOpen
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -1021,7 +1021,7 @@ func (w *wasiResourceTable) pathOpen(
 	if isDirFlag {
 		stat, err := os.Stat(path)
 		if err == nil && !stat.IsDir() {
-			return ErrnoNotDir
+			return errnoNotDir
 		}
 	}
 
@@ -1036,7 +1036,7 @@ func (w *wasiResourceTable) pathOpen(
 	if oflags&int32(oFlagsTrunc) != 0 {
 		// Truncation requires PATH_FILESTAT_SET_SIZE right
 		if fd.rights&RightsPathFilestatSetSize == 0 {
-			return ErrnoNotCapable
+			return errnoNotCapable
 		}
 		osFlags |= os.O_TRUNC
 	}
@@ -1082,10 +1082,10 @@ func (w *wasiResourceTable) pathOpen(
 	if err != nil {
 		delete(w.fds, newFdIndex)
 		file.Close()
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathReadlink(
@@ -1094,13 +1094,13 @@ func (w *wasiResourceTable) pathReadlink(
 ) int32 {
 	rights := RightsPathReadlink
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	target, err := os.Readlink(path)
@@ -1112,14 +1112,14 @@ func (w *wasiResourceTable) pathReadlink(
 	length := min(uint32(len(targetBytes)), uint32(bufLen))
 
 	if err := memory.Set(0, uint32(bufPtr), targetBytes[:length]); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	if err := memory.StoreUint32(0, uint32(bufusedPtr), length); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathRemoveDirectory(
@@ -1128,7 +1128,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 ) int32 {
 	rights := RightsPathRemoveDirectory
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -1137,7 +1137,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return mapError(err)
 	}
 	if !info.IsDir() {
-		return ErrnoNotDir
+		return errnoNotDir
 	}
 
 	err = os.Remove(path)
@@ -1145,7 +1145,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathRename(
@@ -1154,28 +1154,28 @@ func (w *wasiResourceTable) pathRename(
 ) int32 {
 	rights := RightsPathRenameSource
 	from, errCode := w.resolvePath(inst, fdIndex, oldPathPtr, oldPathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	// For destination, we need custom handling because it might not exist yet
 	newFd, errCode := w.getDir(newFdIndex, RightsPathRenameTarget)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	if filepath.IsAbs(newPath) {
-		return ErrnoPerm
+		return errnoPerm
 	}
 
 	to := filepath.Join(newFd.file.Name(), newPath)
@@ -1183,7 +1183,7 @@ func (w *wasiResourceTable) pathRename(
 	// Ensure resolved path stays within base directory
 	relPath, err := filepath.Rel(newFd.file.Name(), to)
 	if err != nil || strings.HasPrefix(relPath, "..") {
-		return ErrnoNotCapable
+		return errnoNotCapable
 	}
 
 	// Get source file info
@@ -1206,9 +1206,9 @@ func (w *wasiResourceTable) pathRename(
 		// Cannot replace a directory with a non-directory or vice versa
 		if oldIsDir != newIsDir {
 			if newIsDir {
-				return ErrnoIsDir
+				return errnoIsDir
 			}
-			return ErrnoNotDir
+			return errnoNotDir
 		}
 
 		// If both are directories, destination must be empty
@@ -1218,7 +1218,7 @@ func (w *wasiResourceTable) pathRename(
 				return mapError(err)
 			}
 			if len(entries) > 0 {
-				return ErrnoNotEmpty
+				return errnoNotEmpty
 			}
 			// Remove the empty destination directory first
 			// os.Rename doesn't replace directories on all platforms (e.g., macOS)
@@ -1233,7 +1233,7 @@ func (w *wasiResourceTable) pathRename(
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathSymlink(
@@ -1241,32 +1241,32 @@ func (w *wasiResourceTable) pathSymlink(
 	oldPathPtr, oldPathLen, fdIndex, newPathPtr, newPathLen int32,
 ) int32 {
 	fd, errCode := w.getDir(fdIndex, RightsPathSymlink)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	oldPath, err := w.readString(memory, oldPathPtr, oldPathLen)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 
 	// Symlink destination cannot have a trailing slash
 	if strings.HasSuffix(newPath, "/") {
-		return ErrnoNoEnt
+		return errnoNoEnt
 	}
 
 	if strings.HasPrefix(oldPath, "/") {
-		return ErrnoNoEnt
+		return errnoNoEnt
 	}
 
 	// Resolve path relative to the fd's directory (openat semantics)
@@ -1276,7 +1276,7 @@ func (w *wasiResourceTable) pathSymlink(
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathUnlinkFile(
@@ -1285,7 +1285,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 ) int32 {
 	rights := RightsPathUnlinkFile
 	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return errCode
 	}
 
@@ -1295,25 +1295,25 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return mapError(err)
 	}
 	if info.IsDir() {
-		return ErrnoIsDir
+		return errnoIsDir
 	}
 
 	if err := os.Remove(path); err != nil {
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) sockAccept(fdIndex, flags, fdPtr int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return ErrnoNotSock
+		return errnoNotSock
 	}
-	return ErrnoNotSup
+	return errnoNotSup
 }
 
 func (w *wasiResourceTable) sockRecv(
@@ -1321,13 +1321,13 @@ func (w *wasiResourceTable) sockRecv(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return ErrnoNotSock
+		return errnoNotSock
 	}
 	// TODO: implement
-	return ErrnoNotSup
+	return errnoNotSup
 }
 
 func (w *wasiResourceTable) sockSend(
@@ -1335,25 +1335,25 @@ func (w *wasiResourceTable) sockSend(
 ) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return ErrnoNotSock
+		return errnoNotSock
 	}
 	// TODO: implement
-	return ErrnoNotSup
+	return errnoNotSup
 }
 
 func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 	fd, ok := w.fds[fdIndex]
 	if !ok {
-		return ErrnoBadF
+		return errnoBadF
 	}
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return ErrnoNotSock
+		return errnoNotSock
 	}
 	// TODO: implement
-	return ErrnoNotSup
+	return errnoNotSup
 }
 
 func (w *wasiResourceTable) allocateFdIndex() int32 {
@@ -1371,22 +1371,22 @@ func (w *wasiResourceTable) resolvePath(
 	rights int64,
 ) (string, int32) {
 	fd, errCode := w.getDir(fdIndex, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return "", errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
-		return "", ErrnoFault
+		return "", errnoFault
 	}
 
 	path, err := w.readString(memory, pathPtr, pathLen)
 	if err != nil {
-		return "", ErrnoFault
+		return "", errnoFault
 	}
 
 	if filepath.IsAbs(path) {
-		return "", ErrnoPerm
+		return "", errnoPerm
 	}
 
 	fullPath := filepath.Join(fd.file.Name(), path)
@@ -1394,7 +1394,7 @@ func (w *wasiResourceTable) resolvePath(
 	// Ensure resolved path stays within base directory
 	relPath, err := filepath.Rel(fd.file.Name(), fullPath)
 	if err != nil || strings.HasPrefix(relPath, "..") {
-		return "", ErrnoNotCapable
+		return "", errnoNotCapable
 	}
 
 	// If path has trailing slash, verify it's a directory
@@ -1404,11 +1404,11 @@ func (w *wasiResourceTable) resolvePath(
 			return "", mapError(err)
 		}
 		if !stat.IsDir() {
-			return "", ErrnoNotDir
+			return "", errnoNotDir
 		}
 	}
 
-	return fullPath, ErrnoSuccess
+	return fullPath, errnoSuccess
 }
 
 func (w *wasiResourceTable) getFile(
@@ -1416,13 +1416,13 @@ func (w *wasiResourceTable) getFile(
 	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, errCode := w.getFileOrDir(fdIdx, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return nil, errCode
 	}
 	if fd.fileType == fileTypeDirectory {
-		return nil, ErrnoIsDir
+		return nil, errnoIsDir
 	}
-	return fd, ErrnoSuccess
+	return fd, errnoSuccess
 }
 
 func (w *wasiResourceTable) getDir(
@@ -1430,13 +1430,13 @@ func (w *wasiResourceTable) getDir(
 	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, errCode := w.getFileOrDir(fdIdx, rights)
-	if errCode != ErrnoSuccess {
+	if errCode != errnoSuccess {
 		return nil, errCode
 	}
 	if fd.fileType != fileTypeDirectory {
-		return nil, ErrnoNotDir
+		return nil, errnoNotDir
 	}
-	return fd, ErrnoSuccess
+	return fd, errnoSuccess
 }
 
 func (w *wasiResourceTable) getFileOrDir(
@@ -1445,12 +1445,12 @@ func (w *wasiResourceTable) getFileOrDir(
 ) (*wasiFileDescriptor, int32) {
 	fd, ok := w.fds[fdIdx]
 	if !ok {
-		return nil, ErrnoBadF
+		return nil, errnoBadF
 	}
 	if fd.rights&rights == 0 {
-		return nil, ErrnoNotCapable
+		return nil, errnoNotCapable
 	}
-	return fd, ErrnoSuccess
+	return fd, errnoSuccess
 }
 
 func readIovecItemPtr(
@@ -1520,33 +1520,33 @@ func writeFilestat(
 	unixStat unix.Stat_t,
 ) int32 {
 	if err := mem.StoreUint64(0, offset, uint64(unixStat.Dev)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	if err := mem.StoreUint64(0, offset+8, unixStat.Ino); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	if err := mem.StoreByte(0, offset+16, uint8(fileType)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	if err := mem.StoreUint64(0, offset+24, uint64(unixStat.Nlink)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	if err := mem.StoreUint64(0, offset+32, uint64(unixStat.Size)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	atim := unixStat.Atim.Sec*1e9 + unixStat.Atim.Nsec
 	if err := mem.StoreUint64(0, offset+40, uint64(atim)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	mtim := unixStat.Mtim.Sec*1e9 + unixStat.Mtim.Nsec
 	if err := mem.StoreUint64(0, offset+48, uint64(mtim)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
 	ctim := unixStat.Ctim.Sec*1e9 + unixStat.Ctim.Nsec
 	if err := mem.StoreUint64(0, offset+56, uint64(ctim)); err != nil {
-		return ErrnoFault
+		return errnoFault
 	}
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) readString(
@@ -1572,10 +1572,10 @@ func computeAndSetTimestamps(
 ) int32 {
 	// Validate flags: cannot have both SET and NOW
 	if (fstFlags&fstFlagsAtim != 0) && (fstFlags&fstFlagsAtimNow != 0) {
-		return ErrnoInval
+		return errnoInval
 	}
 	if (fstFlags&fstFlagsMtim != 0) && (fstFlags&fstFlagsMtimNow != 0) {
-		return ErrnoInval
+		return errnoInval
 	}
 
 	// Check if we're actually setting any timestamps
@@ -1584,7 +1584,7 @@ func computeAndSetTimestamps(
 
 	// If not setting any timestamps, return success immediately
 	if !settingAtim && !settingMtim {
-		return ErrnoSuccess
+		return errnoSuccess
 	}
 
 	// Get current timestamps if we need to preserve them
@@ -1626,12 +1626,12 @@ func computeAndSetTimestamps(
 		return mapError(err)
 	}
 
-	return ErrnoSuccess
+	return errnoSuccess
 }
 
 func mapError(err error) int32 {
 	if err == nil {
-		return ErrnoSuccess
+		return errnoSuccess
 	}
 
 	// Unpack os.PathError/LinkError
@@ -1647,47 +1647,47 @@ func mapError(err error) int32 {
 
 	// Check specific errors
 	if err == os.ErrNotExist {
-		return ErrnoNoEnt
+		return errnoNoEnt
 	}
 	if err == os.ErrExist {
-		return ErrnoExist
+		return errnoExist
 	}
 	if err == os.ErrPermission {
-		return ErrnoAcces
+		return errnoAcces
 	}
 
 	// Check syscall errno
 	if errno, ok := err.(syscall.Errno); ok {
 		switch errno {
 		case syscall.EACCES:
-			return ErrnoAcces
+			return errnoAcces
 		case syscall.EPERM:
-			return ErrnoPerm
+			return errnoPerm
 		case syscall.ENOENT:
-			return ErrnoNoEnt
+			return errnoNoEnt
 		case syscall.EEXIST:
-			return ErrnoExist
+			return errnoExist
 		case syscall.EISDIR:
-			return ErrnoIsDir
+			return errnoIsDir
 		case syscall.ENOTDIR:
-			return ErrnoNotDir
+			return errnoNotDir
 		case syscall.EINVAL:
-			return ErrnoInval
+			return errnoInval
 		case syscall.ENOTEMPTY:
-			return ErrnoNotEmpty
+			return errnoNotEmpty
 		case syscall.ELOOP:
-			return ErrnoLoop
+			return errnoLoop
 		case syscall.EBADF:
-			return ErrnoBadF
+			return errnoBadF
 		case syscall.EMFILE, syscall.ENFILE:
-			return ErrnoNFile
+			return errnoNFile
 		case syscall.ENAMETOOLONG:
-			return ErrnoNameTooLong
+			return errnoNameTooLong
 		case syscall.EPIPE:
-			return ErrnoPipe
+			return errnoPipe
 		}
 	}
 
 	// Fallback
-	return ErrnoIO
+	return errnoIO
 }

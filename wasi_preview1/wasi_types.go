@@ -14,87 +14,28 @@
 
 package wasi_preview1
 
-// Generated from
-// https://github.com/WebAssembly/WASI/blob/8d7fb6eff7d5964b2375beb10518d2327a1dcfe8/legacy/preview0/witx/wasi_unstable.witx
-
+// See github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/witx/typenames.witx
+// for a lot more error codes.
 const (
-	ErrnoSuccess        int32 = 0  // No error occurred.
-	Errno2Big           int32 = 1  // Argument list too long.
-	ErrnoAcces          int32 = 2  // Permission denied.
-	ErrnoAddrInUse      int32 = 3  // Address in use.
-	ErrnoAddrNotAvail   int32 = 4  // Address not available.
-	ErrnoAfNoSupport    int32 = 5  // Address family not supported.
-	ErrnoAgain          int32 = 6  // Resource unavailable, or would block.
-	ErrnoAlready        int32 = 7  // Connection already in progress.
-	ErrnoBadF           int32 = 8  // Bad file descriptor.
-	ErrnoBadMsg         int32 = 9  // Bad message.
-	ErrnoBusy           int32 = 10 // Device or resource busy.
-	ErrnoCanceled       int32 = 11 // Operation canceled.
-	ErrnoChild          int32 = 12 // No child processes.
-	ErrnoConnAborted    int32 = 13 // Connection aborted.
-	ErrnoConnRefused    int32 = 14 // Connection refused.
-	ErrnoConnReset      int32 = 15 // Connection reset.
-	ErrnoDeadLk         int32 = 16 // Resource deadlock would occur.
-	ErrnoDestAddrReq    int32 = 17 // Destination address required.
-	ErrnoDom            int32 = 18 // Mathematics argument out of domain.
-	ErrnoDQuot          int32 = 19 // Reserved.
-	ErrnoExist          int32 = 20 // File exists.
-	ErrnoFault          int32 = 21 // Bad address.
-	ErrnoFBig           int32 = 22 // File too large.
-	ErrnoHostUnreach    int32 = 23 // Host is unreachable.
-	ErrnoIdrm           int32 = 24 // Identifier removed.
-	ErrnoIlSeq          int32 = 25 // Illegal byte sequence.
-	ErrnoInProgress     int32 = 26 // Operation in progress.
-	ErrnoIntr           int32 = 27 // Interrupted function.
-	ErrnoInval          int32 = 28 // Invalid argument.
-	ErrnoIO             int32 = 29 // I/O error.
-	ErrnoIsConn         int32 = 30 // Socket is connected.
-	ErrnoIsDir          int32 = 31 // Is a directory.
-	ErrnoLoop           int32 = 32 // Too many levels of symbolic links.
-	ErrnoMFile          int32 = 33 // File descriptor value too large.
-	ErrnoMLink          int32 = 34 // Too many links.
-	ErrnoMsgSize        int32 = 35 // Message too large.
-	ErrnoMultihop       int32 = 36 // Reserved.
-	ErrnoNameTooLong    int32 = 37 // Filename too long.
-	ErrnoNetDown        int32 = 38 // Network is down.
-	ErrnoNetReset       int32 = 39 // Connection aborted by network.
-	ErrnoNetUnreach     int32 = 40 // Network unreachable.
-	ErrnoNFile          int32 = 41 // Too many files open in system.
-	ErrnoNoBufs         int32 = 42 // No buffer space available.
-	ErrnoNoDev          int32 = 43 // No such device.
-	ErrnoNoEnt          int32 = 44 // No such file or directory.
-	ErrnoNoExec         int32 = 45 // Executable file format error.
-	ErrnoNoLck          int32 = 46 // No locks available.
-	ErrnoNoLink         int32 = 47 // Reserved.
-	ErrnoNoMem          int32 = 48 // Not enough space.
-	ErrnoNoMsg          int32 = 49 // No message of the desired type.
-	ErrnoNoProtoOpt     int32 = 50 // Protocol not available.
-	ErrnoNoSpc          int32 = 51 // No space left on device.
-	ErrnoNoSys          int32 = 52 // Function not supported.
-	ErrnoNotConn        int32 = 53 // The socket is not connected.
-	ErrnoNotDir         int32 = 54 // Not a directory or symbolic link.
-	ErrnoNotEmpty       int32 = 55 // Directory not empty.
-	ErrnoNotRecoverable int32 = 56 // State not recoverable.
-	ErrnoNotSock        int32 = 57 // Not a socket.
-	ErrnoNotSup         int32 = 58 // Not supported.
-	ErrnoNoTty          int32 = 59 // Inappropriate I/O control operation.
-	ErrnoNxIO           int32 = 60 // No such device or address.
-	ErrnoOverflow       int32 = 61 // Value too large to be stored.
-	ErrnoOwnerDead      int32 = 62 // Previous owner died.
-	ErrnoPerm           int32 = 63 // Operation not permitted.
-	ErrnoPipe           int32 = 64 // Broken pipe.
-	ErrnoProto          int32 = 65 // Protocol error.
-	ErrnoProtoNoSupport int32 = 66 // Protocol not supported.
-	ErrnoProtoType      int32 = 67 // Protocol wrong type for socket.
-	ErrnoRange          int32 = 68 // Result too large.
-	ErrnoRoFs           int32 = 69 // Read-only file system.
-	ErrnoSPipe          int32 = 70 // Invalid seek.
-	ErrnoSrch           int32 = 71 // No such process.
-	ErrnoStale          int32 = 72 // Reserved.
-	ErrnoTimedOut       int32 = 73 // Connection timed out.
-	ErrnoTxtBsy         int32 = 74 // Text file busy.
-	ErrnoXDev           int32 = 75 // Cross-device link.
-	ErrnoNotCapable     int32 = 76 // Extension: Capabilities insufficient.
+	errnoSuccess     int32 = 0  // No error occurred.
+	errnoAcces       int32 = 2  // Permission denied.
+	errnoBadF        int32 = 8  // Bad file descriptor.
+	errnoExist       int32 = 20 // File exists.
+	errnoFault       int32 = 21 // Bad address.
+	errnoInval       int32 = 28 // Invalid argument.
+	errnoIO          int32 = 29 // I/O error.
+	errnoIsDir       int32 = 31 // Is a directory.
+	errnoLoop        int32 = 32 // Too many levels of symbolic links.
+	errnoNameTooLong int32 = 37 // Filename too long.
+	errnoNFile       int32 = 41 // Too many files open in system.
+	errnoNoEnt       int32 = 44 // No such file or directory.
+	errnoNotDir      int32 = 54 // Not a directory or symbolic link.
+	errnoNotEmpty    int32 = 55 // Directory not empty.
+	errnoNotSock     int32 = 57 // Not a socket.
+	errnoNotSup      int32 = 58 // Not supported.
+	errnoPerm        int32 = 63 // Operation not permitted.
+	errnoPipe        int32 = 64 // Broken pipe.
+	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
 )
 
 const (

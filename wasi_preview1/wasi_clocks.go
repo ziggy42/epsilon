@@ -27,25 +27,25 @@ const (
 
 func getClockResolution(clockId uint32) (uint64, int32) {
 	if !isValidClockId(clockId) {
-		return 0, ErrnoInval
+		return 0, errnoInval
 	}
 
-	return clockResolutionNs, ErrnoSuccess
+	return clockResolutionNs, errnoSuccess
 }
 
 func getTimestamp(monotonicClockStartNs int64, clockId uint32) (int64, int32) {
 	if !isValidClockId(clockId) {
-		return 0, ErrnoInval
+		return 0, errnoInval
 	}
 
 	switch clockId {
 	case clockRealtime:
-		return time.Now().UnixNano(), ErrnoSuccess
+		return time.Now().UnixNano(), errnoSuccess
 	case clockMonotonic:
-		return time.Now().UnixNano() - monotonicClockStartNs, ErrnoSuccess
+		return time.Now().UnixNano() - monotonicClockStartNs, errnoSuccess
 	default:
 		// TODO: ClockProcessCPUTimeID, ClockThreadCPUTimeID are not supported.
-		return 0, ErrnoNotSup
+		return 0, errnoNotSup
 	}
 }
 
