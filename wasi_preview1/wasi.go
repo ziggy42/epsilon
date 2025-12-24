@@ -16,7 +16,6 @@ package wasi_preview1
 
 import (
 	"crypto/rand"
-	"fmt"
 	"os"
 	"time"
 
@@ -24,9 +23,8 @@ import (
 )
 
 const (
-	WASIMemoryExportName  = "memory"
-	WASIModuleName        = "wasi_snapshot_preview1"
-	WASIClockResolutionNs = 1
+	WASIMemoryExportName = "memory"
+	WASIModuleName       = "wasi_snapshot_preview1"
 )
 
 type WasiModule struct {
@@ -160,8 +158,9 @@ func (w *WasiModule) clockResGet(
 	inst *epsilon.ModuleInstance,
 	clockId, resPtr int32,
 ) int32 {
-	if !isValidClockId(uint32(clockId)) {
-		return ErrnoInval
+	res, errCode := getClockResolution(uint32(clockId))
+	if errCode != ErrnoSuccess {
+		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
@@ -169,7 +168,7 @@ func (w *WasiModule) clockResGet(
 		return ErrnoFault
 	}
 
-	err = memory.StoreUint64(0, uint32(resPtr), WASIClockResolutionNs)
+	err = memory.StoreUint64(0, uint32(resPtr), res)
 	if err != nil {
 		return ErrnoFault
 	}
@@ -180,13 +179,9 @@ func (w *WasiModule) clockTimeGet(
 	inst *epsilon.ModuleInstance,
 	clockId, resPtr int32,
 ) int32 {
-	if !isValidClockId(uint32(clockId)) {
-		return ErrnoInval
-	}
-
-	res, err := w.getTimestamp(uint32(clockId))
-	if err != nil {
-		return ErrnoInval
+	res, errCode := getTimestamp(w.monotonicClockStartNs, uint32(clockId))
+	if errCode != ErrnoSuccess {
+		return errCode
 	}
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
@@ -198,30 +193,6 @@ func (w *WasiModule) clockTimeGet(
 		return ErrnoFault
 	}
 	return ErrnoSuccess
-}
-
-func (w *WasiModule) getTimestamp(clockId uint32) (int64, error) {
-	switch clockId {
-	case ClockRealtime:
-		return time.Now().UnixNano(), nil
-	case ClockMonotonic, ClockProcessCPUTimeID, ClockThreadCPUTimeID:
-		// TODO: ClockProcessCPUTimeID, ClockThreadCPUTimeID are not correct.
-		return time.Now().UnixNano() - w.monotonicClockStartNs, nil
-	default:
-		return -1, fmt.Errorf("unknown clock ID: %d", clockId)
-	}
-}
-
-func isValidClockId(clockId uint32) bool {
-	switch clockId {
-	case ClockRealtime,
-		ClockMonotonic,
-		ClockProcessCPUTimeID,
-		ClockThreadCPUTimeID:
-		return true
-	default:
-		return false
-	}
 }
 
 func (w *WasiModule) randomGet(

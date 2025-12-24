@@ -18,13 +18,6 @@ package wasi_preview1
 // https://github.com/WebAssembly/WASI/blob/8d7fb6eff7d5964b2375beb10518d2327a1dcfe8/legacy/preview0/witx/wasi_unstable.witx
 
 const (
-	ClockRealtime         uint32 = 0 // The clock measuring real time.
-	ClockMonotonic        uint32 = 1 // The store-wide monotonic clock.
-	ClockProcessCPUTimeID uint32 = 2 // The CPU-time clock for the process.
-	ClockThreadCPUTimeID  uint32 = 3 // The CPU-time clock for the thread.
-)
-
-const (
 	ErrnoSuccess        int32 = 0  // No error occurred.
 	Errno2Big           int32 = 1  // Argument list too long.
 	ErrnoAcces          int32 = 2  // Permission denied.

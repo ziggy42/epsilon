@@ -151,8 +151,8 @@ func (w *WasiModule) pollOneoff(
 			var timeout int64
 			if clockSub.flags&subclockFlagsSubscriptionClockAbstime != 0 {
 				// Absolute time
-				now, err := w.getTimestamp(clockSub.clockId)
-				if err != nil {
+				now, errCode := getTimestamp(w.monotonicClockStartNs, clockSub.clockId)
+				if errCode != ErrnoSuccess {
 					// Invalid clock ID
 					events = append(events, event{
 						userData:  sub.userData,
