@@ -102,10 +102,6 @@ type ModuleImportBuilder struct {
 	imports    map[string]any
 }
 
-func (b *ModuleImportBuilder) AddExport(param any, param2 any) {
-	panic("unimplemented")
-}
-
 func NewModuleImportBuilder(moduleName string) *ModuleImportBuilder {
 	return &ModuleImportBuilder{
 		moduleName: moduleName,
