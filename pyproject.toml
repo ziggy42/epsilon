@@ -1,0 +1,21 @@
+[tool.pylint.format]
+indent-string = '  '
+indent-after-paren = 2
+
+[tool.pylint.messages_control]
+disable = [
+  "C0114",  # missing-module-docstring
+  "C0115",  # missing-class-docstring
+  "C0116",  # missing-function-docstring
+]
+
+[tool.black]
+line-length = 80
+indent-width = 2
+
+[tool.autopep8]
+indent-size = 2
+
+[tool.yapf]
+based_on_style = "google"
+indent_width = 2

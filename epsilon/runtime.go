@@ -40,7 +40,7 @@ func (r *Runtime) WithConfig(config Config) *Runtime {
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
 func (r *Runtime) InstantiateModule(wasm io.Reader) (*ModuleInstance, error) {
-	return r.InstantiateModuleWithImports(wasm, nil)
+	return r.InstantiateModuleWithImports(wasm, map[string]map[string]any{})
 }
 
 // InstantiateModuleWithImports parses and instantiates a WASM module with
@@ -55,7 +55,12 @@ func (r *Runtime) InstantiateModuleWithImports(
 		return nil, err
 	}
 
-	return r.vm.instantiate(module, imports)
+	instance, err := r.vm.instantiate(module, imports)
+	if err != nil {
+		return nil, err
+	}
+
+	return instance, nil
 }
 
 // InstantiateModuleFromBytes is a convenience method to instantiate a WASM
@@ -101,7 +106,7 @@ func NewImportBuilder() *ImportBuilder {
 
 func (b *ImportBuilder) AddHostFunc(
 	module, name string,
-	fn func(...any) []any,
+	fn func(*ModuleInstance, ...any) []any,
 ) *ImportBuilder {
 	b.ensureModule(module)
 	b.imports[module][name] = fn

@@ -60,38 +60,70 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 				},
 			),
 		).
-		AddHostFunc("spectest", "print_i32", func(args ...any) []any {
-			fmt.Printf("%d", args[0].(int32))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_i64", func(args ...any) []any {
-			fmt.Printf("%d", args[0].(int64))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_f32", func(args ...any) []any {
-			fmt.Printf("%f", args[0].(float32))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_f64", func(args ...any) []any {
-			fmt.Printf("%f", args[0].(float64))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_i32_f32", func(args ...any) []any {
-			fmt.Printf("%d %f", args[0].(int32), args[1].(float32))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_i64_f64", func(args ...any) []any {
-			fmt.Printf("%d %f", args[0].(int64), args[1].(float64))
-			return nil
-		}).
-		AddHostFunc("spectest", "print_f64_f64", func(args ...any) []any {
-			fmt.Printf("%f %f", args[0].(float64), args[1].(float64))
-			return nil
-		}).
-		AddHostFunc("spectest", "print", func(args ...any) []any {
-			fmt.Printf("Print called!")
-			return nil
-		}).
+		AddHostFunc(
+			"spectest",
+			"print_i32",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%d", args[0].(int32))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_i64",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%d", args[0].(int64))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_f32",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%f", args[0].(float32))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_f64",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%f", args[0].(float64))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_i32_f32",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%d %f", args[0].(int32), args[1].(float32))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_i64_f64",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%d %f", args[0].(int64), args[1].(float64))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print_f64_f64",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("%f %f", args[0].(float64), args[1].(float64))
+				return nil
+			},
+		).
+		AddHostFunc(
+			"spectest",
+			"print",
+			func(m *epsilon.ModuleInstance, args ...any) []any {
+				fmt.Printf("Print called!")
+				return nil
+			},
+		).
 		Build()
 
 	return &specTestRunner{

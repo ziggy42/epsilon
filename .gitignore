@@ -4,6 +4,7 @@
 *.dll
 *.so
 *.dylib
+bin/
 
 # Test binaries
 *.test
@@ -23,3 +24,10 @@ cpu.prof
 
 # Antigravity
 .agent
+
+# Python
+__pycache__/
+.venv/
+
+# WASI test binary
+.epsilon-wasi-test
