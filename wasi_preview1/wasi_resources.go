@@ -29,19 +29,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const rightsAll wasiRights = ^wasiRights(0)
+const rightsAll int64 = ^0
 
 // DefaultDirRights are the rights inherent to the directory handle itself. We
 // exclude rights that imply reading/writing "data" from the directory stream
 // itself (which is not how WASI reads directories, it uses fd_readdir) or
 // seeking.
-const DefaultDirRights wasiRights = rightsAll &^
+const DefaultDirRights int64 = rightsAll &^
 	(RightsFdRead | RightsFdWrite | RightsFdSeek | RightsFdTell)
 
 // DefaultDirInheritingRights are the rights that newly opened files/directories
 // will inherit from this directory. This effectively allows full access to
 // children.
-const DefaultDirInheritingRights wasiRights = rightsAll
+const DefaultDirInheritingRights int64 = rightsAll
 
 const preopenTypeDir uint8 = 0
 
@@ -91,8 +91,8 @@ const lookupFlagsSymlinkFollow int32 = 1 << 0
 type WasiPreopenDir struct {
 	HostPath         string
 	GuestPath        string
-	Rights           wasiRights
-	RightsInheriting wasiRights
+	Rights           int64
+	RightsInheriting int64
 }
 
 type dirEntry struct {
@@ -105,8 +105,8 @@ type wasiFileDescriptor struct {
 	file             *os.File
 	fileType         wasiFileType
 	flags            uint16
-	rights           wasiRights
-	rightsInheriting wasiRights
+	rights           int64
+	rightsInheriting int64
 	guestPath        string
 	inode            uint64
 	isPreopen        bool
@@ -148,7 +148,7 @@ func newWasiResourceTable(
 
 func newFileDescriptor(
 	file *os.File,
-	rights, rightsInheriting wasiRights,
+	rights, rightsInheriting int64,
 	flags uint16,
 ) (*wasiFileDescriptor, error) {
 	info, err := file.Stat()
@@ -210,7 +210,7 @@ func newPreopenFileDescriptor(
 
 func newStdFileDescriptor(
 	file *os.File,
-	rights wasiRights,
+	rights int64,
 ) (*wasiFileDescriptor, error) {
 	return newFileDescriptor(file, rights, 0, 0)
 }
@@ -340,15 +340,15 @@ func (w *wasiResourceTable) setStatRights(
 	}
 
 	// Can only remove rights, not add them
-	if (wasiRights(rightsBase) & ^fd.rights) != 0 {
+	if (rightsBase & ^fd.rights) != 0 {
 		return ErrnoNotCapable
 	}
-	if (wasiRights(rightsInheriting) & ^fd.rightsInheriting) != 0 {
+	if (rightsInheriting & ^fd.rightsInheriting) != 0 {
 		return ErrnoNotCapable
 	}
 
-	fd.rights = wasiRights(rightsBase)
-	fd.rightsInheriting = wasiRights(rightsInheriting)
+	fd.rights = rightsBase
+	fd.rightsInheriting = rightsInheriting
 	return ErrnoSuccess
 }
 
@@ -1048,10 +1048,8 @@ func (w *wasiResourceTable) pathOpen(
 	}
 
 	// Determine read/write mode based on rights
-	effectiveRights := rightsBase & int64(fd.rightsInheriting)
-	effectiveInheriting := rightsInheriting & int64(fd.rightsInheriting)
-	rights = wasiRights(effectiveRights)
-	inheritRights := wasiRights(effectiveInheriting)
+	rights = rightsBase & fd.rightsInheriting
+	inheritRights := rightsInheriting & fd.rightsInheriting
 	hasRead := rights&RightsFdRead != 0
 	hasWrite := rights&RightsFdWrite != 0
 
@@ -1370,7 +1368,7 @@ func (w *wasiResourceTable) allocateFdIndex() int32 {
 func (w *wasiResourceTable) resolvePath(
 	inst *epsilon.ModuleInstance,
 	fdIndex, pathPtr, pathLen int32,
-	rights wasiRights,
+	rights int64,
 ) (string, int32) {
 	fd, errCode := w.getDir(fdIndex, rights)
 	if errCode != ErrnoSuccess {
@@ -1415,7 +1413,7 @@ func (w *wasiResourceTable) resolvePath(
 
 func (w *wasiResourceTable) getFile(
 	fdIdx int32,
-	rights wasiRights,
+	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, errCode := w.getFileOrDir(fdIdx, rights)
 	if errCode != ErrnoSuccess {
@@ -1429,7 +1427,7 @@ func (w *wasiResourceTable) getFile(
 
 func (w *wasiResourceTable) getDir(
 	fdIdx int32,
-	rights wasiRights,
+	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, errCode := w.getFileOrDir(fdIdx, rights)
 	if errCode != ErrnoSuccess {
@@ -1443,7 +1441,7 @@ func (w *wasiResourceTable) getDir(
 
 func (w *wasiResourceTable) getFileOrDir(
 	fdIdx int32,
-	rights wasiRights,
+	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, ok := w.fds[fdIdx]
 	if !ok {

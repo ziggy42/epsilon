@@ -97,36 +97,34 @@ const (
 	ErrnoNotCapable     int32 = 76 // Extension: Capabilities insufficient.
 )
 
-type wasiRights uint64
-
 const (
-	RightsFdDatasync           wasiRights = 1 << 0
-	RightsFdRead               wasiRights = 1 << 1
-	RightsFdSeek               wasiRights = 1 << 2
-	RightsFdFdstatSetFlags     wasiRights = 1 << 3
-	RightsFdSync               wasiRights = 1 << 4
-	RightsFdTell               wasiRights = 1 << 5
-	RightsFdWrite              wasiRights = 1 << 6
-	RightsFdAdvise             wasiRights = 1 << 7
-	RightsFdAllocate           wasiRights = 1 << 8
-	RightsPathCreateDirectory  wasiRights = 1 << 9
-	RightsPathCreateFile       wasiRights = 1 << 10
-	RightsPathLinkSource       wasiRights = 1 << 11
-	RightsPathLinkTarget       wasiRights = 1 << 12
-	RightsPathOpen             wasiRights = 1 << 13
-	RightsFdReaddir            wasiRights = 1 << 14
-	RightsPathReadlink         wasiRights = 1 << 15
-	RightsPathRenameSource     wasiRights = 1 << 16
-	RightsPathRenameTarget     wasiRights = 1 << 17
-	RightsPathFilestatGet      wasiRights = 1 << 18
-	RightsPathFilestatSetSize  wasiRights = 1 << 19
-	RightsPathFilestatSetTimes wasiRights = 1 << 20
-	RightsFdFilestatGet        wasiRights = 1 << 21
-	RightsFdFilestatSetSize    wasiRights = 1 << 22
-	RightsFdFilestatSetTimes   wasiRights = 1 << 23
-	RightsPathSymlink          wasiRights = 1 << 24
-	RightsPathRemoveDirectory  wasiRights = 1 << 25
-	RightsPathUnlinkFile       wasiRights = 1 << 26
-	RightsPollFdReadwrite      wasiRights = 1 << 27
-	RightsSockShutdown         wasiRights = 1 << 28
+	RightsFdDatasync           int64 = 1 << 0
+	RightsFdRead               int64 = 1 << 1
+	RightsFdSeek               int64 = 1 << 2
+	RightsFdFdstatSetFlags     int64 = 1 << 3
+	RightsFdSync               int64 = 1 << 4
+	RightsFdTell               int64 = 1 << 5
+	RightsFdWrite              int64 = 1 << 6
+	RightsFdAdvise             int64 = 1 << 7
+	RightsFdAllocate           int64 = 1 << 8
+	RightsPathCreateDirectory  int64 = 1 << 9
+	RightsPathCreateFile       int64 = 1 << 10
+	RightsPathLinkSource       int64 = 1 << 11
+	RightsPathLinkTarget       int64 = 1 << 12
+	RightsPathOpen             int64 = 1 << 13
+	RightsFdReaddir            int64 = 1 << 14
+	RightsPathReadlink         int64 = 1 << 15
+	RightsPathRenameSource     int64 = 1 << 16
+	RightsPathRenameTarget     int64 = 1 << 17
+	RightsPathFilestatGet      int64 = 1 << 18
+	RightsPathFilestatSetSize  int64 = 1 << 19
+	RightsPathFilestatSetTimes int64 = 1 << 20
+	RightsFdFilestatGet        int64 = 1 << 21
+	RightsFdFilestatSetSize    int64 = 1 << 22
+	RightsFdFilestatSetTimes   int64 = 1 << 23
+	RightsPathSymlink          int64 = 1 << 24
+	RightsPathRemoveDirectory  int64 = 1 << 25
+	RightsPathUnlinkFile       int64 = 1 << 26
+	RightsPollFdReadwrite      int64 = 1 << 27
+	RightsSockShutdown         int64 = 1 << 28
 )
