@@ -17,6 +17,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+IMAGE_NAME="wasi-suite:latest"
 
 # Build epsilon targeting Linux amd64
 cd "$REPO_ROOT"
@@ -25,9 +26,9 @@ trap "rm '$SCRIPT_DIR/epsilon'" EXIT
 
 # Build and run Docker container
 cd "$SCRIPT_DIR"
-docker build -q --platform linux/amd64 -t wasi-suite .
+docker build -q --platform linux/amd64 -t "$IMAGE_NAME" .
 docker run \
   --platform linux/amd64 \
   --rm -it \
   -v "$SCRIPT_DIR/adapter.py:/opt/wasi-testsuite/adapters/epsilon.py" \
-  -v "$SCRIPT_DIR/epsilon:/usr/local/bin/epsilon" wasi-suite:latest
+  -v "$SCRIPT_DIR/epsilon:/usr/local/bin/epsilon" "$IMAGE_NAME"
