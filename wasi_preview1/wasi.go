@@ -246,27 +246,6 @@ func (w *WasiModule) randomGet(
 	return ErrnoSuccess
 }
 
-func (w *WasiModule) pollOneoff(
-	inst *epsilon.ModuleInstance,
-	inPtr, outPtr, nsubscriptions, neventsPtr int32,
-) int32 {
-	memory, err := inst.GetMemory(WASIMemoryExportName)
-	if err != nil {
-		return ErrnoFault
-	}
-
-	// Stub: we just return success with 0 events or immediately return.
-	// Real implementation would look at subscriptions (clock or fd read/write).
-	// For now, supporting sleep via clock subscription is enough for basic tests.
-	// But parsing the subscription struct is complex (C union-like).
-	// We'll return ErrnoNotSup for now to avoid incorrect behavior.
-	// Stub: we just return success with 0 events.
-	if err := memory.StoreUint32(0, uint32(neventsPtr), 0); err != nil {
-		return ErrnoFault
-	}
-	return ErrnoSuccess
-}
-
 func (w *WasiModule) procRaise(sig int32) int32 {
 	return ErrnoNotSup
 }
