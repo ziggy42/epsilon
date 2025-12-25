@@ -223,7 +223,7 @@ func (w *wasiResourceTable) advise(
 	if _, ok := w.fds[fdIndex]; !ok {
 		return errnoBadF
 	}
-	// TODO: implement
+	// This WASI implementation does not use the hints provided by this API.
 	return errnoSuccess
 }
 
