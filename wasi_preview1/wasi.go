@@ -34,10 +34,21 @@ type WasiModule struct {
 	monotonicClockStartNs int64
 }
 
+// NewWasiModule creates a new WasiModule instance.
+//
+// Ownership Contract:
+// On success (err == nil), the returned WasiModule takes ownership of the
+// *os.Files provided in 'preopens'. The module will close these files when its
+// resources are released (e.g. via an explicit Close method, if one existed, or
+// relying on GC/Finalizers isn't safe, so the runtime typically handles this).
+//
+// On failure (err != nil), the WasiModule is not created, and the ownership of
+// the files remains with the caller. The caller is responsible for closing the
+// files in this case.
 func NewWasiModule(
 	args []string,
 	env map[string]string,
-	preopens []WasiPreopenDir,
+	preopens []WasiPreopen,
 ) (*WasiModule, error) {
 	fs, err := newWasiResourceTable(preopens)
 	if err != nil {
@@ -669,6 +680,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			args ...any,
 		) []any {
 			errCode := w.fs.sockAccept(
+				inst,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -680,6 +692,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			args ...any,
 		) []any {
 			errCode := w.fs.sockRecv(
+				inst,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -694,6 +707,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			args ...any,
 		) []any {
 			errCode := w.fs.sockSend(
+				inst,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),

@@ -19,6 +19,7 @@ package wasi_preview1
 const (
 	errnoSuccess     int32 = 0  // No error occurred.
 	errnoAcces       int32 = 2  // Permission denied.
+	errnoAgain       int32 = 6  // Try again.
 	errnoBadF        int32 = 8  // Bad file descriptor.
 	errnoExist       int32 = 20 // File exists.
 	errnoFault       int32 = 21 // Bad address.

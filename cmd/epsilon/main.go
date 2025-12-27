@@ -123,17 +123,16 @@ func runCLI(
 	fullArgs := append([]string{modulePath}, wasiArgs...)
 
 	// Parse pre-opened directories with host:guest path mapping
-	preopens := make([]wasi_preview1.WasiPreopenDir, 0, len(wasiDirs))
+	preopens := make([]wasi_preview1.WasiPreopen, 0, len(wasiDirs))
 	for _, dir := range wasiDirs {
-		parts := strings.SplitN(dir, ":", 2)
-		hostPath := parts[0]
-		guestPath := hostPath
-		if len(parts) == 2 {
-			guestPath = parts[1]
+		hostPath, guestPath := extractHostGuestPaths(dir)
+		file, err := os.Open(hostPath)
+		if err != nil {
+			return fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
 		}
 
-		preopens = append(preopens, wasi_preview1.WasiPreopenDir{
-			HostPath:         hostPath,
+		preopens = append(preopens, wasi_preview1.WasiPreopen{
+			File:             file,
 			GuestPath:        guestPath,
 			Rights:           wasi_preview1.DefaultDirRights,
 			RightsInheriting: wasi_preview1.DefaultDirInheritingRights,
@@ -165,4 +164,14 @@ func runCLI(
 		fmt.Println(r)
 	}
 	return nil
+}
+
+func extractHostGuestPaths(arg string) (string, string) {
+	parts := strings.SplitN(arg, ":", 2)
+	hostPath := parts[0]
+	guestPath := hostPath
+	if len(parts) == 2 {
+		guestPath = parts[1]
+	}
+	return hostPath, guestPath
 }

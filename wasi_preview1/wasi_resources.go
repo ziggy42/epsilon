@@ -16,7 +16,6 @@ package wasi_preview1
 
 import (
 	"encoding/binary"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,6 +41,9 @@ const DefaultDirRights int64 = rightsAll &^
 // will inherit from this directory. This effectively allows full access to
 // children.
 const DefaultDirInheritingRights int64 = rightsAll
+
+const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
+	RightsPollFdReadwrite | RightsFdFilestatGet | RightsSockShutdown
 
 const preopenTypeDir uint8 = 0
 
@@ -86,10 +88,21 @@ const (
 	fdFlagsSync     uint16 = 1 << 4
 )
 
+const (
+	shutRd   = 1
+	shutWr   = 2
+	shutRdWr = 3
+)
+
 const lookupFlagsSymlinkFollow int32 = 1 << 0
 
-type WasiPreopenDir struct {
-	HostPath         string
+// WasiPreopen represents a pre-opened os.File to be provided to WASI.
+//
+// If the WasiModule is successfully created, it takes ownership of the File and
+// will close it when appropriate. If creation fails, ownership stays with the
+// caller.
+type WasiPreopen struct {
+	File             *os.File
 	GuestPath        string
 	Rights           int64
 	RightsInheriting int64
@@ -116,9 +129,7 @@ type wasiResourceTable struct {
 	fds map[int32]*wasiFileDescriptor
 }
 
-func newWasiResourceTable(
-	preopenDirs []WasiPreopenDir,
-) (*wasiResourceTable, error) {
+func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
 	stdRights := RightsFdFilestatGet | RightsPollFdReadwrite
 	stdin, err := newStdFileDescriptor(os.Stdin, RightsFdRead|stdRights)
 	if err != nil {
@@ -136,9 +147,18 @@ func newWasiResourceTable(
 	resourceTable := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{0: stdin, 1: stdout, 2: stderr},
 	}
-	for _, dir := range preopenDirs {
+
+	// If we fail halfway through loop, we must close the preopened files we
+	// already accepted.
+	for _, dir := range preopens {
 		fd, err := newPreopenFileDescriptor(dir)
 		if err != nil {
+			// Cleanup already opened files in the table
+			for _, f := range resourceTable.fds {
+				if f.file != os.Stdin && f.file != os.Stdout && f.file != os.Stderr {
+					f.file.Close()
+				}
+			}
 			return nil, err
 		}
 		resourceTable.fds[resourceTable.allocateFdIndex()] = fd
@@ -162,7 +182,7 @@ func newFileDescriptor(
 		rights &= ^(RightsFdSeek | RightsFdTell | RightsFdRead | RightsFdWrite)
 	}
 
-	ino, err := getInode(file.Name())
+	ino, err := getInodeByFd(int(file.Fd()))
 	if err != nil {
 		return nil, err
 	}
@@ -179,31 +199,12 @@ func newFileDescriptor(
 	}, nil
 }
 
-func newPreopenFileDescriptor(
-	preopenDir WasiPreopenDir,
-) (*wasiFileDescriptor, error) {
-	file, err := os.Open(preopenDir.HostPath)
+func newPreopenFileDescriptor(pre WasiPreopen) (*wasiFileDescriptor, error) {
+	fd, err := newFileDescriptor(pre.File, pre.Rights, pre.RightsInheriting, 0)
 	if err != nil {
 		return nil, err
 	}
-
-	info, err := file.Stat()
-	if err != nil {
-		file.Close()
-		return nil, err
-	}
-	if !info.IsDir() {
-		file.Close()
-		return nil, fmt.Errorf("%q is not a directory", preopenDir.HostPath)
-	}
-
-	rights := preopenDir.Rights
-	fd, err := newFileDescriptor(file, rights, preopenDir.RightsInheriting, 0)
-	if err != nil {
-		file.Close()
-		return nil, err
-	}
-	fd.guestPath = preopenDir.GuestPath
+	fd.guestPath = pre.GuestPath
 	fd.isPreopen = true
 	return fd, nil
 }
@@ -396,22 +397,18 @@ func (w *wasiResourceTable) setFileStatTimes(
 		return errCode
 	}
 
-	return computeAndSetTimestamps(
-		fd.file.Name(),
-		atim,
-		mtim,
-		fstFlags,
-		0, // no special utime flags for fd-based operations
-		func() (int64, int64, error) {
-			var stat unix.Stat_t
-			if err := unix.Fstat(int(fd.file.Fd()), &stat); err != nil {
-				return 0, 0, err
-			}
-			atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
-			mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
-			return atimNs, mtimNs, nil
-		},
-	)
+	getTimestamps := func() (int64, int64, error) {
+		var stat unix.Stat_t
+		if err := unix.Fstat(int(fd.file.Fd()), &stat); err != nil {
+			return 0, 0, err
+		}
+		atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
+		mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
+		return atimNs, mtimNs, nil
+	}
+
+	path := fd.file.Name()
+	return updateTimestamps(path, atim, mtim, fstFlags, true, getTimestamps)
 }
 
 func (w *wasiResourceTable) pread(
@@ -430,33 +427,11 @@ func (w *wasiResourceTable) pread(
 		return errnoFault
 	}
 
-	var totalRead uint32
-	for i := range iovecLength {
-		ptr, length, err := readIovecItemPtr(memory, uint32(iovecPtr)+uint32(i*8))
-		if err != nil {
-			return errnoFault
-		}
-
-		buf := make([]byte, length)
-		n, err := fd.file.ReadAt(buf, offset+int64(totalRead))
-		if err != nil && err != io.EOF {
-			return mapError(err)
-		}
-
-		if err := memory.Set(0, ptr, buf[:n]); err != nil {
-			return errnoFault
-		}
-
-		totalRead += uint32(n)
-		if n < int(length) {
-			break
-		}
+	readBytes := func(buf []byte, readSoFar int64) (int, error) {
+		return fd.file.ReadAt(buf, offset+readSoFar)
 	}
 
-	if err := memory.StoreUint32(0, uint32(nPtr), totalRead); err != nil {
-		return errnoFault
-	}
-	return errnoSuccess
+	return iterIovec(memory, iovecPtr, iovecLength, nPtr, readBytes)
 }
 
 func (w *wasiResourceTable) getPrestat(
@@ -477,9 +452,9 @@ func (w *wasiResourceTable) getPrestat(
 		return errnoFault
 	}
 
-	// Write prestat struct directly to memory:
-	// - Byte 0: type (always PreopenTypeDir = 0)
-	// - Bytes 4-7: name length as uint32
+	// Note: WASI Preview 1 only supports "Directory" preopens. If the underlying
+	// file is a socket or other resource, we must present it as a directory.
+	// Guests attempting to open paths under this FD will fail with ENOTDIR.
 	err = memory.StoreByte(0, uint32(prestatPtr), preopenTypeDir)
 	if err != nil {
 		return errnoFault
@@ -528,54 +503,23 @@ func (w *wasiResourceTable) pwrite(
 		return errCode
 	}
 
-	if offset < 0 {
-		return errnoInval
-	}
-
-	memory, err := inst.GetMemory(WASIMemoryExportName)
-	if err != nil {
-		return errnoFault
-	}
-
-	var totalWritten uint32
 	currentOffset := offset
-
-	for i := range ciovecLength {
-		data, err := readCiovecItem(memory, uint32(ciovecPtr)+uint32(i*8))
-		if err != nil {
-			return errnoFault
-		}
-
+	writeBytes := func(data []byte) (int, error) {
 		var n int
-		var writeErr error
+		var err error
 		if fd.flags&fdFlagsAppend != 0 {
 			// Go's WriteAt returns error for O_APPEND files, but WASI expects it to
 			// work (even if it appends on Linux). Use unix.Pwrite directly to bypass
 			// Go's check.
-			n, writeErr = unix.Pwrite(int(fd.file.Fd()), data, currentOffset)
+			n, err = unix.Pwrite(int(fd.file.Fd()), data, currentOffset)
 		} else {
-			n, writeErr = fd.file.WriteAt(data, currentOffset)
+			n, err = fd.file.WriteAt(data, currentOffset)
 		}
-		totalWritten += uint32(n)
 		currentOffset += int64(n)
-
-		if writeErr != nil {
-			if totalWritten > 0 {
-				break
-			}
-			return mapError(writeErr)
-		}
-
-		if n < len(data) {
-			break
-		}
+		return n, err
 	}
 
-	if err := memory.StoreUint32(0, uint32(nPtr), totalWritten); err != nil {
-		return errnoFault
-	}
-
-	return errnoSuccess
+	return iterCiovec(inst, ciovecPtr, ciovecLength, nPtr, writeBytes)
 }
 
 func (w *wasiResourceTable) read(
@@ -592,34 +536,11 @@ func (w *wasiResourceTable) read(
 		return errnoFault
 	}
 
-	var totalRead uint32
-	for i := range iovecLength {
-		ptr, length, err := readIovecItemPtr(memory, uint32(iovecPtr)+uint32(i*8))
-		if err != nil {
-			return errnoFault
-		}
-
-		buf := make([]byte, length)
-		n, err := fd.file.Read(buf)
-		if err != nil && err != io.EOF {
-			return mapError(err)
-		}
-
-		if err := memory.Set(0, ptr, buf[:n]); err != nil {
-			return errnoFault
-		}
-
-		totalRead += uint32(n)
-
-		if n < int(length) {
-			break
-		}
+	readBytes := func(buf []byte, _ int64) (int, error) {
+		return fd.file.Read(buf)
 	}
 
-	if err := memory.StoreUint32(0, uint32(nPtr), totalRead); err != nil {
-		return errnoFault
-	}
-	return errnoSuccess
+	return iterIovec(memory, iovecPtr, iovecLength, nPtr, readBytes)
 }
 
 func (w *wasiResourceTable) readdir(
@@ -648,13 +569,13 @@ func (w *wasiResourceTable) readdir(
 	defer dirFile.Close()
 
 	// Synthesize . and .. entries
-	dotIno, err := getInode(fd.file.Name())
+	dotIno, err := getInodeByPath(fd.file.Name())
 	if err != nil {
 		return mapError(err)
 	}
 	currentDir := dirEntry{name: ".", fileType: fileTypeDirectory, ino: dotIno}
 
-	dotDotIno, err := getInode(filepath.Dir(fd.file.Name()))
+	dotDotIno, err := getInodeByPath(filepath.Dir(fd.file.Name()))
 	if err != nil {
 		return mapError(err)
 	}
@@ -668,7 +589,7 @@ func (w *wasiResourceTable) readdir(
 	}
 
 	for _, entry := range entries {
-		ino, err := getInode(filepath.Join(fd.file.Name(), entry.Name()))
+		ino, err := getInodeByPath(filepath.Join(fd.file.Name(), entry.Name()))
 		if err != nil {
 			return mapError(err)
 		}
@@ -845,32 +766,7 @@ func (w *wasiResourceTable) write(
 		return errCode
 	}
 
-	memory, err := inst.GetMemory(WASIMemoryExportName)
-	if err != nil {
-		return errnoFault
-	}
-
-	var written uint32
-	for i := range ciovecLength {
-		data, err := readCiovecItem(memory, uint32(ciovecPtr)+uint32(i*8))
-		if err != nil {
-			return errnoFault
-		}
-
-		n, err := fd.file.Write(data)
-		if err != nil {
-			return mapError(err)
-		}
-		written += uint32(n)
-		if n < len(data) {
-			break
-		}
-	}
-
-	if err := memory.StoreUint32(0, uint32(nPtr), written); err != nil {
-		return errnoFault
-	}
-	return errnoSuccess
+	return iterCiovec(inst, ciovecPtr, ciovecLength, nPtr, fd.file.Write)
 }
 
 func (w *wasiResourceTable) pathCreateDirectory(
@@ -933,7 +829,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 
 func (w *wasiResourceTable) pathFilestatSetTimes(
 	inst *epsilon.ModuleInstance,
-	fdIndex, flags int32, pathPtr, pathLen int32,
+	fdIndex, flags, pathPtr, pathLen int32,
 	atim, mtim int64,
 	fstFlags int32,
 ) int32 {
@@ -943,28 +839,18 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 		return errCode
 	}
 
-	// Determine utime flags based on symlink follow flag
-	utimeFlags := 0
-	if flags&int32(lookupFlagsSymlinkFollow) == 0 {
-		utimeFlags = unix.AT_SYMLINK_NOFOLLOW
+	getTimestamps := func() (int64, int64, error) {
+		var stat unix.Stat_t
+		if err := unix.Stat(path, &stat); err != nil {
+			return 0, 0, err
+		}
+		atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
+		mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
+		return atimNs, mtimNs, nil
 	}
 
-	return computeAndSetTimestamps(
-		path,
-		atim,
-		mtim,
-		fstFlags,
-		utimeFlags,
-		func() (int64, int64, error) {
-			var stat unix.Stat_t
-			if err := unix.Stat(path, &stat); err != nil {
-				return 0, 0, err
-			}
-			atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
-			mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
-			return atimNs, mtimNs, nil
-		},
-	)
+	followLink := flags&lookupFlagsSymlinkFollow != 0
+	return updateTimestamps(path, atim, mtim, fstFlags, followLink, getTimestamps)
 }
 
 func (w *wasiResourceTable) pathLink(
@@ -1305,55 +1191,124 @@ func (w *wasiResourceTable) pathUnlinkFile(
 	return errnoSuccess
 }
 
-func (w *wasiResourceTable) sockAccept(fdIndex, flags, fdPtr int32) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+func (w *wasiResourceTable) sockAccept(
+	inst *epsilon.ModuleInstance,
+	fdIndex, flags, fdPtr int32,
+) int32 {
+	fd, errCode := w.getSocket(fdIndex)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return errnoNotSock
+
+	connectedSocketFd, _, err := unix.Accept(int(fd.file.Fd()))
+	if err != nil {
+		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
+			return errnoAgain
+		}
+		return mapError(err)
 	}
-	return errnoNotSup
+
+	newFile := os.NewFile(uintptr(connectedSocketFd), "")
+	newFd, err := newFileDescriptor(
+		newFile,
+		connectedSocketDefaultRights,
+		0,
+		uint16(flags),
+	)
+	if err != nil {
+		newFile.Close()
+		return mapError(err)
+	}
+
+	newFdIndex := w.allocateFdIndex()
+	w.fds[newFdIndex] = newFd
+
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		w.close(newFdIndex)
+		return errnoFault
+	}
+
+	err = memory.StoreUint32(0, uint32(fdPtr), uint32(newFdIndex))
+	if err != nil {
+		w.close(newFdIndex)
+		return errnoFault
+	}
+
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) sockRecv(
+	inst *epsilon.ModuleInstance,
 	fdIndex, riDataPtr, riDataLen, riFlags, roDataLenPtr, roFlagsPtr int32,
 ) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+	fd, errCode := w.getSocket(fdIndex)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return errnoNotSock
+
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
 	}
-	// TODO: implement
-	return errnoNotSup
+
+	// Note: riFlags (like MSG_PEEK) are currently ignored. To support them, we
+	// would need to switch to unix.Recvmsg or other lower level APIs directly.
+	readBytes := func(data []byte, _ int64) (int, error) {
+		return fd.file.Read(data)
+	}
+
+	errCode = iterIovec(memory, riDataPtr, riDataLen, roDataLenPtr, readBytes)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
+	// We use os.File.Read for reading from the socker, which does not return
+	// output flags (like MSG_TRUNC). For simple stream operations, returning 0 is
+	// acceptable.
+	if err := memory.StoreUint16(0, uint32(roFlagsPtr), 0); err != nil {
+		return errnoFault
+	}
+
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) sockSend(
+	inst *epsilon.ModuleInstance,
 	fdIndex, siDataPtr, siDataLen, siFlags, soDataLenPtr int32,
 ) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+	fd, errCode := w.getSocket(fdIndex)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return errnoNotSock
-	}
-	// TODO: implement
-	return errnoNotSup
+
+	// Note: siFlags (like MSG_OOB) are currently ignored. To support them, we
+	// would need to switch to unix.Sendmsg or other lower level APIs directly.
+	return iterCiovec(inst, siDataPtr, siDataLen, soDataLenPtr, fd.file.Write)
 }
 
 func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+	fd, errCode := w.getSocket(fdIndex)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
-		return errnoNotSock
+
+	var unixHow int
+	switch how {
+	case shutRd:
+		unixHow = unix.SHUT_RD
+	case shutWr:
+		unixHow = unix.SHUT_WR
+	case shutRdWr:
+		unixHow = unix.SHUT_RDWR
+	default:
+		return errnoInval
 	}
-	// TODO: implement
-	return errnoNotSup
+
+	if err := unix.Shutdown(int(fd.file.Fd()), unixHow); err != nil {
+		return mapError(err)
+	}
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) allocateFdIndex() int32 {
@@ -1453,40 +1408,117 @@ func (w *wasiResourceTable) getFileOrDir(
 	return fd, errnoSuccess
 }
 
-func readIovecItemPtr(
-	mem *epsilon.Memory,
-	iovecPtr uint32,
-) (uint32, uint32, error) {
-	iovec, err := mem.Get(0, iovecPtr, 8)
-	if err != nil {
-		return 0, 0, err
+func (w *wasiResourceTable) getSocket(
+	fdIdx int32,
+) (*wasiFileDescriptor, int32) {
+	fd, ok := w.fds[fdIdx]
+	if !ok {
+		return nil, errnoBadF
 	}
-
-	ptr := binary.LittleEndian.Uint32(iovec[0:4])
-	length := binary.LittleEndian.Uint32(iovec[4:8])
-	return ptr, length, nil
+	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
+		return nil, errnoNotSock
+	}
+	return fd, errnoSuccess
 }
 
-func readCiovecItem(mem *epsilon.Memory, ciovecPtr uint32) ([]byte, error) {
-	ciovec, err := mem.Get(0, ciovecPtr, 8)
-	if err != nil {
-		return nil, err
+// iterIovec reads data from the given iovec items and stores it in memory.
+// Returns an error code.
+func iterIovec(
+	memory *epsilon.Memory,
+	iovecPtr, iovecLength, totalReadPtr int32,
+	readBytes func([]byte, int64) (int, error),
+) int32 {
+	var totalRead uint32
+	for i := range iovecLength {
+		iovec, err := memory.Get(0, uint32(iovecPtr)+uint32(i*8), 8)
+		if err != nil {
+			return errnoFault
+		}
+
+		ptr := binary.LittleEndian.Uint32(iovec[0:4])
+		length := binary.LittleEndian.Uint32(iovec[4:8])
+
+		buf := make([]byte, length)
+		n, err := readBytes(buf, int64(totalRead))
+		if err != nil && err != io.EOF {
+			return mapError(err)
+		}
+
+		if err := memory.Set(0, ptr, buf[:n]); err != nil {
+			return errnoFault
+		}
+
+		totalRead += uint32(n)
+		if n < int(length) {
+			break
+		}
 	}
-
-	ptr := binary.LittleEndian.Uint32(ciovec[0:4])
-	length := binary.LittleEndian.Uint32(ciovec[4:8])
-
-	data, err := mem.Get(0, ptr, length)
-	if err != nil {
-		return nil, err
+	if err := memory.StoreUint32(0, uint32(totalReadPtr), totalRead); err != nil {
+		return errnoFault
 	}
-
-	return data, nil
+	return errnoSuccess
 }
 
-func getInode(path string) (uint64, error) {
+// iterCiovec writes data from the given ciovec items using the given writeBytes
+// function. Returns an error code.
+func iterCiovec(
+	inst *epsilon.ModuleInstance,
+	ciovecPtr, ciovecLength, totalWrittenPtr int32,
+	writeBytes func([]byte) (int, error),
+) int32 {
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	var totalWritten uint32
+	for i := range ciovecLength {
+		ciovec, err := memory.Get(0, uint32(ciovecPtr)+uint32(i*8), 8)
+		if err != nil {
+			return errnoFault
+		}
+
+		ptr := binary.LittleEndian.Uint32(ciovec[0:4])
+		length := binary.LittleEndian.Uint32(ciovec[4:8])
+
+		data, err := memory.Get(0, ptr, length)
+		if err != nil {
+			return errnoFault
+		}
+
+		n, err := writeBytes(data)
+		totalWritten += uint32(n)
+
+		if err != nil {
+			if totalWritten > 0 {
+				break
+			}
+			return mapError(err)
+		}
+
+		if n < len(data) {
+			break
+		}
+	}
+
+	err = memory.StoreUint32(0, uint32(totalWrittenPtr), totalWritten)
+	if err != nil {
+		return errnoFault
+	}
+	return errnoSuccess
+}
+
+func getInodeByPath(path string) (uint64, error) {
 	var stat unix.Stat_t
 	if err := unix.Stat(path, &stat); err != nil {
+		return 0, err
+	}
+	return stat.Ino, nil
+}
+
+func getInodeByFd(fd int) (uint64, error) {
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil {
 		return 0, err
 	}
 	return stat.Ino, nil
@@ -1560,14 +1592,14 @@ func (w *wasiResourceTable) readString(
 	return string(oldPathBytes), nil
 }
 
-// computeAndSetTimestamps validates flags, computes final timestamp values,
+// updateTimestamps validates flags, computes final timestamp values,
 // and applies them to the specified path. The getCurrentTimestamps function
 // should return current atime and mtime in nanoseconds if needed.
-func computeAndSetTimestamps(
+func updateTimestamps(
 	path string,
 	atim, mtim int64,
 	fstFlags int32,
-	utimeFlags int,
+	followSymlink bool,
 	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
 ) int32 {
 	// Validate flags: cannot have both SET and NOW
@@ -1618,8 +1650,13 @@ func computeAndSetTimestamps(
 	}
 
 	ts := []unix.Timespec{
-		unix.NsecToTimespec(finalAtimNs),
-		unix.NsecToTimespec(finalMtimNs),
+		{Sec: finalAtimNs / 1e9, Nsec: finalAtimNs % 1e9},
+		{Sec: finalMtimNs / 1e9, Nsec: finalMtimNs % 1e9},
+	}
+
+	utimeFlags := 0
+	if !followSymlink {
+		utimeFlags = unix.AT_SYMLINK_NOFOLLOW
 	}
 
 	if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, utimeFlags); err != nil {
