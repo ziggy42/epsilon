@@ -176,8 +176,7 @@ func newFileDescriptor(
 		return nil, err
 	}
 
-	mode := info.Mode()
-	if mode.IsDir() {
+	if info.IsDir() {
 		// TODO: why do we need to do this?
 		rights &= ^(RightsFdSeek | RightsFdTell | RightsFdRead | RightsFdWrite)
 	}
@@ -189,7 +188,7 @@ func newFileDescriptor(
 
 	return &wasiFileDescriptor{
 		file:             file,
-		fileType:         getModeFileType(mode),
+		fileType:         getModeFileType(info.Mode()),
 		flags:            flags,
 		rights:           rights,
 		rightsInheriting: rightsInheriting,
@@ -800,13 +799,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 		return errnoFault
 	}
 
-	// Get file info - follow symlinks unless LookupFlagsSymlinkFollow is NOT set
-	var info os.FileInfo
-	if flags&lookupFlagsSymlinkFollow != 0 {
-		info, err = os.Stat(path)
-	} else {
-		info, err = os.Lstat(path)
-	}
+	info, err := getFileInfo(path, flags&lookupFlagsSymlinkFollow != 0)
 	if err != nil {
 		return mapError(err)
 	}
@@ -814,7 +807,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	// Get actual timestamps using unix.Stat or unix.Lstat
 	// Follow symlinks based on the same flag used above
 	var unixStat unix.Stat_t
-	if flags&int32(lookupFlagsSymlinkFollow) != 0 {
+	if flags&lookupFlagsSymlinkFollow != 0 {
 		err = unix.Stat(path, &unixStat)
 	} else {
 		err = unix.Lstat(path, &unixStat)
@@ -905,7 +898,7 @@ func (w *wasiResourceTable) pathOpen(
 
 	isDirFlag := oflags&int32(oFlagsDirectory) != 0
 	if isDirFlag {
-		stat, err := os.Stat(path)
+		stat, err := getFileInfo(path, true)
 		if err == nil && !stat.IsDir() {
 			return errnoNotDir
 		}
@@ -929,7 +922,7 @@ func (w *wasiResourceTable) pathOpen(
 	if fdflags&int32(fdFlagsAppend) != 0 {
 		osFlags |= os.O_APPEND
 	}
-	if dirflags&int32(lookupFlagsSymlinkFollow) == 0 {
+	if dirflags&lookupFlagsSymlinkFollow == 0 {
 		osFlags |= syscall.O_NOFOLLOW
 	}
 
@@ -1018,7 +1011,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errCode
 	}
 
-	info, err := os.Lstat(path)
+	info, err := getFileInfo(path, false)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1073,13 +1066,13 @@ func (w *wasiResourceTable) pathRename(
 	}
 
 	// Get source file info
-	oldInfo, err := os.Stat(from)
+	oldInfo, err := getFileInfo(from, true)
 	if err != nil {
 		return mapError(err)
 	}
 
 	// Check if destination exists
-	newInfo, err := os.Stat(to)
+	newInfo, err := getFileInfo(to, true)
 	if err != nil && !os.IsNotExist(err) {
 		return mapError(err)
 	}
@@ -1175,8 +1168,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errCode
 	}
 
-	// Check if it is a directory
-	info, err := os.Lstat(path)
+	info, err := getFileInfo(path, false)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1354,7 +1346,7 @@ func (w *wasiResourceTable) resolvePath(
 
 	// If path has trailing slash, verify it's a directory
 	if strings.HasSuffix(path, "/") {
-		stat, err := os.Stat(fullPath)
+		stat, err := getFileInfo(fullPath, true)
 		if err != nil {
 			return "", mapError(err)
 		}
@@ -1664,6 +1656,14 @@ func updateTimestamps(
 	}
 
 	return errnoSuccess
+}
+
+func getFileInfo(path string, followSymlink bool) (os.FileInfo, error) {
+	if followSymlink {
+		return os.Stat(path)
+	} else {
+		return os.Lstat(path)
+	}
 }
 
 func mapError(err error) int32 {
