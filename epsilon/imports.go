@@ -27,6 +27,7 @@ type resolvedImports struct {
 // the provided map of available imports.
 func resolveImports(
 	module *moduleDefinition,
+	instance *ModuleInstance,
 	imports map[string]map[string]any,
 ) (*resolvedImports, error) {
 	functions := []FunctionInstance{}
@@ -42,7 +43,8 @@ func resolveImports(
 
 		switch t := imp.importType.(type) {
 		case functionTypeIndex:
-			function, err := resolveFunctionImport(obj, module.types[t], imp)
+			functionType := module.types[t]
+			function, err := resolveFunctionImport(instance, obj, functionType, imp)
 			if err != nil {
 				return nil, err
 			}
@@ -88,6 +90,7 @@ func findImport(
 }
 
 func resolveFunctionImport(
+	moduleInstance *ModuleInstance,
 	obj any,
 	functionType FunctionType,
 	imp moduleImport,
@@ -101,8 +104,12 @@ func resolveFunctionImport(
 		return f, nil
 	}
 
-	if f, ok := obj.(func(...any) []any); ok {
-		return &hostFunction{functionType: functionType, hostCode: f}, nil
+	if f, ok := obj.(func(*ModuleInstance, ...any) []any); ok {
+		return &hostFunction{
+			functionType: functionType,
+			module:       moduleInstance,
+			hostCode:     f,
+		}, nil
 	}
 
 	return nil, fmt.Errorf("%s.%s not a function", imp.moduleName, imp.name)

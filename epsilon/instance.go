@@ -138,7 +138,8 @@ func (wf *wasmFunction) GetType() *FunctionType { return &wf.functionType }
 // hostFunction represents a function defined by the host environment.
 type hostFunction struct {
 	functionType FunctionType
-	hostCode     func(...any) []any
+	module       *ModuleInstance
+	hostCode     func(*ModuleInstance, ...any) []any
 }
 
 func (hf *hostFunction) GetType() *FunctionType { return &hf.functionType }

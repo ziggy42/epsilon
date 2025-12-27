@@ -70,7 +70,8 @@ def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
       ["go", "test", "-bench=.", "-benchmem", "./internal/benchmarks"],
       cwd=cwd,
       capture_output=True,
-      text=True
+      text=True,
+      check=False,
   )
   if result.returncode != 0:
     print(result.stderr, file=sys.stderr)

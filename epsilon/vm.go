@@ -103,7 +103,7 @@ func (vm *vm) instantiate(
 		vm:    vm,
 	}
 
-	resolvedImports, err := resolveImports(module, imports)
+	resolvedImports, err := resolveImports(module, moduleInstance, imports)
 	if err != nil {
 		return nil, err
 	}
@@ -1893,7 +1893,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 	}()
 
 	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
-	res := fun.hostCode(args...)
+	res := fun.hostCode(fun.module, args...)
 	vm.stack.pushAll(res)
 	return err
 }
