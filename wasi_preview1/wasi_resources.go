@@ -672,6 +672,10 @@ func (w *wasiResourceTable) readdir(
 }
 
 func (w *wasiResourceTable) renumber(fdIndex, toFdIndex int32) int32 {
+	if fdIndex == toFdIndex {
+		return errnoSuccess
+	}
+
 	fd, ok := w.fds[fdIndex]
 	if !ok {
 		return errnoBadF
