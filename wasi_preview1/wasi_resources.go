@@ -786,13 +786,28 @@ func (w *wasiResourceTable) pathCreateDirectory(
 	inst *epsilon.ModuleInstance,
 	fdIndex, pathPtr, pathLen int32,
 ) int32 {
-	rights := RightsPathCreateDirectory
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	fd, errCode := w.getDir(fdIndex, RightsPathCreateDirectory)
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
-	if err := os.Mkdir(path, 0755); err != nil {
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	root, err := os.OpenRoot(fd.file.Name())
+	if err != nil {
+		return mapError(err)
+	}
+	defer root.Close()
+
+	if err := root.Mkdir(path, 0755); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -989,8 +1004,7 @@ func (w *wasiResourceTable) pathReadlink(
 	inst *epsilon.ModuleInstance,
 	fdIndex, pathPtr, pathLen, bufPtr, bufLen, bufusedPtr int32,
 ) int32 {
-	rights := RightsPathReadlink
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	fd, errCode := w.getDir(fdIndex, RightsPathReadlink)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -1000,7 +1014,18 @@ func (w *wasiResourceTable) pathReadlink(
 		return errnoFault
 	}
 
-	target, err := os.Readlink(path)
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	root, err := os.OpenRoot(fd.file.Name())
+	if err != nil {
+		return mapError(err)
+	}
+	defer root.Close()
+
+	target, err := root.Readlink(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1023,13 +1048,28 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 	inst *epsilon.ModuleInstance,
 	fdIndex, pathPtr, pathLen int32,
 ) int32 {
-	rights := RightsPathRemoveDirectory
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	fd, errCode := w.getDir(fdIndex, RightsPathRemoveDirectory)
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
-	info, err := getFileInfo(path, false)
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	root, err := os.OpenRoot(fd.file.Name())
+	if err != nil {
+		return mapError(err)
+	}
+	defer root.Close()
+
+	info, err := root.Lstat(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1037,8 +1077,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoNotDir
 	}
 
-	err = os.Remove(path)
-	if err != nil {
+	if err := root.Remove(path); err != nil {
 		return mapError(err)
 	}
 
@@ -1130,6 +1169,11 @@ func (w *wasiResourceTable) pathSymlink(
 	inst *epsilon.ModuleInstance,
 	targetPathPtr, targetPathLen, fdIndex, linkPathPtr, linkPathLen int32,
 ) int32 {
+	fd, errCode := w.getDir(fdIndex, RightsPathSymlink)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
 		return errnoFault
@@ -1154,18 +1198,13 @@ func (w *wasiResourceTable) pathSymlink(
 		return errnoNoEnt
 	}
 
-	fd, errCode := w.getDir(fdIndex, RightsPathSymlink)
-	if errCode != errnoSuccess {
-		return errCode
+	root, err := os.OpenRoot(fd.file.Name())
+	if err != nil {
+		return mapError(err)
 	}
+	defer root.Close()
 
-	// Validate linkPath (where the symlink will be created) stays in sandbox
-	fullLinkPath, errCode := validatePathInRoot(fd.file.Name(), linkPath)
-	if errCode != errnoSuccess {
-		return errCode
-	}
-
-	if err := os.Symlink(targetPath, fullLinkPath); err != nil {
+	if err := root.Symlink(targetPath, linkPath); err != nil {
 		return mapError(err)
 	}
 
@@ -1176,13 +1215,28 @@ func (w *wasiResourceTable) pathUnlinkFile(
 	inst *epsilon.ModuleInstance,
 	fdIndex, pathPtr, pathLen int32,
 ) int32 {
-	rights := RightsPathUnlinkFile
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	fd, errCode := w.getDir(fdIndex, RightsPathUnlinkFile)
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
-	info, err := getFileInfo(path, false)
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	root, err := os.OpenRoot(fd.file.Name())
+	if err != nil {
+		return mapError(err)
+	}
+	defer root.Close()
+
+	info, err := root.Lstat(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1190,7 +1244,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoIsDir
 	}
 
-	if err := os.Remove(path); err != nil {
+	if err := root.Remove(path); err != nil {
 		return mapError(err)
 	}
 
