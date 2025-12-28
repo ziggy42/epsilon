@@ -16,6 +16,7 @@ package wasi_preview1
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -27,6 +28,8 @@ import (
 	"github.com/ziggy42/epsilon/epsilon"
 	"golang.org/x/sys/unix"
 )
+
+var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
 const rightsAll int64 = ^0
 
@@ -44,6 +47,8 @@ const DefaultDirInheritingRights int64 = rightsAll
 
 const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
 	RightsPollFdReadwrite | RightsFdFilestatGet | RightsSockShutdown
+
+const maxFileDescriptors = 2048
 
 const preopenTypeDir uint8 = 0
 
@@ -161,7 +166,12 @@ func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
 			}
 			return nil, err
 		}
-		resourceTable.fds[resourceTable.allocateFdIndex()] = fd
+		newFdIndex, err := resourceTable.allocateFdIndex()
+		if err != nil {
+			dir.File.Close()
+			return nil, err
+		}
+		resourceTable.fds[newFdIndex] = fd
 	}
 	return resourceTable, nil
 }
@@ -953,7 +963,11 @@ func (w *wasiResourceTable) pathOpen(
 		file.Close()
 		return mapError(err)
 	}
-	newFdIndex := w.allocateFdIndex()
+	newFdIndex, err := w.allocateFdIndex()
+	if err != nil {
+		file.Close()
+		return mapError(err)
+	}
 	w.fds[newFdIndex] = createdFd
 
 	// Write the new fd to memory
@@ -1215,7 +1229,11 @@ func (w *wasiResourceTable) sockAccept(
 		return mapError(err)
 	}
 
-	newFdIndex := w.allocateFdIndex()
+	newFdIndex, err := w.allocateFdIndex()
+	if err != nil {
+		newFile.Close()
+		return mapError(err)
+	}
 	w.fds[newFdIndex] = newFd
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
@@ -1306,11 +1324,15 @@ func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 	return errnoSuccess
 }
 
-func (w *wasiResourceTable) allocateFdIndex() int32 {
+func (w *wasiResourceTable) allocateFdIndex() (int32, error) {
+	if len(w.fds) >= maxFileDescriptors {
+		return 0, errMaxFileDescriptorsReached
+	}
+
 	// Find next available fd starting from 3
 	for fd := int32(3); ; fd++ {
 		if _, exists := w.fds[fd]; !exists {
-			return fd
+			return fd, nil
 		}
 	}
 }
@@ -1724,6 +1746,10 @@ func getFileInfo(path string, followSymlink bool) (os.FileInfo, error) {
 func mapError(err error) int32 {
 	if err == nil {
 		return errnoSuccess
+	}
+
+	if err == errMaxFileDescriptorsReached {
+		return errnoNFile
 	}
 
 	// Unpack os.PathError/LinkError
