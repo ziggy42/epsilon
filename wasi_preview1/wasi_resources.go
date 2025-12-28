@@ -1117,41 +1117,44 @@ func (w *wasiResourceTable) pathRename(
 
 func (w *wasiResourceTable) pathSymlink(
 	inst *epsilon.ModuleInstance,
-	oldPathPtr, oldPathLen, fdIndex, newPathPtr, newPathLen int32,
+	targetPathPtr, targetPathLen, fdIndex, linkPathPtr, linkPathLen int32,
 ) int32 {
-	fd, errCode := w.getDir(fdIndex, RightsPathSymlink)
-	if errCode != errnoSuccess {
-		return errCode
-	}
-
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
 		return errnoFault
 	}
 
-	oldPath, err := w.readString(memory, oldPathPtr, oldPathLen)
+	targetPath, err := w.readString(memory, targetPathPtr, targetPathLen)
 	if err != nil {
 		return errnoFault
 	}
 
-	newPath, err := w.readString(memory, newPathPtr, newPathLen)
+	linkPath, err := w.readString(memory, linkPathPtr, linkPathLen)
 	if err != nil {
 		return errnoFault
 	}
 
-	// Symlink destination cannot have a trailing slash
-	if strings.HasSuffix(newPath, "/") {
+	// Symlink location cannot have a trailing slash
+	if strings.HasSuffix(linkPath, "/") {
 		return errnoNoEnt
 	}
 
-	if strings.HasPrefix(oldPath, "/") {
+	if strings.HasPrefix(targetPath, "/") {
 		return errnoNoEnt
 	}
 
-	// Resolve path relative to the fd's directory (openat semantics)
-	fullNewPath := filepath.Join(fd.file.Name(), newPath)
+	fd, errCode := w.getDir(fdIndex, RightsPathSymlink)
+	if errCode != errnoSuccess {
+		return errCode
+	}
 
-	if err := os.Symlink(oldPath, fullNewPath); err != nil {
+	// Validate linkPath (where the symlink will be created) stays in sandbox
+	fullLinkPath, errCode := validatePathInRoot(fd.file.Name(), linkPath)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
+	if err := os.Symlink(targetPath, fullLinkPath); err != nil {
 		return mapError(err)
 	}
 
@@ -1332,16 +1335,9 @@ func (w *wasiResourceTable) resolvePath(
 		return "", errnoFault
 	}
 
-	if filepath.IsAbs(path) {
-		return "", errnoPerm
-	}
-
-	fullPath := filepath.Join(fd.file.Name(), path)
-
-	// Ensure resolved path stays within base directory
-	relPath, err := filepath.Rel(fd.file.Name(), fullPath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return "", errnoNotCapable
+	fullPath, errCode := validatePathInRoot(fd.file.Name(), path)
+	if errCode != errnoSuccess {
+		return "", errCode
 	}
 
 	// If path has trailing slash, verify it's a directory
@@ -1352,6 +1348,65 @@ func (w *wasiResourceTable) resolvePath(
 		}
 		if !stat.IsDir() {
 			return "", errnoNotDir
+		}
+	}
+
+	return fullPath, errnoSuccess
+}
+
+// validatePathInRoot validates that a relative path stays within the root
+// directory. It performs two levels of containment checks:
+//  1. Basic check: the cleaned path (with ".." normalized) stays in root
+//  2. Symlink check: resolves symlinks and verifies the target is still in root
+//     if the relativePath points to a file that already exists. For
+//     non-existing paths, it validates the parent directory instead.
+//
+// Returns the full validated path and an error code.
+func validatePathInRoot(root, relativePath string) (string, int32) {
+	if filepath.IsAbs(relativePath) {
+		return "", errnoPerm
+	}
+
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return "", errnoNoEnt
+	}
+
+	canonicalRoot, err := filepath.EvalSymlinks(absRoot)
+	if err != nil {
+		return "", errnoNoEnt
+	}
+
+	fullPath := filepath.Join(canonicalRoot, relativePath)
+
+	// First containment check: the cleaned path must still be under root.
+	// This catches simple ".." escapes before we do any filesystem operations.
+	rel, err := filepath.Rel(canonicalRoot, fullPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return "", errnoNotCapable
+	}
+
+	// Second check: resolve symlinks and verify containment again.
+	// This catches symlinks that point outside the sandbox.
+	canonicalPath, err := filepath.EvalSymlinks(fullPath)
+	if err == nil {
+		// Path exists: check that resolved path is inside root
+		rel, err := filepath.Rel(canonicalRoot, canonicalPath)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", errnoNotCapable
+		}
+	} else {
+		// Path doesn't exist: check the parent directory instead. This allows
+		// file creation while still preventing directory escapes via symlinks.
+		parentDir := filepath.Dir(fullPath)
+		canonicalParent, err := filepath.EvalSymlinks(parentDir)
+		if err != nil {
+			return "", errnoNoEnt
+		}
+
+		rel, err := filepath.Rel(canonicalRoot, canonicalParent)
+		if err != nil || strings.HasPrefix(rel, "..") {
+			return "", errnoNotCapable
 		}
 	}
 
