@@ -1071,16 +1071,9 @@ func (w *wasiResourceTable) pathRename(
 		return errnoFault
 	}
 
-	if filepath.IsAbs(newPath) {
-		return errnoPerm
-	}
-
-	to := filepath.Join(newFd.file.Name(), newPath)
-
-	// Ensure resolved path stays within base directory
-	relPath, err := filepath.Rel(newFd.file.Name(), to)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return errnoNotCapable
+	to, errCode := validatePathInRoot(newFd.file.Name(), newPath)
+	if errCode != errnoSuccess {
+		return errCode
 	}
 
 	// Get source file info
