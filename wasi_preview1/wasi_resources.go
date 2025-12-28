@@ -1375,37 +1375,26 @@ func (w *wasiResourceTable) resolvePath(
 
 // validatePathInRoot validates that a relative path stays within the root
 // directory. It performs two levels of containment checks:
-//  1. Basic check: the cleaned path (with ".." normalized) stays in root
+//  1. Lexical check: filepath.IsLocal ensures the path is relative and has no
+//     ".." escapes after cleaning.
 //  2. Symlink check: resolves symlinks and verifies the target is still in root
 //     if the relativePath points to a file that already exists. For
 //     non-existing paths, it validates the parent directory instead.
 //
 // Returns the full validated path and an error code.
 func validatePathInRoot(root, relativePath string) (string, int32) {
-	if filepath.IsAbs(relativePath) {
-		return "", errnoPerm
+	if !filepath.IsLocal(relativePath) {
+		return "", errnoNotCapable
 	}
 
-	absRoot, err := filepath.Abs(root)
-	if err != nil {
-		return "", errnoNoEnt
-	}
-
-	canonicalRoot, err := filepath.EvalSymlinks(absRoot)
+	canonicalRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", errnoNoEnt
 	}
 
 	fullPath := filepath.Join(canonicalRoot, relativePath)
 
-	// First containment check: the cleaned path must still be under root.
-	// This catches simple ".." escapes before we do any filesystem operations.
-	rel, err := filepath.Rel(canonicalRoot, fullPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return "", errnoNotCapable
-	}
-
-	// Second check: resolve symlinks and verify containment again.
+	// Resolve symlinks and verify containment.
 	// This catches symlinks that point outside the sandbox.
 	canonicalPath, err := filepath.EvalSymlinks(fullPath)
 	if err == nil {
