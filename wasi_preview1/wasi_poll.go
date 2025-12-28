@@ -113,11 +113,13 @@ func writeEvent(memory *epsilon.Memory, offset uint32, event event) error {
 	return memory.Set(0, offset, data)
 }
 
+const maxSubscriptions = 4096
+
 func (w *WasiModule) pollOneoff(
 	inst *epsilon.ModuleInstance,
 	inPtr, outPtr, nsubscriptions, neventsPtr int32,
 ) int32 {
-	if nsubscriptions == 0 {
+	if nsubscriptions <= 0 || nsubscriptions > maxSubscriptions {
 		return errnoInval
 	}
 
