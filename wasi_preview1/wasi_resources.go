@@ -793,6 +793,9 @@ func (w *wasiResourceTable) pathFilestatGet(
 	if err != nil {
 		return errnoFault
 	}
+	if !filepath.IsLocal(path) {
+		return errnoPerm
+	}
 
 	var info os.FileInfo
 	if flags&lookupFlagsSymlinkFollow != 0 {
@@ -832,6 +835,9 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 	path, err := w.readString(memory, pathPtr, pathLen)
 	if err != nil {
 		return errnoFault
+	}
+	if !filepath.IsLocal(path) {
+		return errnoPerm
 	}
 
 	fd := int(dirFd.file.Fd())
@@ -881,10 +887,16 @@ func (w *wasiResourceTable) pathLink(
 	if err != nil {
 		return errnoFault
 	}
+	if !filepath.IsLocal(oldPath) {
+		return errnoPerm
+	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
 		return errnoFault
+	}
+	if !filepath.IsLocal(newPath) {
+		return errnoPerm
 	}
 
 	// Use Linkat with directory FDs to avoid TOCTOU - paths are resolved
@@ -1127,10 +1139,16 @@ func (w *wasiResourceTable) pathRename(
 	if err != nil {
 		return errnoFault
 	}
+	if !filepath.IsLocal(oldPath) {
+		return errnoPerm
+	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
 		return errnoFault
+	}
+	if !filepath.IsLocal(newPath) {
+		return errnoPerm
 	}
 
 	oldInfo, err := oldDirFd.root.Stat(oldPath)
@@ -1213,6 +1231,9 @@ func (w *wasiResourceTable) pathSymlink(
 
 	if !filepath.IsLocal(targetPath) {
 		return errnoNoEnt
+	}
+	if !filepath.IsLocal(linkPath) {
+		return errnoPerm
 	}
 
 	if err := fd.root.Symlink(targetPath, linkPath); err != nil {
