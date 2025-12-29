@@ -792,11 +792,44 @@ func (w *wasiResourceTable) pathLink(
 		return errnoPerm
 	}
 
+	// Hard link creation does not support directory targets (implied by trailing slash)
+	if strings.HasSuffix(oldPath, "/") {
+		return errnoNotDir
+	}
+	if strings.HasSuffix(newPath, "/") {
+		return errnoNoEnt
+	}
+
+	// Resolve parents safe against symlink escape
+	oldParent, oldBase, errCode := openParent(oldDirFd.root, oldPath)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+	if oldParent != nil {
+		defer oldParent.Close()
+	}
+	oldDirFdInt := int(oldDirFd.file.Fd())
+	if oldParent != nil {
+		oldDirFdInt = int(oldParent.Fd())
+	}
+
+	newParent, newBase, errCode := openParent(newDirFd.root, newPath)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+	if newParent != nil {
+		defer newParent.Close()
+	}
+	newDirFdInt := int(newDirFd.file.Fd())
+	if newParent != nil {
+		newDirFdInt = int(newParent.Fd())
+	}
+
 	err = linkat(
-		int(oldDirFd.file.Fd()),
-		oldPath,
-		int(newDirFd.file.Fd()),
-		newPath,
+		oldDirFdInt,
+		oldBase,
+		newDirFdInt,
+		newBase,
 		oldFlags&lookupFlagsSymlinkFollow != 0,
 	)
 	if err != nil {
@@ -948,6 +981,27 @@ func openFileInRoot(
 	return file, errnoSuccess
 }
 
+// openParent resolves the parent directory of path relative to root, opening it
+// securely to prevent symlink traversal escaping the sandbox.
+// It returns the opened directory file (which the caller must Close), the
+// basename of the path, and an error code.
+// If the path is just a file in the root, it returns (nil, path, errnoSuccess),
+// meaning the operation should be performed relative to the root fd.
+func openParent(root *os.Root, path string) (*os.File, string, int32) {
+	path = filepath.Clean(path)
+	dir, base := filepath.Split(path)
+	if dir == "" {
+		return nil, base, errnoSuccess
+	}
+	dir = filepath.Clean(dir)
+
+	f, errCode := openFileInRoot(root, dir, os.O_RDONLY, true)
+	if errCode != errnoSuccess {
+		return nil, "", errCode
+	}
+	return f, base, errnoSuccess
+}
+
 func (w *wasiResourceTable) pathReadlink(
 	memory *epsilon.Memory,
 	fdIndex, pathPtr, pathLen, bufPtr, bufLen, bufusedPtr int32,
@@ -1040,6 +1094,30 @@ func (w *wasiResourceTable) pathRename(
 		return errnoPerm
 	}
 
+	oldParent, oldBase, errCode := openParent(oldDirFd.root, oldPath)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+	if oldParent != nil {
+		defer oldParent.Close()
+	}
+	oldDirFdInt := int(oldDirFd.file.Fd())
+	if oldParent != nil {
+		oldDirFdInt = int(oldParent.Fd())
+	}
+
+	newParent, newBase, errCode := openParent(newDirFd.root, newPath)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+	if newParent != nil {
+		defer newParent.Close()
+	}
+	newDirFdInt := int(newDirFd.file.Fd())
+	if newParent != nil {
+		newDirFdInt = int(newParent.Fd())
+	}
+
 	oldInfo, err := oldDirFd.root.Stat(oldPath)
 	if err != nil {
 		return mapError(err)
@@ -1052,7 +1130,6 @@ func (w *wasiResourceTable) pathRename(
 
 	if err == nil {
 		// Destination exists - check POSIX rename semantics
-
 		if oldInfo.IsDir() != newInfo.IsDir() {
 			if newInfo.IsDir() {
 				return errnoIsDir
@@ -1085,10 +1162,10 @@ func (w *wasiResourceTable) pathRename(
 	}
 
 	err = renameat(
-		int(oldDirFd.file.Fd()),
-		oldPath,
-		int(newDirFd.file.Fd()),
-		newPath,
+		oldDirFdInt,
+		oldBase,
+		newDirFdInt,
+		newBase,
 	)
 	if err != nil {
 		return mapError(err)
