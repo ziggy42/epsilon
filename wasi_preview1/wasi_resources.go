@@ -563,9 +563,6 @@ func (w *wasiResourceTable) readdir(
 	// Open fresh handle to ensure full listing regardless of seek state
 	// Note: this avoids issues where previous reads consumed entries.
 	// Since WASI cookies allow random access, we must be able to restart.
-	if fd.root == nil {
-		return errnoBadF
-	}
 	dirFile, err := fd.root.Open(".")
 	if err != nil {
 		return mapError(err)
@@ -777,10 +774,6 @@ func (w *wasiResourceTable) pathCreateDirectory(
 		return errnoFault
 	}
 
-	if fd.root == nil {
-		return errnoBadF
-	}
-
 	if err := fd.root.Mkdir(path, 0755); err != nil {
 		return mapError(err)
 	}
@@ -799,10 +792,6 @@ func (w *wasiResourceTable) pathFilestatGet(
 	path, err := w.readString(memory, pathPtr, pathLen)
 	if err != nil {
 		return errnoFault
-	}
-
-	if dirFd.root == nil {
-		return errnoBadF
 	}
 
 	var info os.FileInfo
@@ -938,10 +927,6 @@ func (w *wasiResourceTable) pathOpen(
 	}
 
 	// Open via stored root for sandbox containment
-	if dirFd.root == nil {
-		return errnoBadF
-	}
-
 	isDirFlag := oflags&int32(oFlagsDirectory) != 0
 	file, errCode := openFileInRoot(dirFd.root, path, osFlags, isDirFlag)
 	if errCode != errnoSuccess {
@@ -1076,10 +1061,6 @@ func (w *wasiResourceTable) pathReadlink(
 		return errnoFault
 	}
 
-	if fd.root == nil {
-		return errnoBadF
-	}
-
 	target, err := fd.root.Readlink(path)
 	if err != nil {
 		return mapError(err)
@@ -1111,10 +1092,6 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 	path, err := w.readString(memory, pathPtr, pathLen)
 	if err != nil {
 		return errnoFault
-	}
-
-	if fd.root == nil {
-		return errnoBadF
 	}
 
 	info, err := fd.root.Lstat(path)
@@ -1156,18 +1133,11 @@ func (w *wasiResourceTable) pathRename(
 		return errnoFault
 	}
 
-	// Use os.Root for sandbox-safe stat operations
-	if oldDirFd.root == nil || newDirFd.root == nil {
-		return errnoBadF
-	}
-
-	// Get source file info (must exist)
 	oldInfo, err := oldDirFd.root.Stat(oldPath)
 	if err != nil {
 		return mapError(err)
 	}
 
-	// Check if destination exists
 	newInfo, err := newDirFd.root.Stat(newPath)
 	if err != nil && !os.IsNotExist(err) {
 		return mapError(err)
@@ -1175,19 +1145,16 @@ func (w *wasiResourceTable) pathRename(
 
 	if err == nil {
 		// Destination exists - check POSIX rename semantics
-		oldIsDir := oldInfo.IsDir()
-		newIsDir := newInfo.IsDir()
 
-		// Cannot replace a directory with a non-directory or vice versa
-		if oldIsDir != newIsDir {
-			if newIsDir {
+		if oldInfo.IsDir() != newInfo.IsDir() {
+			if newInfo.IsDir() {
 				return errnoIsDir
 			}
 			return errnoNotDir
 		}
 
 		// If both are directories, destination must be empty
-		if oldIsDir && newIsDir {
+		if oldInfo.IsDir() && newInfo.IsDir() {
 			// Open the destination directory via root to check if empty
 			destDir, err := newDirFd.root.Open(newPath)
 			if err != nil {
@@ -1244,12 +1211,8 @@ func (w *wasiResourceTable) pathSymlink(
 		return errnoNoEnt
 	}
 
-	if strings.HasPrefix(targetPath, "/") {
+	if !filepath.IsLocal(targetPath) {
 		return errnoNoEnt
-	}
-
-	if fd.root == nil {
-		return errnoBadF
 	}
 
 	if err := fd.root.Symlink(targetPath, linkPath); err != nil {
@@ -1271,10 +1234,6 @@ func (w *wasiResourceTable) pathUnlinkFile(
 	path, err := w.readString(memory, pathPtr, pathLen)
 	if err != nil {
 		return errnoFault
-	}
-
-	if fd.root == nil {
-		return errnoBadF
 	}
 
 	info, err := fd.root.Lstat(path)
@@ -1507,6 +1466,9 @@ func (w *wasiResourceTable) getFileOrDir(
 	}
 	if fd.rights&rights == 0 {
 		return nil, errnoNotCapable
+	}
+	if fd.fileType == fileTypeDirectory && fd.root == nil {
+		return nil, errnoBadF
 	}
 	return fd, errnoSuccess
 }
