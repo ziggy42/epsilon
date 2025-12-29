@@ -909,7 +909,7 @@ func (w *wasiResourceTable) pathOpen(
 	rightsBase, rightsInheriting int64,
 	fdflags, newFdPtr int32,
 ) int32 {
-	fd, errCode := w.getDir(fdIndex, RightsPathOpen)
+	dirFd, errCode := w.getDir(fdIndex, RightsPathOpen)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -933,40 +933,9 @@ func (w *wasiResourceTable) pathOpen(
 		}
 	}
 
-	// Determine open flags
-	var osFlags int
-	if oflags&int32(oFlagsCreat) != 0 {
-		osFlags |= os.O_CREATE
-	}
-	if oflags&int32(oFlagsExcl) != 0 {
-		osFlags |= os.O_EXCL
-	}
-	if oflags&int32(oFlagsTrunc) != 0 {
-		// Truncation requires PATH_FILESTAT_SET_SIZE right
-		if fd.rights&RightsPathFilestatSetSize == 0 {
-			return errnoNotCapable
-		}
-		osFlags |= os.O_TRUNC
-	}
-	if fdflags&int32(fdFlagsAppend) != 0 {
-		osFlags |= os.O_APPEND
-	}
-	if dirflags&lookupFlagsSymlinkFollow == 0 {
-		osFlags |= syscall.O_NOFOLLOW
-	}
-
-	// Determine read/write mode based on rights
-	rights = rightsBase & fd.rightsInheriting
-	inheritRights := rightsInheriting & fd.rightsInheriting
-	hasRead := rights&RightsFdRead != 0
-	hasWrite := rights&RightsFdWrite != 0
-
-	if hasRead && hasWrite {
-		osFlags |= os.O_RDWR
-	} else if hasWrite {
-		osFlags |= os.O_WRONLY
-	} else {
-		osFlags |= os.O_RDONLY
+	osFlags, errCode := getOpenFlags(dirFd, dirflags, oflags, fdflags, rightsBase)
+	if errCode != errnoSuccess {
+		return errCode
 	}
 
 	// Open the file/directory
@@ -975,19 +944,13 @@ func (w *wasiResourceTable) pathOpen(
 		return mapError(err)
 	}
 
-	// Use newWasiFileDescriptor to create the descriptor
+	rights = rightsBase & dirFd.rightsInheriting
+	inheritRights := rightsInheriting & dirFd.rightsInheriting
 	flags := uint16(fdflags)
-	createdFd, err := newFileDescriptor(file, rights, inheritRights, flags)
-	if err != nil {
-		file.Close()
-		return mapError(err)
+	newFdIndex, errCode := w.allocateFd(file, rights, inheritRights, flags)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	newFdIndex, err := w.allocateFdIndex()
-	if err != nil {
-		file.Close()
-		return mapError(err)
-	}
-	w.fds[newFdIndex] = createdFd
 
 	// Write the new fd to memory
 	err = memory.StoreUint32(0, uint32(newFdPtr), uint32(newFdIndex))
@@ -1269,23 +1232,11 @@ func (w *wasiResourceTable) sockAccept(
 	}
 
 	newFile := os.NewFile(uintptr(connectedSocketFd), "")
-	newFd, err := newFileDescriptor(
-		newFile,
-		connectedSocketDefaultRights,
-		0,
-		uint16(flags),
-	)
-	if err != nil {
-		newFile.Close()
-		return mapError(err)
+	rights := connectedSocketDefaultRights
+	newFdIndex, errCode := w.allocateFd(newFile, rights, 0, uint16(flags))
+	if errCode != errnoSuccess {
+		return errCode
 	}
-
-	newFdIndex, err := w.allocateFdIndex()
-	if err != nil {
-		newFile.Close()
-		return mapError(err)
-	}
-	w.fds[newFdIndex] = newFd
 
 	memory, err := inst.GetMemory(WASIMemoryExportName)
 	if err != nil {
@@ -1386,6 +1337,69 @@ func (w *wasiResourceTable) allocateFdIndex() (int32, error) {
 			return fd, nil
 		}
 	}
+}
+
+// allocateFd allocates a new file descriptor and returns its index and an error
+// code.
+func (w *wasiResourceTable) allocateFd(
+	file *os.File,
+	rights, inheritRights int64,
+	flags uint16,
+) (int32, int32) {
+	fd, err := newFileDescriptor(file, rights, inheritRights, flags)
+	if err != nil {
+		file.Close()
+		return 0, mapError(err)
+	}
+	newFdIndex, err := w.allocateFdIndex()
+	if err != nil {
+		file.Close()
+		return 0, mapError(err)
+	}
+	w.fds[newFdIndex] = fd
+	return newFdIndex, errnoSuccess
+}
+
+// getOpenFlags returns the OS flags for opening a file and an error code.
+func getOpenFlags(
+	dirFd *wasiFileDescriptor,
+	dirflags, oflags, fdflags int32,
+	rightsBase int64,
+) (int, int32) {
+	var osFlags int
+	if oflags&int32(oFlagsCreat) != 0 {
+		osFlags |= os.O_CREATE
+	}
+	if oflags&int32(oFlagsExcl) != 0 {
+		osFlags |= os.O_EXCL
+	}
+	if oflags&int32(oFlagsTrunc) != 0 {
+		// Truncation requires PATH_FILESTAT_SET_SIZE right
+		if dirFd.rights&RightsPathFilestatSetSize == 0 {
+			return 0, errnoNotCapable
+		}
+		osFlags |= os.O_TRUNC
+	}
+	if fdflags&int32(fdFlagsAppend) != 0 {
+		osFlags |= os.O_APPEND
+	}
+	if dirflags&lookupFlagsSymlinkFollow == 0 {
+		osFlags |= syscall.O_NOFOLLOW
+	}
+
+	// Determine read/write mode based on rights
+	rights := rightsBase & dirFd.rightsInheriting
+	hasRead := rights&RightsFdRead != 0
+	hasWrite := rights&RightsFdWrite != 0
+
+	if hasRead && hasWrite {
+		osFlags |= os.O_RDWR
+	} else if hasWrite {
+		osFlags |= os.O_WRONLY
+	} else {
+		osFlags |= os.O_RDONLY
+	}
+	return osFlags, errnoSuccess
 }
 
 func (w *wasiResourceTable) resolvePath(
