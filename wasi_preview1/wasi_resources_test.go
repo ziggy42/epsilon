@@ -20,6 +20,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -59,14 +60,15 @@ func createSocketPair(
 	return wasiFile, hostFile
 }
 
-func createWasiModuleWithSocket(
+func createWasiModuleWithPreopen(
 	t *testing.T,
-	socketFile *os.File,
+	file *os.File,
 	guestPath string,
 ) *WasiModule {
 	t.Helper()
+
 	preopen := WasiPreopen{
-		File:             socketFile,
+		File:             file,
 		GuestPath:        guestPath,
 		Rights:           0xffffff, // Enable everything
 		RightsInheriting: 0xffffff,
@@ -85,7 +87,7 @@ func TestWasiSocketSend(t *testing.T) {
 	defer wasiFile.Close()
 	defer hostFile.Close()
 
-	wasiMod := createWasiModuleWithSocket(t, wasiFile, "socket")
+	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
 	const socketFd = 3 // After stdin, stdout, stderr
 
 	mem, _ := instance.GetMemory(WASIMemoryExportName)
@@ -115,7 +117,7 @@ func TestWasiSocketReceive(t *testing.T) {
 	defer wasiFile.Close()
 	defer hostFile.Close()
 
-	wasiMod := createWasiModuleWithSocket(t, wasiFile, "socket")
+	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
 	const socketFd = 3 // After stdin, stdout, stderr
 
 	payload := "payload"
@@ -155,7 +157,7 @@ func TestWasiSocketAccept(t *testing.T) {
 	}
 	defer listenerFile.Close()
 
-	wasiMod := createWasiModuleWithSocket(t, listenerFile, "listener")
+	wasiMod := createWasiModuleWithPreopen(t, listenerFile, "listener")
 	const listenerFd = 3
 
 	// Start a dialer in background
@@ -186,7 +188,7 @@ func TestWasiSocketShutdown(t *testing.T) {
 	defer wasiFile.Close()
 	defer hostFile.Close()
 
-	wasiMod := createWasiModuleWithSocket(t, wasiFile, "socket")
+	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
 	const socketFd = 3
 
 	errCode := wasiMod.fs.sockShutdown(socketFd, shutWr)
@@ -198,5 +200,136 @@ func TestWasiSocketShutdown(t *testing.T) {
 	n, err := hostFile.Read(buf)
 	if n != 0 || (err != nil && err != io.EOF) {
 		t.Fatalf("Read %d bytes, want 0", n)
+	}
+}
+
+func TestPathOpen_Normal(t *testing.T) {
+	tmpDir := t.TempDir()
+	content := []byte("Hello, WASI!")
+	path := "hello.txt"
+	err := os.WriteFile(filepath.Join(tmpDir, path), content, 0666)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dirFile, err := os.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dirFile.Close()
+
+	wasiMod := createWasiModuleWithPreopen(t, dirFile, ".")
+	const dirFd = 3
+
+	// Write the path to memory
+	instance := createModuleInstance(t)
+	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	pathPtr := uint32(100)
+	newFdPtr := uint32(200)
+	mem.Set(0, pathPtr, []byte(path)) // Path at offset 100
+
+	errCode := wasiMod.fs.pathOpen(
+		instance,
+		dirFd,
+		0,                // dirflags
+		int32(pathPtr),   // pathPtr
+		int32(len(path)), // pathLen
+		0,                // oflags
+		rightsAll,        // rightsBase
+		rightsAll,        // rightsInheriting
+		0,                // fdflags
+		int32(newFdPtr),  // newFdPtr
+	)
+	if errCode != errnoSuccess {
+		t.Errorf("pathOpen failed: %d", errCode)
+	}
+
+	// Prepare the iovec to read the content
+	iovecPtr := uint32(300)
+	bufPtr := uint32(400)
+	mem.StoreUint32(0, iovecPtr, bufPtr)
+	mem.StoreUint32(0, iovecPtr+4, 100)
+
+	// Read the content
+	nPtr := uint32(500)
+	newFdIdx, _ := mem.LoadUint32(0, newFdPtr)
+	errCode = wasiMod.fs.read(
+		instance,
+		int32(newFdIdx),
+		int32(iovecPtr),
+		1,
+		int32(nPtr),
+	)
+	if errCode != errnoSuccess {
+		t.Errorf("read failed: %d", errCode)
+	}
+
+	nRead, _ := mem.LoadUint32(0, nPtr)
+	if nRead != uint32(len(content)) {
+		t.Errorf("Read %d bytes, want %d", nRead, len(content))
+	}
+
+	readContent, _ := mem.Get(0, bufPtr, nRead)
+	if !bytes.Equal(readContent, content) {
+		t.Errorf("Read content %q, want %q", readContent, content)
+	}
+
+	if wasiMod.fs.close(int32(newFdIdx)) != errnoSuccess {
+		t.Errorf("Failed to close opened file")
+	}
+}
+
+// Note that this test is NOT enough to test the sandboxing.
+func TestPathOpen_SymlinkEscape(t *testing.T) {
+	// Structure:
+	// tmp/
+	//   outside.txt
+	//   safe/
+	//     escape -> ../outside.txt
+	tmpDir := t.TempDir()
+	outsidePath := filepath.Join(tmpDir, "outside.txt")
+	if err := os.WriteFile(outsidePath, []byte("secret"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	safeDir := filepath.Join(tmpDir, "safe")
+	if err := os.Mkdir(safeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	escapePath := filepath.Join(safeDir, "escape")
+	if err := os.Symlink("../outside.txt", escapePath); err != nil {
+		t.Fatal(err)
+	}
+
+	dirFile, err := os.Open(safeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dirFile.Close()
+
+	wasiMod := createWasiModuleWithPreopen(t, dirFile, ".")
+	const dirFd = 3
+
+	instance := createModuleInstance(t)
+	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	path := "escape"
+	pathPtr := uint32(100)
+	mem.Set(0, pathPtr, []byte(path))
+	newFdPtr := uint32(200)
+
+	errCode := wasiMod.fs.pathOpen(
+		instance,
+		dirFd,
+		0,                // dirflags
+		int32(pathPtr),   // pathPtr
+		int32(len(path)), // pathLen
+		0,                // oflags
+		rightsAll,        // rightsBase
+		rightsAll,        // rightsInheriting
+		0,                // fdflags
+		int32(newFdPtr),  // newFdPtr
+	)
+
+	if errCode == errnoSuccess {
+		t.Errorf("pathOpen should have failed for symlink escape, but succeeded")
 	}
 }
