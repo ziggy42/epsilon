@@ -131,8 +131,8 @@ type wasiFileDescriptor struct {
 	isPreopen        bool
 }
 
-func (fd *wasiFileDescriptor) Close() {
-	if fd.file != nil {
+func (fd *wasiFileDescriptor) close() {
+	if fd.file != os.Stdin && fd.file != os.Stdout && fd.file != os.Stderr {
 		fd.file.Close()
 	}
 	if fd.root != nil {
@@ -142,6 +142,12 @@ func (fd *wasiFileDescriptor) Close() {
 
 type wasiResourceTable struct {
 	fds map[int32]*wasiFileDescriptor
+}
+
+func (rt *wasiResourceTable) closeAll() {
+	for _, fd := range rt.fds {
+		fd.close()
+	}
 }
 
 func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
@@ -163,21 +169,17 @@ func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
 		fds: map[int32]*wasiFileDescriptor{0: stdin, 1: stdout, 2: stderr},
 	}
 
-	// If we fail halfway through loop, we must close the preopened files we
-	// already accepted.
 	for _, dir := range preopens {
 		fd, err := newPreopenFileDescriptor(dir)
 		if err != nil {
-			// Cleanup already opened files in the table
-			for _, f := range resourceTable.fds {
-				if f.file != os.Stdin && f.file != os.Stdout && f.file != os.Stderr {
-					f.Close()
-				}
-			}
+			// If we fail halfway through loop, we must close the preopened files we
+			// already accepted.
+			resourceTable.closeAll()
 			return nil, err
 		}
 		newFdIndex, err := resourceTable.allocateFdIndex()
 		if err != nil {
+			resourceTable.closeAll()
 			dir.File.Close()
 			return nil, err
 		}
@@ -198,7 +200,6 @@ func newFileDescriptor(
 
 	var root *os.Root
 	if info.IsDir() {
-		// TODO: why do we need to do this?
 		rights &= ^(RightsFdSeek | RightsFdTell | RightsFdRead | RightsFdWrite)
 
 		r, err := os.OpenRoot(file.Name())
@@ -286,7 +287,7 @@ func (w *wasiResourceTable) close(fdIndex int32) int32 {
 	if !ok {
 		return errnoBadF
 	}
-	fd.Close()
+	fd.close()
 	delete(w.fds, fdIndex)
 	return errnoSuccess
 }
@@ -435,7 +436,15 @@ func (w *wasiResourceTable) setFileStatTimes(
 	}
 
 	path := fd.file.Name()
-	return updateTimestamps(path, atim, mtim, fstFlags, true, getTimestamps)
+	return updateTimestampsAt(
+		unix.AT_FDCWD,
+		path,
+		atim,
+		mtim,
+		fstFlags,
+		true,
+		getTimestamps,
+	)
 }
 
 func (w *wasiResourceTable) pread(
@@ -599,11 +608,7 @@ func (w *wasiResourceTable) readdir(
 	defer dirFile.Close()
 
 	// Synthesize . and .. entries
-	dotIno, err := getInodeByPath(fd.file.Name())
-	if err != nil {
-		return mapError(err)
-	}
-	currentDir := dirEntry{name: ".", fileType: fileTypeDirectory, ino: dotIno}
+	currentDir := dirEntry{name: ".", fileType: fileTypeDirectory, ino: fd.inode}
 
 	dotDotIno, err := getInodeByPath(filepath.Dir(fd.file.Name()))
 	if err != nil {
@@ -707,7 +712,7 @@ func (w *wasiResourceTable) renumber(fdIndex, toFdIndex int32) int32 {
 		return errnoBadF
 	}
 
-	toFd.Close()
+	toFd.close()
 	w.fds[toFdIndex] = fd
 	delete(w.fds, fdIndex)
 	return errnoSuccess
@@ -1796,29 +1801,10 @@ func (w *wasiResourceTable) readString(
 	return string(oldPathBytes), nil
 }
 
-// updateTimestamps validates flags, computes final timestamp values,
-// and applies them to the specified path. The getCurrentTimestamps function
-// should return current atime and mtime in nanoseconds if needed.
-func updateTimestamps(
-	path string,
-	atim, mtim int64,
-	fstFlags int32,
-	followSymlink bool,
-	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
-) int32 {
-	return updateTimestampsAt(
-		unix.AT_FDCWD,
-		path,
-		atim,
-		mtim,
-		fstFlags,
-		followSymlink,
-		getCurrentTimestamps,
-	)
-}
-
-// updateTimestampsAt is like updateTimestamps but operates relative to a
-// directory FD.
+// updateTimestampsAt validates flags, computes final timestamp values,
+// and applies them to the file specified by the path relative to dirFd.
+// The getCurrentTimestamps function should return current atime and mtime
+// in nanoseconds if needed.
 func updateTimestampsAt(
 	dirFd int,
 	path string,
