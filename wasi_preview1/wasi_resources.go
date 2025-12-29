@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/ziggy42/epsilon/epsilon"
-	"golang.org/x/sys/unix"
 )
 
 var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
@@ -50,57 +49,6 @@ const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
 
 const maxFileDescriptors = 2048
 
-const preopenTypeDir uint8 = 0
-
-const (
-	whenceSet uint8 = 0 // Seek relative to start-of-file.
-	whenceCur uint8 = 1 // Seek relative to current position.
-	whenceEnd uint8 = 2 // Seek relative to end-of-file.
-)
-
-type wasiFileType uint8
-
-const (
-	fileTypeUnknown         wasiFileType = 0
-	fileTypeBlockDevice     wasiFileType = 1
-	fileTypeCharacterDevice wasiFileType = 2
-	fileTypeDirectory       wasiFileType = 3
-	fileTypeRegularFile     wasiFileType = 4
-	fileTypeSocketDgram     wasiFileType = 5
-	fileTypeSocketStream    wasiFileType = 6
-	fileTypeSymbolicLink    wasiFileType = 7
-)
-
-const (
-	oFlagsCreat     uint16 = 1 << 0
-	oFlagsDirectory uint16 = 1 << 1
-	oFlagsExcl      uint16 = 1 << 2
-	oFlagsTrunc     uint16 = 1 << 3
-)
-
-const (
-	fstFlagsAtim    int32 = 1 << 0
-	fstFlagsAtimNow int32 = 1 << 1
-	fstFlagsMtim    int32 = 1 << 2
-	fstFlagsMtimNow int32 = 1 << 3
-)
-
-const (
-	fdFlagsAppend   uint16 = 1 << 0
-	fdFlagsDsync    uint16 = 1 << 1
-	fdFlagsNonblock uint16 = 1 << 2
-	fdFlagsRsync    uint16 = 1 << 3
-	fdFlagsSync     uint16 = 1 << 4
-)
-
-const (
-	shutRd   = 1
-	shutWr   = 2
-	shutRdWr = 3
-)
-
-const lookupFlagsSymlinkFollow int32 = 1 << 0
-
 // WasiPreopen represents a pre-opened os.File to be provided to WASI.
 //
 // If the WasiModule is successfully created, it takes ownership of the File and
@@ -111,12 +59,6 @@ type WasiPreopen struct {
 	GuestPath        string
 	Rights           int64
 	RightsInheriting int64
-}
-
-type dirEntry struct {
-	name     string
-	fileType wasiFileType
-	ino      uint64
 }
 
 type wasiFileDescriptor struct {
@@ -339,15 +281,7 @@ func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 
 	fd.flags = uint16(fdFlags)
 
-	var osFlags int
-	if fdFlags&int32(fdFlagsAppend) != 0 {
-		osFlags |= unix.O_APPEND
-	}
-	if fdFlags&int32(fdFlagsNonblock) != 0 {
-		osFlags |= unix.O_NONBLOCK
-	}
-
-	if _, err := unix.FcntlInt(fd.file.Fd(), unix.F_SETFL, osFlags); err != nil {
+	if err := setFdFlags(fd.file.Fd(), fdFlags); err != nil {
 		return mapError(err)
 	}
 
@@ -385,12 +319,16 @@ func (w *wasiResourceTable) getFileStat(
 		return errCode
 	}
 
-	var stat unix.Stat_t
-	if err := unix.Fstat(int(fd.file.Fd()), &stat); err != nil {
+	fs, err := filestatFromFd(int(fd.file.Fd()))
+	if err != nil {
 		return mapError(err)
 	}
 
-	return writeFilestat(memory, uint32(bufPtr), fd.fileType, stat)
+	buf := fs.bytes()
+	if err := memory.Set(0, uint32(bufPtr), buf[:]); err != nil {
+		return errnoFault
+	}
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) setFileStatSize(fdIndex int32, size int64) int32 {
@@ -415,25 +353,21 @@ func (w *wasiResourceTable) setFileStatTimes(
 		return errCode
 	}
 
+	fileFd := int(fd.file.Fd())
 	getTimestamps := func() (int64, int64, error) {
-		var stat unix.Stat_t
-		if err := unix.Fstat(int(fd.file.Fd()), &stat); err != nil {
-			return 0, 0, err
-		}
-		atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
-		mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
-		return atimNs, mtimNs, nil
+		return getTimestampsFromFd(fileFd)
 	}
 
-	path := fd.file.Name()
+	setTimestamps := func(atimNs, mtimNs int64) error {
+		return utimesNanoFd(fd.file.Name(), atimNs, mtimNs)
+	}
+
 	return updateTimestampsAt(
-		unix.AT_FDCWD,
-		path,
 		atim,
 		mtim,
 		fstFlags,
-		true,
 		getTimestamps,
+		setTimestamps,
 	)
 }
 
@@ -516,16 +450,7 @@ func (w *wasiResourceTable) pwrite(
 
 	currentOffset := offset
 	writeBytes := func(data []byte) (int, error) {
-		var n int
-		var err error
-		if fd.flags&fdFlagsAppend != 0 {
-			// Go's WriteAt returns error for O_APPEND files, but WASI expects it to
-			// work (even if it appends on Linux). Use unix.Pwrite directly to bypass
-			// Go's check.
-			n, err = unix.Pwrite(int(fd.file.Fd()), data, currentOffset)
-		} else {
-			n, err = fd.file.WriteAt(data, currentOffset)
-		}
+		n, err := writeAt(fd.file, data, currentOffset, fd.flags&fdFlagsAppend != 0)
 		currentOffset += int64(n)
 		return n, err
 	}
@@ -615,25 +540,12 @@ func (w *wasiResourceTable) readdir(
 	written := uint32(0)
 
 	for i := startIndex; i < len(wasiEntries); i++ {
-		entry := wasiEntries[i]
-		nameLen := uint32(len(entry.name))
-		entrySize := 24 + nameLen
-
-		// Prepare the full entry bytes
-		entryBytes := make([]byte, entrySize)
-		nextCookie := uint64(i + 1)
-		binary.LittleEndian.PutUint64(entryBytes[0:8], nextCookie)
-		binary.LittleEndian.PutUint64(entryBytes[8:16], entry.ino)
-		binary.LittleEndian.PutUint32(entryBytes[16:20], nameLen)
-		entryBytes[20] = uint8(entry.fileType)
-		// Padding bytes 21, 22, 23 are zero
-		copy(entryBytes[24:], entry.name)
-
 		available := bufEnd - bufOffset
 		if available == 0 {
 			break
 		}
 
+		entryBytes := wasiEntries[i].bytes(uint64(i + 1))
 		toWrite := min(uint32(len(entryBytes)), available)
 
 		if err := memory.Set(0, bufOffset, entryBytes[:toWrite]); err != nil {
@@ -797,28 +709,17 @@ func (w *wasiResourceTable) pathFilestatGet(
 		return errnoPerm
 	}
 
-	var info os.FileInfo
-	if flags&lookupFlagsSymlinkFollow != 0 {
-		info, err = dirFd.root.Stat(path)
-	} else {
-		info, err = dirFd.root.Lstat(path)
-	}
+	followSymlink := flags&lookupFlagsSymlinkFollow != 0
+	fs, err := filestatFromPath(int(dirFd.file.Fd()), path, followSymlink)
 	if err != nil {
 		return mapError(err)
 	}
 
-	var unixStat unix.Stat_t
-	fstatFlags := unix.AT_SYMLINK_NOFOLLOW
-	if flags&lookupFlagsSymlinkFollow != 0 {
-		fstatFlags = 0
+	buf := fs.bytes()
+	if err := memory.Set(0, uint32(filestatPtr), buf[:]); err != nil {
+		return errnoFault
 	}
-	err = unix.Fstatat(int(dirFd.file.Fd()), path, &unixStat, fstatFlags)
-	if err != nil {
-		return mapError(err)
-	}
-
-	fileType := getModeFileType(info.Mode())
-	return writeFilestat(memory, uint32(filestatPtr), fileType, unixStat)
+	return errnoSuccess
 }
 
 func (w *wasiResourceTable) pathFilestatSetTimes(
@@ -844,27 +745,19 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 	followSymlink := flags&lookupFlagsSymlinkFollow != 0
 
 	getTimestamps := func() (int64, int64, error) {
-		var stat unix.Stat_t
-		fstatFlags := unix.AT_SYMLINK_NOFOLLOW
-		if followSymlink {
-			fstatFlags = 0
-		}
-		if err := unix.Fstatat(fd, path, &stat, fstatFlags); err != nil {
-			return 0, 0, err
-		}
-		atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
-		mtimNs := stat.Mtim.Sec*1e9 + stat.Mtim.Nsec
-		return atimNs, mtimNs, nil
+		return getTimestampsFromPath(fd, path, followSymlink)
+	}
+
+	setTimestamps := func(atimNs, mtimNs int64) error {
+		return utimesNanoAt(fd, path, atimNs, mtimNs, followSymlink)
 	}
 
 	return updateTimestampsAt(
-		fd,
-		path,
 		atim,
 		mtim,
 		fstFlags,
-		followSymlink,
 		getTimestamps,
+		setTimestamps,
 	)
 }
 
@@ -899,18 +792,14 @@ func (w *wasiResourceTable) pathLink(
 		return errnoPerm
 	}
 
-	// Use Linkat with directory FDs to avoid TOCTOU - paths are resolved
-	// relative to the already-validated directory file descriptors.
-	// linkat() does not follow symlinks by default; use AT_SYMLINK_FOLLOW
-	// to follow them (i.e., create a link to the target, not the symlink).
-	var flags int
-	if oldFlags&lookupFlagsSymlinkFollow != 0 {
-		flags = unix.AT_SYMLINK_FOLLOW
-	}
-
-	oldFd := int(oldDirFd.file.Fd())
-	newFd := int(newDirFd.file.Fd())
-	if err := unix.Linkat(oldFd, oldPath, newFd, newPath, flags); err != nil {
+	err = linkat(
+		int(oldDirFd.file.Fd()),
+		oldPath,
+		int(newDirFd.file.Fd()),
+		newPath,
+		oldFlags&lookupFlagsSymlinkFollow != 0,
+	)
+	if err != nil {
 		return mapError(err)
 	}
 
@@ -1195,10 +1084,13 @@ func (w *wasiResourceTable) pathRename(
 		// For files replacing files, Renameat will handle the overwrite
 	}
 
-	// Use Renameat with directory FDs to avoid TOCTOU
-	oldFd := int(oldDirFd.file.Fd())
-	newFd := int(newDirFd.file.Fd())
-	if err := unix.Renameat(oldFd, oldPath, newFd, newPath); err != nil {
+	err = renameat(
+		int(oldDirFd.file.Fd()),
+		oldPath,
+		int(newDirFd.file.Fd()),
+		newPath,
+	)
+	if err != nil {
 		return mapError(err)
 	}
 
@@ -1281,9 +1173,9 @@ func (w *wasiResourceTable) sockAccept(
 		return errCode
 	}
 
-	connectedSocketFd, _, err := unix.Accept(int(fd.file.Fd()))
+	connectedSocketFd, err := accept(int(fd.file.Fd()))
 	if err != nil {
-		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
+		if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
 			return errnoAgain
 		}
 		return mapError(err)
@@ -1355,19 +1247,19 @@ func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 		return errCode
 	}
 
-	var unixHow int
+	var sysHow int
 	switch how {
 	case shutRd:
-		unixHow = unix.SHUT_RD
+		sysHow = syscall.SHUT_RD
 	case shutWr:
-		unixHow = unix.SHUT_WR
+		sysHow = syscall.SHUT_WR
 	case shutRdWr:
-		unixHow = unix.SHUT_RDWR
+		sysHow = syscall.SHUT_RDWR
 	default:
 		return errnoInval
 	}
 
-	if err := unix.Shutdown(int(fd.file.Fd()), unixHow); err != nil {
+	if err := syscall.Shutdown(int(fd.file.Fd()), sysHow); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -1589,22 +1481,6 @@ func iterCiovec(
 	return errnoSuccess
 }
 
-func getInodeByPath(path string) (uint64, error) {
-	var stat unix.Stat_t
-	if err := unix.Stat(path, &stat); err != nil {
-		return 0, err
-	}
-	return stat.Ino, nil
-}
-
-func getInodeByFd(fd int) (uint64, error) {
-	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
-		return 0, err
-	}
-	return stat.Ino, nil
-}
-
 func getModeFileType(mode os.FileMode) wasiFileType {
 	switch {
 	case mode.IsDir():
@@ -1626,42 +1502,6 @@ func getModeFileType(mode os.FileMode) wasiFileType {
 	}
 }
 
-func writeFilestat(
-	mem *epsilon.Memory,
-	offset uint32,
-	fileType wasiFileType,
-	unixStat unix.Stat_t,
-) int32 {
-	if err := mem.StoreUint64(0, offset, uint64(unixStat.Dev)); err != nil {
-		return errnoFault
-	}
-	if err := mem.StoreUint64(0, offset+8, unixStat.Ino); err != nil {
-		return errnoFault
-	}
-	if err := mem.StoreByte(0, offset+16, uint8(fileType)); err != nil {
-		return errnoFault
-	}
-	if err := mem.StoreUint64(0, offset+24, uint64(unixStat.Nlink)); err != nil {
-		return errnoFault
-	}
-	if err := mem.StoreUint64(0, offset+32, uint64(unixStat.Size)); err != nil {
-		return errnoFault
-	}
-	atim := unixStat.Atim.Sec*1e9 + unixStat.Atim.Nsec
-	if err := mem.StoreUint64(0, offset+40, uint64(atim)); err != nil {
-		return errnoFault
-	}
-	mtim := unixStat.Mtim.Sec*1e9 + unixStat.Mtim.Nsec
-	if err := mem.StoreUint64(0, offset+48, uint64(mtim)); err != nil {
-		return errnoFault
-	}
-	ctim := unixStat.Ctim.Sec*1e9 + unixStat.Ctim.Nsec
-	if err := mem.StoreUint64(0, offset+56, uint64(ctim)); err != nil {
-		return errnoFault
-	}
-	return errnoSuccess
-}
-
 func (w *wasiResourceTable) readString(
 	memory *epsilon.Memory,
 	ptr, length int32,
@@ -1673,17 +1513,14 @@ func (w *wasiResourceTable) readString(
 	return string(oldPathBytes), nil
 }
 
-// updateTimestampsAt validates flags, computes final timestamp values,
-// and applies them to the file specified by the path relative to dirFd.
-// The getCurrentTimestamps function should return current atime and mtime
-// in nanoseconds if needed.
+// updateTimestampsAt validates flags, computes final timestamp values, and
+// applies them to the file specified by the path relative to dirFd. The
+// getTimestamps function should return current atime and mtime in ns.
 func updateTimestampsAt(
-	dirFd int,
-	path string,
 	atim, mtim int64,
 	fstFlags int32,
-	followSymlink bool,
-	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
+	getTimestamps func() (atimNs, mtimNs int64, err error),
+	setTimestamps func(atimNs, mtimNs int64) error,
 ) int32 {
 	// Validate flags: cannot have both SET and NOW
 	if (fstFlags&fstFlagsAtim != 0) && (fstFlags&fstFlagsAtimNow != 0) {
@@ -1706,7 +1543,7 @@ func updateTimestampsAt(
 	var currentAtimNs, currentMtimNs int64
 	if !settingAtim || !settingMtim {
 		var err error
-		currentAtimNs, currentMtimNs, err = getCurrentTimestamps()
+		currentAtimNs, currentMtimNs, err = getTimestamps()
 		if err != nil {
 			return mapError(err)
 		}
@@ -1732,17 +1569,7 @@ func updateTimestampsAt(
 		finalMtimNs = currentMtimNs
 	}
 
-	ts := []unix.Timespec{
-		{Sec: finalAtimNs / 1e9, Nsec: finalAtimNs % 1e9},
-		{Sec: finalMtimNs / 1e9, Nsec: finalMtimNs % 1e9},
-	}
-
-	utimeFlags := 0
-	if !followSymlink {
-		utimeFlags = unix.AT_SYMLINK_NOFOLLOW
-	}
-
-	if err := unix.UtimesNanoAt(dirFd, path, ts, utimeFlags); err != nil {
+	if err := setTimestamps(finalAtimNs, finalMtimNs); err != nil {
 		return mapError(err)
 	}
 

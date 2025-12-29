@@ -14,6 +14,8 @@
 
 package wasi_preview1
 
+import "encoding/binary"
+
 // See github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/witx/typenames.witx
 // for a lot more error codes.
 const (
@@ -70,3 +72,101 @@ const (
 	RightsPollFdReadwrite      int64 = 1 << 27
 	RightsSockShutdown         int64 = 1 << 28
 )
+
+type wasiFileType uint8
+
+const (
+	fileTypeUnknown         wasiFileType = 0
+	fileTypeBlockDevice     wasiFileType = 1
+	fileTypeCharacterDevice wasiFileType = 2
+	fileTypeDirectory       wasiFileType = 3
+	fileTypeRegularFile     wasiFileType = 4
+	fileTypeSocketDgram     wasiFileType = 5
+	fileTypeSocketStream    wasiFileType = 6
+	fileTypeSymbolicLink    wasiFileType = 7
+)
+
+const preopenTypeDir uint8 = 0
+
+const (
+	whenceSet uint8 = 0 // Seek relative to start-of-file.
+	whenceCur uint8 = 1 // Seek relative to current position.
+	whenceEnd uint8 = 2 // Seek relative to end-of-file.
+)
+
+const (
+	oFlagsCreat     uint16 = 1 << 0
+	oFlagsDirectory uint16 = 1 << 1
+	oFlagsExcl      uint16 = 1 << 2
+	oFlagsTrunc     uint16 = 1 << 3
+)
+
+const (
+	fstFlagsAtim    int32 = 1 << 0
+	fstFlagsAtimNow int32 = 1 << 1
+	fstFlagsMtim    int32 = 1 << 2
+	fstFlagsMtimNow int32 = 1 << 3
+)
+
+const (
+	fdFlagsAppend   uint16 = 1 << 0
+	fdFlagsDsync    uint16 = 1 << 1
+	fdFlagsNonblock uint16 = 1 << 2
+	fdFlagsRsync    uint16 = 1 << 3
+	fdFlagsSync     uint16 = 1 << 4
+)
+
+const (
+	shutRd   = 1
+	shutWr   = 2
+	shutRdWr = 3
+)
+
+const lookupFlagsSymlinkFollow int32 = 1 << 0
+
+// dirEntry represents a directory entry for fd_readdir.
+type dirEntry struct {
+	name     string
+	fileType wasiFileType
+	ino      uint64
+}
+
+// bytes serializes the dirEntry to the WASI dirent layout.
+// The cookie parameter is the position marker for this entry.
+func (d *dirEntry) bytes(cookie uint64) []byte {
+	nameLen := len(d.name)
+	buf := make([]byte, 24+nameLen)
+	binary.LittleEndian.PutUint64(buf[0:8], cookie)
+	binary.LittleEndian.PutUint64(buf[8:16], d.ino)
+	binary.LittleEndian.PutUint32(buf[16:20], uint32(nameLen))
+	buf[20] = uint8(d.fileType)
+	copy(buf[24:], d.name)
+	return buf
+}
+
+// filestat represents the WASI filestat structure (64 bytes total).
+type filestat struct {
+	dev      uint64       // offset 0:  device ID
+	ino      uint64       // offset 8:  inode
+	filetype wasiFileType // offset 16: file type (1 byte, 7 padding)
+	nlink    uint64       // offset 24: number of hard links
+	size     uint64       // offset 32: file size in bytes
+	atim     uint64       // offset 40: access time (nanoseconds)
+	mtim     uint64       // offset 48: modification time (nanoseconds)
+	ctim     uint64       // offset 56: status change time (nanoseconds)
+}
+
+// bytes serializes the filestat to the WASI memory layout (64 bytes).
+func (fs *filestat) bytes() [64]byte {
+	var buf [64]byte
+	binary.LittleEndian.PutUint64(buf[0:8], fs.dev)
+	binary.LittleEndian.PutUint64(buf[8:16], fs.ino)
+	buf[16] = uint8(fs.filetype)
+	// buf[17:24] padding (already zero)
+	binary.LittleEndian.PutUint64(buf[24:32], fs.nlink)
+	binary.LittleEndian.PutUint64(buf[32:40], fs.size)
+	binary.LittleEndian.PutUint64(buf[40:48], fs.atim)
+	binary.LittleEndian.PutUint64(buf[48:56], fs.mtim)
+	binary.LittleEndian.PutUint64(buf[56:64], fs.ctim)
+	return buf
+}
