@@ -241,7 +241,7 @@ func TestPathOpen_Normal(t *testing.T) {
 		int32(newFdPtr),  // newFdPtr
 	)
 	if errCode != errnoSuccess {
-		t.Errorf("pathOpen failed: %d", errCode)
+		t.Fatalf("pathOpen failed: %d", errCode)
 	}
 
 	// Prepare the iovec to read the content
@@ -261,21 +261,21 @@ func TestPathOpen_Normal(t *testing.T) {
 		int32(nPtr),
 	)
 	if errCode != errnoSuccess {
-		t.Errorf("read failed: %d", errCode)
+		t.Fatalf("read failed: %d", errCode)
 	}
 
 	nRead, _ := mem.LoadUint32(0, nPtr)
 	if nRead != uint32(len(content)) {
-		t.Errorf("Read %d bytes, want %d", nRead, len(content))
+		t.Fatalf("Read %d bytes, want %d", nRead, len(content))
 	}
 
 	readContent, _ := mem.Get(0, bufPtr, nRead)
 	if !bytes.Equal(readContent, content) {
-		t.Errorf("Read content %q, want %q", readContent, content)
+		t.Fatalf("Read content %q, want %q", readContent, content)
 	}
 
 	if wasiMod.fs.close(int32(newFdIdx)) != errnoSuccess {
-		t.Errorf("Failed to close opened file")
+		t.Fatalf("Failed to close opened file")
 	}
 }
 
@@ -330,6 +330,6 @@ func TestPathOpen_SymlinkEscape(t *testing.T) {
 	)
 
 	if errCode == errnoSuccess {
-		t.Errorf("pathOpen should have failed for symlink escape, but succeeded")
+		t.Fatalf("pathOpen should have failed for symlink escape, but succeeded")
 	}
 }

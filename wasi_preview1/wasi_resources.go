@@ -121,6 +121,7 @@ type dirEntry struct {
 
 type wasiFileDescriptor struct {
 	file             *os.File
+	root             *os.Root
 	fileType         wasiFileType
 	flags            uint16
 	rights           int64
@@ -128,6 +129,15 @@ type wasiFileDescriptor struct {
 	guestPath        string
 	inode            uint64
 	isPreopen        bool
+}
+
+func (fd *wasiFileDescriptor) Close() {
+	if fd.file != nil {
+		fd.file.Close()
+	}
+	if fd.root != nil {
+		fd.root.Close()
+	}
 }
 
 type wasiResourceTable struct {
@@ -161,7 +171,7 @@ func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
 			// Cleanup already opened files in the table
 			for _, f := range resourceTable.fds {
 				if f.file != os.Stdin && f.file != os.Stdout && f.file != os.Stderr {
-					f.file.Close()
+					f.Close()
 				}
 			}
 			return nil, err
@@ -186,9 +196,16 @@ func newFileDescriptor(
 		return nil, err
 	}
 
+	var root *os.Root
 	if info.IsDir() {
 		// TODO: why do we need to do this?
 		rights &= ^(RightsFdSeek | RightsFdTell | RightsFdRead | RightsFdWrite)
+
+		r, err := os.OpenRoot(file.Name())
+		if err != nil {
+			return nil, err
+		}
+		root = r
 	}
 
 	ino, err := getInodeByFd(int(file.Fd()))
@@ -198,6 +215,7 @@ func newFileDescriptor(
 
 	return &wasiFileDescriptor{
 		file:             file,
+		root:             root,
 		fileType:         getModeFileType(info.Mode()),
 		flags:            flags,
 		rights:           rights,
@@ -268,7 +286,7 @@ func (w *wasiResourceTable) close(fdIndex int32) int32 {
 	if !ok {
 		return errnoBadF
 	}
-	fd.file.Close()
+	fd.Close()
 	delete(w.fds, fdIndex)
 	return errnoSuccess
 }
@@ -571,7 +589,10 @@ func (w *wasiResourceTable) readdir(
 	// Open fresh handle to ensure full listing regardless of seek state
 	// Note: this avoids issues where previous reads consumed entries.
 	// Since WASI cookies allow random access, we must be able to restart.
-	dirFile, err := os.Open(fd.file.Name())
+	if fd.root == nil {
+		return errnoBadF
+	}
+	dirFile, err := fd.root.Open(".")
 	if err != nil {
 		return mapError(err)
 	}
@@ -686,7 +707,7 @@ func (w *wasiResourceTable) renumber(fdIndex, toFdIndex int32) int32 {
 		return errnoBadF
 	}
 
-	toFd.file.Close()
+	toFd.Close()
 	w.fds[toFdIndex] = fd
 	delete(w.fds, fdIndex)
 	return errnoSuccess
@@ -801,13 +822,11 @@ func (w *wasiResourceTable) pathCreateDirectory(
 		return errnoFault
 	}
 
-	root, err := os.OpenRoot(fd.file.Name())
-	if err != nil {
-		return mapError(err)
+	if fd.root == nil {
+		return errnoBadF
 	}
-	defer root.Close()
 
-	if err := root.Mkdir(path, 0755); err != nil {
+	if err := fd.root.Mkdir(path, 0755); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -817,8 +836,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	inst *epsilon.ModuleInstance,
 	fdIndex, flags, pathPtr, pathLen, filestatPtr int32,
 ) int32 {
-	rights := RightsPathFilestatGet
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	dirFd, errCode := w.getDir(fdIndex, RightsPathFilestatGet)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -828,19 +846,31 @@ func (w *wasiResourceTable) pathFilestatGet(
 		return errnoFault
 	}
 
-	info, err := getFileInfo(path, flags&lookupFlagsSymlinkFollow != 0)
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	if dirFd.root == nil {
+		return errnoBadF
+	}
+
+	var info os.FileInfo
+	if flags&lookupFlagsSymlinkFollow != 0 {
+		info, err = dirFd.root.Stat(path)
+	} else {
+		info, err = dirFd.root.Lstat(path)
+	}
 	if err != nil {
 		return mapError(err)
 	}
 
-	// Get actual timestamps using unix.Stat or unix.Lstat
-	// Follow symlinks based on the same flag used above
 	var unixStat unix.Stat_t
+	fstatFlags := unix.AT_SYMLINK_NOFOLLOW
 	if flags&lookupFlagsSymlinkFollow != 0 {
-		err = unix.Stat(path, &unixStat)
-	} else {
-		err = unix.Lstat(path, &unixStat)
+		fstatFlags = 0
 	}
+	err = unix.Fstatat(int(dirFd.file.Fd()), path, &unixStat, fstatFlags)
 	if err != nil {
 		return mapError(err)
 	}
@@ -855,15 +885,31 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 	atim, mtim int64,
 	fstFlags int32,
 ) int32 {
-	rights := RightsPathFilestatSetTimes
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
+	dirFd, errCode := w.getDir(fdIndex, RightsPathFilestatSetTimes)
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	fd := int(dirFd.file.Fd())
+	followSymlink := flags&lookupFlagsSymlinkFollow != 0
+
 	getTimestamps := func() (int64, int64, error) {
 		var stat unix.Stat_t
-		if err := unix.Stat(path, &stat); err != nil {
+		fstatFlags := unix.AT_SYMLINK_NOFOLLOW
+		if followSymlink {
+			fstatFlags = 0
+		}
+		if err := unix.Fstatat(fd, path, &stat, fstatFlags); err != nil {
 			return 0, 0, err
 		}
 		atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
@@ -871,8 +917,15 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 		return atimNs, mtimNs, nil
 	}
 
-	followLink := flags&lookupFlagsSymlinkFollow != 0
-	return updateTimestamps(path, atim, mtim, fstFlags, followLink, getTimestamps)
+	return updateTimestampsAt(
+		fd,
+		path,
+		atim,
+		mtim,
+		fstFlags,
+		followSymlink,
+		getTimestamps,
+	)
 }
 
 func (w *wasiResourceTable) pathLink(
@@ -880,23 +933,43 @@ func (w *wasiResourceTable) pathLink(
 	oldIndex int32,
 	oldFlags, oldPathPtr, oldPathLen, newIndex, newPathPtr, newPathLen int32,
 ) int32 {
+	oldDirFd, errCode := w.getDir(oldIndex, RightsPathLinkSource)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
+	newDirFd, errCode := w.getDir(newIndex, RightsPathLinkTarget)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
+	memory, err := inst.GetMemory(WASIMemoryExportName)
+	if err != nil {
+		return errnoFault
+	}
+
+	oldPath, err := w.readString(memory, oldPathPtr, oldPathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	newPath, err := w.readString(memory, newPathPtr, newPathLen)
+	if err != nil {
+		return errnoFault
+	}
+
+	// Use Linkat with directory FDs to avoid TOCTOU - paths are resolved
+	// relative to the already-validated directory file descriptors.
+	// linkat() does not follow symlinks by default; use AT_SYMLINK_FOLLOW
+	// to follow them (i.e., create a link to the target, not the symlink).
+	var flags int
 	if oldFlags&lookupFlagsSymlinkFollow != 0 {
-		return errnoInval
+		flags = unix.AT_SYMLINK_FOLLOW
 	}
 
-	rights := RightsPathLinkSource
-	from, errCode := w.resolvePath(inst, oldIndex, oldPathPtr, oldPathLen, rights)
-	if errCode != errnoSuccess {
-		return errCode
-	}
-
-	rights = RightsPathLinkTarget
-	to, errCode := w.resolvePath(inst, newIndex, newPathPtr, newPathLen, rights)
-	if errCode != errnoSuccess {
-		return errCode
-	}
-
-	if err := os.Link(from, to); err != nil {
+	oldFd := int(oldDirFd.file.Fd())
+	newFd := int(newDirFd.file.Fd())
+	if err := unix.Linkat(oldFd, oldPath, newFd, newPath, flags); err != nil {
 		return mapError(err)
 	}
 
@@ -919,18 +992,9 @@ func (w *wasiResourceTable) pathOpen(
 		return errnoFault
 	}
 
-	rights := RightsPathOpen
-	path, errCode := w.resolvePath(inst, fdIndex, pathPtr, pathLen, rights)
-	if errCode != errnoSuccess {
-		return errCode
-	}
-
-	isDirFlag := oflags&int32(oFlagsDirectory) != 0
-	if isDirFlag {
-		stat, err := getFileInfo(path, true)
-		if err == nil && !stat.IsDir() {
-			return errnoNotDir
-		}
+	path, err := w.readString(memory, pathPtr, pathLen)
+	if err != nil {
+		return errnoFault
 	}
 
 	osFlags, errCode := getOpenFlags(dirFd, dirflags, oflags, fdflags, rightsBase)
@@ -938,13 +1002,18 @@ func (w *wasiResourceTable) pathOpen(
 		return errCode
 	}
 
-	// Open the file/directory
-	file, err := os.OpenFile(path, osFlags, 0666)
-	if err != nil {
-		return mapError(err)
+	// Open via stored root for sandbox containment
+	if dirFd.root == nil {
+		return errnoBadF
 	}
 
-	rights = rightsBase & dirFd.rightsInheriting
+	isDirFlag := oflags&int32(oFlagsDirectory) != 0
+	file, errCode := openFileInRoot(dirFd.root, path, osFlags, isDirFlag)
+	if errCode != errnoSuccess {
+		return errCode
+	}
+
+	rights := rightsBase & dirFd.rightsInheriting
 	inheritRights := rightsInheriting & dirFd.rightsInheriting
 	flags := uint16(fdflags)
 	newFdIndex, errCode := w.allocateFd(file, rights, inheritRights, flags)
@@ -961,6 +1030,101 @@ func (w *wasiResourceTable) pathOpen(
 	}
 
 	return errnoSuccess
+}
+
+// openFileInRoot opens a file within an os.Root with secure O_NOFOLLOW
+// handling. It uses the "Open -> Verify -> Truncate" pattern to prevent side
+// effects on symlink targets when O_NOFOLLOW is set.
+func openFileInRoot(
+	root *os.Root,
+	path string,
+	osFlags int,
+	expectsDir bool,
+) (*os.File, int32) {
+	wantsNoFollow := osFlags&syscall.O_NOFOLLOW != 0
+
+	// Only defer O_TRUNC when O_NOFOLLOW is set (to prevent side effects on
+	// symlink targets). When symlink following is allowed, O_TRUNC is safe.
+	var wantsTrunc bool
+	safeFlags := osFlags
+	if wantsNoFollow {
+		wantsTrunc = osFlags&os.O_TRUNC != 0
+		safeFlags = osFlags &^ os.O_TRUNC
+		// os.Root doesn't respect O_NOFOLLOW, so remove it from flags
+		// (we'll verify manually)
+		safeFlags &^= syscall.O_NOFOLLOW
+
+		// If we need to truncate later, we need write access.
+		// If file opened O_RDONLY, upgrade to O_RDWR.
+		if wantsTrunc && (safeFlags&(os.O_WRONLY|os.O_RDWR)) == 0 {
+			safeFlags &^= os.O_RDONLY
+			safeFlags |= os.O_RDWR
+		}
+	}
+
+	file, err := root.OpenFile(path, safeFlags, 0666)
+	if err != nil {
+		// If O_NOFOLLOW was requested and the open failed, check if the path
+		// is a symlink. For dangling symlinks, os.Root returns ENOENT because
+		// the target doesn't exist, but WASI expects ELOOP.
+		if wantsNoFollow {
+			linfo, lerr := root.Lstat(path)
+			if lerr == nil && linfo.Mode()&os.ModeSymlink != 0 {
+				return nil, errnoLoop
+			}
+		}
+		return nil, mapError(err)
+	}
+
+	// Verify O_NOFOLLOW compliance
+	if wantsNoFollow {
+		linfo, err := root.Lstat(path)
+		if err != nil {
+			file.Close()
+			return nil, mapError(err)
+		}
+
+		// If Lstat shows a symlink, we shouldn't have opened it
+		if linfo.Mode()&os.ModeSymlink != 0 {
+			file.Close()
+			return nil, errnoLoop
+		}
+
+		// Verify identity: opened file must match the path we intended
+		finfo, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, mapError(err)
+		}
+
+		if !os.SameFile(finfo, linfo) {
+			file.Close()
+			return nil, errnoLoop
+		}
+
+		// Apply O_TRUNC now that verification passed
+		if wantsTrunc {
+			if err := file.Truncate(0); err != nil {
+				file.Close()
+				return nil, mapError(err)
+			}
+		}
+	}
+
+	// Verify directory flag
+	if expectsDir {
+		finfo, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, mapError(err)
+		}
+		if !finfo.IsDir() {
+			file.Close()
+			return nil, errnoNotDir
+		}
+	}
+
+	return file, errnoSuccess
 }
 
 func (w *wasiResourceTable) pathReadlink(
@@ -982,13 +1146,11 @@ func (w *wasiResourceTable) pathReadlink(
 		return errnoFault
 	}
 
-	root, err := os.OpenRoot(fd.file.Name())
-	if err != nil {
-		return mapError(err)
+	if fd.root == nil {
+		return errnoBadF
 	}
-	defer root.Close()
 
-	target, err := root.Readlink(path)
+	target, err := fd.root.Readlink(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1026,13 +1188,11 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoFault
 	}
 
-	root, err := os.OpenRoot(fd.file.Name())
-	if err != nil {
-		return mapError(err)
+	if fd.root == nil {
+		return errnoBadF
 	}
-	defer root.Close()
 
-	info, err := root.Lstat(path)
+	info, err := fd.root.Lstat(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1040,7 +1200,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoNotDir
 	}
 
-	if err := root.Remove(path); err != nil {
+	if err := fd.root.Remove(path); err != nil {
 		return mapError(err)
 	}
 
@@ -1051,14 +1211,12 @@ func (w *wasiResourceTable) pathRename(
 	inst *epsilon.ModuleInstance,
 	fdIndex, oldPathPtr, oldPathLen, newFdIndex, newPathPtr, newPathLen int32,
 ) int32 {
-	rights := RightsPathRenameSource
-	from, errCode := w.resolvePath(inst, fdIndex, oldPathPtr, oldPathLen, rights)
+	oldDirFd, errCode := w.getDir(fdIndex, RightsPathRenameSource)
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
-	// For destination, we need custom handling because it might not exist yet
-	newFd, errCode := w.getDir(newFdIndex, RightsPathRenameTarget)
+	newDirFd, errCode := w.getDir(newFdIndex, RightsPathRenameTarget)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -1068,24 +1226,29 @@ func (w *wasiResourceTable) pathRename(
 		return errnoFault
 	}
 
+	oldPath, err := w.readString(memory, oldPathPtr, oldPathLen)
+	if err != nil {
+		return errnoFault
+	}
+
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
 		return errnoFault
 	}
 
-	to, errCode := validatePathInRoot(newFd.file.Name(), newPath)
-	if errCode != errnoSuccess {
-		return errCode
+	// Use os.Root for sandbox-safe stat operations
+	if oldDirFd.root == nil || newDirFd.root == nil {
+		return errnoBadF
 	}
 
-	// Get source file info
-	oldInfo, err := getFileInfo(from, true)
+	// Get source file info (must exist)
+	oldInfo, err := oldDirFd.root.Stat(oldPath)
 	if err != nil {
 		return mapError(err)
 	}
 
 	// Check if destination exists
-	newInfo, err := getFileInfo(to, true)
+	newInfo, err := newDirFd.root.Stat(newPath)
 	if err != nil && !os.IsNotExist(err) {
 		return mapError(err)
 	}
@@ -1105,8 +1268,14 @@ func (w *wasiResourceTable) pathRename(
 
 		// If both are directories, destination must be empty
 		if oldIsDir && newIsDir {
-			entries, err := os.ReadDir(to)
+			// Open the destination directory via root to check if empty
+			destDir, err := newDirFd.root.Open(newPath)
 			if err != nil {
+				return mapError(err)
+			}
+			entries, err := destDir.Readdirnames(1)
+			destDir.Close()
+			if err != nil && err != io.EOF {
 				return mapError(err)
 			}
 			if len(entries) > 0 {
@@ -1114,14 +1283,17 @@ func (w *wasiResourceTable) pathRename(
 			}
 			// Remove the empty destination directory first
 			// os.Rename doesn't replace directories on all platforms (e.g., macOS)
-			if err := os.Remove(to); err != nil {
+			if err := newDirFd.root.Remove(newPath); err != nil {
 				return mapError(err)
 			}
 		}
-		// For files replacing files, os.Rename will handle the overwrite
+		// For files replacing files, Renameat will handle the overwrite
 	}
 
-	if err := os.Rename(from, to); err != nil {
+	// Use Renameat with directory FDs to avoid TOCTOU
+	oldFd := int(oldDirFd.file.Fd())
+	newFd := int(newDirFd.file.Fd())
+	if err := unix.Renameat(oldFd, oldPath, newFd, newPath); err != nil {
 		return mapError(err)
 	}
 
@@ -1161,13 +1333,11 @@ func (w *wasiResourceTable) pathSymlink(
 		return errnoNoEnt
 	}
 
-	root, err := os.OpenRoot(fd.file.Name())
-	if err != nil {
-		return mapError(err)
+	if fd.root == nil {
+		return errnoBadF
 	}
-	defer root.Close()
 
-	if err := root.Symlink(targetPath, linkPath); err != nil {
+	if err := fd.root.Symlink(targetPath, linkPath); err != nil {
 		return mapError(err)
 	}
 
@@ -1193,13 +1363,11 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoFault
 	}
 
-	root, err := os.OpenRoot(fd.file.Name())
-	if err != nil {
-		return mapError(err)
+	if fd.root == nil {
+		return errnoBadF
 	}
-	defer root.Close()
 
-	info, err := root.Lstat(path)
+	info, err := fd.root.Lstat(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -1207,7 +1375,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoIsDir
 	}
 
-	if err := root.Remove(path); err != nil {
+	if err := fd.root.Remove(path); err != nil {
 		return mapError(err)
 	}
 
@@ -1400,93 +1568,6 @@ func getOpenFlags(
 		osFlags |= os.O_RDONLY
 	}
 	return osFlags, errnoSuccess
-}
-
-func (w *wasiResourceTable) resolvePath(
-	inst *epsilon.ModuleInstance,
-	fdIndex, pathPtr, pathLen int32,
-	rights int64,
-) (string, int32) {
-	fd, errCode := w.getDir(fdIndex, rights)
-	if errCode != errnoSuccess {
-		return "", errCode
-	}
-
-	memory, err := inst.GetMemory(WASIMemoryExportName)
-	if err != nil {
-		return "", errnoFault
-	}
-
-	path, err := w.readString(memory, pathPtr, pathLen)
-	if err != nil {
-		return "", errnoFault
-	}
-
-	fullPath, errCode := validatePathInRoot(fd.file.Name(), path)
-	if errCode != errnoSuccess {
-		return "", errCode
-	}
-
-	// If path has trailing slash, verify it's a directory
-	if strings.HasSuffix(path, "/") {
-		stat, err := getFileInfo(fullPath, true)
-		if err != nil {
-			return "", mapError(err)
-		}
-		if !stat.IsDir() {
-			return "", errnoNotDir
-		}
-	}
-
-	return fullPath, errnoSuccess
-}
-
-// validatePathInRoot validates that a relative path stays within the root
-// directory. It performs two levels of containment checks:
-//  1. Lexical check: filepath.IsLocal ensures the path is relative and has no
-//     ".." escapes after cleaning.
-//  2. Symlink check: resolves symlinks and verifies the target is still in root
-//     if the relativePath points to a file that already exists. For
-//     non-existing paths, it validates the parent directory instead.
-//
-// Returns the full validated path and an error code.
-func validatePathInRoot(root, relativePath string) (string, int32) {
-	if !filepath.IsLocal(relativePath) {
-		return "", errnoNotCapable
-	}
-
-	canonicalRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", errnoNoEnt
-	}
-
-	fullPath := filepath.Join(canonicalRoot, relativePath)
-
-	// Resolve symlinks and verify containment.
-	// This catches symlinks that point outside the sandbox.
-	canonicalPath, err := filepath.EvalSymlinks(fullPath)
-	if err == nil {
-		// Path exists: check that resolved path is inside root
-		rel, err := filepath.Rel(canonicalRoot, canonicalPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return "", errnoNotCapable
-		}
-	} else {
-		// Path doesn't exist: check the parent directory instead. This allows
-		// file creation while still preventing directory escapes via symlinks.
-		parentDir := filepath.Dir(fullPath)
-		canonicalParent, err := filepath.EvalSymlinks(parentDir)
-		if err != nil {
-			return "", errnoNoEnt
-		}
-
-		rel, err := filepath.Rel(canonicalRoot, canonicalParent)
-		if err != nil || strings.HasPrefix(rel, "..") {
-			return "", errnoNotCapable
-		}
-	}
-
-	return fullPath, errnoSuccess
 }
 
 func (w *wasiResourceTable) getFile(
@@ -1725,6 +1806,27 @@ func updateTimestamps(
 	followSymlink bool,
 	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
 ) int32 {
+	return updateTimestampsAt(
+		unix.AT_FDCWD,
+		path,
+		atim,
+		mtim,
+		fstFlags,
+		followSymlink,
+		getCurrentTimestamps,
+	)
+}
+
+// updateTimestampsAt is like updateTimestamps but operates relative to a
+// directory FD.
+func updateTimestampsAt(
+	dirFd int,
+	path string,
+	atim, mtim int64,
+	fstFlags int32,
+	followSymlink bool,
+	getCurrentTimestamps func() (atimNs, mtimNs int64, err error),
+) int32 {
 	// Validate flags: cannot have both SET and NOW
 	if (fstFlags&fstFlagsAtim != 0) && (fstFlags&fstFlagsAtimNow != 0) {
 		return errnoInval
@@ -1782,19 +1884,11 @@ func updateTimestamps(
 		utimeFlags = unix.AT_SYMLINK_NOFOLLOW
 	}
 
-	if err := unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, utimeFlags); err != nil {
+	if err := unix.UtimesNanoAt(dirFd, path, ts, utimeFlags); err != nil {
 		return mapError(err)
 	}
 
 	return errnoSuccess
-}
-
-func getFileInfo(path string, followSymlink bool) (os.FileInfo, error) {
-	if followSymlink {
-		return os.Stat(path)
-	} else {
-		return os.Lstat(path)
-	}
 }
 
 func mapError(err error) int32 {
@@ -1861,5 +1955,5 @@ func mapError(err error) int32 {
 	}
 
 	// Fallback
-	return errnoIO
+	return errnoNotCapable
 }
