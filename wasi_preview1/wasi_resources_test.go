@@ -16,7 +16,6 @@ package wasi_preview1
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -26,23 +25,12 @@ import (
 	"time"
 
 	"github.com/ziggy42/epsilon/epsilon"
-	"github.com/ziggy42/epsilon/internal/wabt"
 )
 
-func createModuleInstance(t *testing.T) *epsilon.ModuleInstance {
-	t.Helper()
-	wat := fmt.Sprintf(`(module (memory (export "%s") 1))`, WASIMemoryExportName)
-	wasmBin, err := wabt.Wat2Wasm(wat)
-	if err != nil {
-		t.Fatalf("Failed to convert WAT to WASM: %v", err)
-	}
-
-	instance, err := epsilon.NewRuntime().
-		InstantiateModuleWithImports(bytes.NewReader(wasmBin), nil)
-	if err != nil {
-		t.Fatalf("Failed to instantiate minimal module: %v", err)
-	}
-	return instance
+func createMemory() *epsilon.Memory {
+	return epsilon.NewMemory(epsilon.MemoryType{
+		Limits: epsilon.Limits{Min: 1},
+	})
 }
 
 func createSocketPair(
@@ -82,7 +70,6 @@ func createWasiModuleWithPreopen(
 }
 
 func TestWasiSocketSend(t *testing.T) {
-	instance := createModuleInstance(t)
 	wasiFile, hostFile := createSocketPair(t, "wasi_socket", "host_socket")
 	defer wasiFile.Close()
 	defer hostFile.Close()
@@ -90,13 +77,13 @@ func TestWasiSocketSend(t *testing.T) {
 	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
 	const socketFd = 3 // After stdin, stdout, stderr
 
-	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	mem := createMemory()
 	payload := []byte("payload")
 	mem.Set(0, 0, payload)                        // The data to send
 	mem.StoreUint32(0, 100, 0)                    // Send input data pointer
 	mem.StoreUint32(0, 104, uint32(len(payload))) // Send input data length
 
-	errCode := wasiMod.fs.sockSend(instance, socketFd, 100, 1, 0, 200)
+	errCode := wasiMod.fs.sockSend(mem, socketFd, 100, 1, 0, 200)
 	if errCode != errnoSuccess {
 		t.Errorf("sockSend failed: %d", errCode)
 	}
@@ -112,7 +99,6 @@ func TestWasiSocketSend(t *testing.T) {
 }
 
 func TestWasiSocketReceive(t *testing.T) {
-	instance := createModuleInstance(t)
 	wasiFile, hostFile := createSocketPair(t, "wasi_socket", "host_socket")
 	defer wasiFile.Close()
 	defer hostFile.Close()
@@ -125,11 +111,11 @@ func TestWasiSocketReceive(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	mem := createMemory()
 	mem.StoreUint32(0, 300, 400) // Read input data pointer
 	mem.StoreUint32(0, 304, 100) // Read input data length
 
-	errCode := wasiMod.fs.sockRecv(instance, socketFd, 300, 1, 0, 500, 504)
+	errCode := wasiMod.fs.sockRecv(mem, socketFd, 300, 1, 0, 500, 504)
 	if errCode != errnoSuccess {
 		t.Errorf("sockRecv failed: %d", errCode)
 	}
@@ -145,7 +131,6 @@ func TestWasiSocketReceive(t *testing.T) {
 }
 
 func TestWasiSocketAccept(t *testing.T) {
-	instance := createModuleInstance(t)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Listen failed: %v", err)
@@ -169,10 +154,10 @@ func TestWasiSocketAccept(t *testing.T) {
 		}
 	}()
 
-	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	mem := createMemory()
 	outputFdPtr := uint32(100)
 
-	errCode := wasiMod.fs.sockAccept(instance, listenerFd, 0, int32(outputFdPtr))
+	errCode := wasiMod.fs.sockAccept(mem, listenerFd, 0, int32(outputFdPtr))
 	if errCode != errnoSuccess {
 		t.Errorf("sockAccept failed: %d", errCode)
 	}
@@ -222,14 +207,13 @@ func TestPathOpen_Normal(t *testing.T) {
 	const dirFd = 3
 
 	// Write the path to memory
-	instance := createModuleInstance(t)
-	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	mem := createMemory()
 	pathPtr := uint32(100)
 	newFdPtr := uint32(200)
 	mem.Set(0, pathPtr, []byte(path)) // Path at offset 100
 
 	errCode := wasiMod.fs.pathOpen(
-		instance,
+		mem,
 		dirFd,
 		0,                // dirflags
 		int32(pathPtr),   // pathPtr
@@ -254,7 +238,7 @@ func TestPathOpen_Normal(t *testing.T) {
 	nPtr := uint32(500)
 	newFdIdx, _ := mem.LoadUint32(0, newFdPtr)
 	errCode = wasiMod.fs.read(
-		instance,
+		mem,
 		int32(newFdIdx),
 		int32(iovecPtr),
 		1,
@@ -309,15 +293,14 @@ func TestPathOpen_SymlinkEscape(t *testing.T) {
 	wasiMod := createWasiModuleWithPreopen(t, dirFile, ".")
 	const dirFd = 3
 
-	instance := createModuleInstance(t)
-	mem, _ := instance.GetMemory(WASIMemoryExportName)
+	mem := createMemory()
 	path := "escape"
 	pathPtr := uint32(100)
 	mem.Set(0, pathPtr, []byte(path))
 	newFdPtr := uint32(200)
 
 	errCode := wasiMod.fs.pathOpen(
-		instance,
+		mem,
 		dirFd,
 		0,                // dirflags
 		int32(pathPtr),   // pathPtr

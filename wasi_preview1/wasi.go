@@ -292,7 +292,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
-			errCode := w.fs.getStat(inst, args[0].(int32), args[1].(int32))
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
+			errCode := w.fs.getStat(memory, args[0].(int32), args[1].(int32))
 			return []any{errCode}
 		}).
 		AddHostFunc("fd_fdstat_set_flags", func(
@@ -317,15 +321,23 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
-			errCode := w.fs.getPrestat(inst, args[0].(int32), args[1].(int32))
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
+			errCode := w.fs.getPrestat(memory, args[0].(int32), args[1].(int32))
 			return []any{errCode}
 		}).
 		AddHostFunc("fd_prestat_dir_name", func(
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.prestatDirName(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -336,8 +348,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathFilestatGet(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -350,8 +366,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathOpen(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -368,8 +388,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathRemoveDirectory(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -380,8 +404,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.seek(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int64),
 				args[2].(int32),
@@ -393,8 +421,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.read(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -406,8 +438,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.write(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -419,8 +455,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pwrite(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -484,7 +524,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
-			errCode := w.fs.tell(inst, args[0].(int32), args[1].(int32))
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
+			errCode := w.fs.tell(memory, args[0].(int32), args[1].(int32))
 			return []any{errCode}
 		}).
 		AddHostFunc("fd_renumber", func(
@@ -498,7 +542,11 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
-			errCode := w.fs.getFileStat(inst, args[0].(int32), args[1].(int32))
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
+			errCode := w.fs.getFileStat(memory, args[0].(int32), args[1].(int32))
 			return []any{errCode}
 		}).
 		AddHostFunc("fd_filestat_set_size", func(
@@ -524,8 +572,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pread(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -538,8 +590,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.readdir(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -552,8 +608,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathCreateDirectory(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -564,8 +624,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathFilestatSetTimes(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -580,8 +644,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathLink(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -596,8 +664,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathReadlink(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -611,8 +683,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathRename(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -626,8 +702,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathSymlink(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -640,8 +720,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.pathUnlinkFile(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -679,8 +763,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.sockAccept(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -691,8 +779,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.sockRecv(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
@@ -706,8 +798,12 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			inst *epsilon.ModuleInstance,
 			args ...any,
 		) []any {
+			memory, err := inst.GetMemory(WASIMemoryExportName)
+			if err != nil {
+				return []any{errnoFault}
+			}
 			errCode := w.fs.sockSend(
-				inst,
+				memory,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
