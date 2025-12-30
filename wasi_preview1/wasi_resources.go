@@ -1347,7 +1347,7 @@ func (w *wasiResourceTable) allocateFd(
 	}
 	newFdIndex, err := w.allocateFdIndex()
 	if err != nil {
-		file.Close()
+		fd.close()
 		return 0, mapError(err)
 	}
 	w.fds[newFdIndex] = fd
