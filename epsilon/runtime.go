@@ -17,6 +17,7 @@ package epsilon
 import (
 	"bytes"
 	"io"
+	"maps"
 )
 
 // Runtime provides the main API for instantiating and interacting with WASM
@@ -40,14 +41,14 @@ func (r *Runtime) WithConfig(config Config) *Runtime {
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
 func (r *Runtime) InstantiateModule(wasm io.Reader) (*ModuleInstance, error) {
-	return r.InstantiateModuleWithImports(wasm, nil)
+	return r.InstantiateModuleWithImports(wasm, map[string]map[string]any{})
 }
 
 // InstantiateModuleWithImports parses and instantiates a WASM module with
 // imports.
 func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
-	imports map[string]map[string]any,
+	imports ...map[string]map[string]any,
 ) (*ModuleInstance, error) {
 	r.ensureVm()
 	module, err := newParser(wasm).parse()
@@ -55,7 +56,17 @@ func (r *Runtime) InstantiateModuleWithImports(
 		return nil, err
 	}
 
-	return r.vm.instantiate(module, imports)
+	merged := make(map[string]map[string]any)
+	for _, importMap := range imports {
+		for moduleName, exports := range importMap {
+			if _, exists := merged[moduleName]; !exists {
+				merged[moduleName] = make(map[string]any)
+			}
+			maps.Copy(merged[moduleName], exports)
+		}
+	}
+
+	return r.vm.instantiate(module, merged)
 }
 
 // InstantiateModuleFromBytes is a convenience method to instantiate a WASM
@@ -72,68 +83,63 @@ func (r *Runtime) ensureVm() {
 	}
 }
 
-// ImportBuilder provides a fluent, type-safe API for building import objects
-// for WASM module instantiation.
+// ModuleImportBuilder provides a fluent, type-safe API for building import
+// objects for a specific WASM module.
 //
 // Example:
 //
-//	imports := epsilon.NewImportBuilder().
-//	    AddHostFunc("env", "log", func(x int32) {
-//	        fmt.Println("WASM says:", x)
-//	    }).
-//	    AddMemory("env", "memory", epsilon.NewMemory(epsilon.MemoryType{
+//	imports := epsilon.NewModuleImportBuilder("env").
+//	    AddHostFunc("log", func(x int32) { fmt.Println("WASM says:", x) }).
+//	    AddMemory("memory", epsilon.NewMemory(epsilon.MemoryType{
 //	        Limits: epsilon.Limits{Min: 1},
 //	    })).
-//	    AddGlobal("env", "offset", int32(1024), false, epsilon.I32).
+//	    AddGlobal("offset", int32(1024), false, epsilon.I32).
 //	    Build()
 //
 //	instance, err := runtime.InstantiateModuleWithImports(wasmReader, imports)
-type ImportBuilder struct {
-	imports map[string]map[string]any
+type ModuleImportBuilder struct {
+	moduleName string
+	imports    map[string]any
 }
 
-// NewImportBuilder creates a new ImportBuilder.
-func NewImportBuilder() *ImportBuilder {
-	return &ImportBuilder{
-		imports: make(map[string]map[string]any),
+func NewModuleImportBuilder(moduleName string) *ModuleImportBuilder {
+	return &ModuleImportBuilder{
+		moduleName: moduleName,
+		imports:    make(map[string]any),
 	}
 }
 
-func (b *ImportBuilder) AddHostFunc(
-	module, name string,
-	fn func(...any) []any,
-) *ImportBuilder {
-	b.ensureModule(module)
-	b.imports[module][name] = fn
+func (b *ModuleImportBuilder) AddHostFunc(
+	name string,
+	fn func(*ModuleInstance, ...any) []any,
+) *ModuleImportBuilder {
+	b.imports[name] = fn
 	return b
 }
 
-func (b *ImportBuilder) AddMemory(
-	module, name string,
+func (b *ModuleImportBuilder) AddMemory(
+	name string,
 	memory *Memory,
-) *ImportBuilder {
-	b.ensureModule(module)
-	b.imports[module][name] = memory
+) *ModuleImportBuilder {
+	b.imports[name] = memory
 	return b
 }
 
-func (b *ImportBuilder) AddTable(
-	module, name string,
+func (b *ModuleImportBuilder) AddTable(
+	name string,
 	table *Table,
-) *ImportBuilder {
-	b.ensureModule(module)
-	b.imports[module][name] = table
+) *ModuleImportBuilder {
+	b.imports[name] = table
 	return b
 }
 
-func (b *ImportBuilder) AddGlobal(
-	module, name string,
+func (b *ModuleImportBuilder) AddGlobal(
+	name string,
 	value any,
 	mutable bool,
 	valueType ValueType,
-) *ImportBuilder {
-	b.ensureModule(module)
-	b.imports[module][name] = &Global{
+) *ModuleImportBuilder {
+	b.imports[name] = &Global{
 		value:   newValue(value),
 		Mutable: mutable,
 		Type:    valueType,
@@ -144,23 +150,17 @@ func (b *ImportBuilder) AddGlobal(
 // AddModuleExports adds all exports from a ModuleInstance as imports.
 // This is useful when you want to import functions, memories, tables, or
 // globals from one module into another.
-func (b *ImportBuilder) AddModuleExports(
-	module string,
+func (b *ModuleImportBuilder) AddModuleExports(
 	instance *ModuleInstance,
-) *ImportBuilder {
-	b.ensureModule(module)
+) *ModuleImportBuilder {
 	for _, export := range instance.exports {
-		b.imports[module][export.name] = export.value
+		b.imports[export.name] = export.value
 	}
 	return b
 }
 
-func (b *ImportBuilder) Build() map[string]map[string]any {
-	return b.imports
-}
-
-func (b *ImportBuilder) ensureModule(module string) {
-	if _, exists := b.imports[module]; !exists {
-		b.imports[module] = make(map[string]any)
+func (b *ModuleImportBuilder) Build() map[string]map[string]any {
+	return map[string]map[string]any{
+		b.moduleName: b.imports,
 	}
 }

@@ -68,8 +68,8 @@ Extend your WebAssembly modules with custom Go functions and more using
 
 ```go
 // Create imports before instantiation
-imports := epsilon.NewImportBuilder().
-	AddHostFunc("env", "log", func(args ...any) []any {
+imports := epsilon.NewModuleImportBuilder("env").
+	AddHostFunc("log", func(m *epsilon.ModuleInstance, args ...any) []any {
 		fmt.Printf("[WASM Log]: %v\n", args[0])
 		return nil
 	}).
@@ -77,7 +77,7 @@ imports := epsilon.NewImportBuilder().
 
 // Instantiate with imports
 instance, _ := epsilon.NewRuntime().
-	InstantiateModuleWithImports(wasmFile, imports)
+	InstantiateModuleWithImports(bytes.NewReader(wasmBytes), imports)
 ```
 
 ## CLI

@@ -55,8 +55,8 @@ func TestRuntimeImportedFunction(t *testing.T) {
 			call $multiply)
 	)`)
 
-	imports := NewImportBuilder().
-		AddHostFunc("env", "multiply", func(args ...any) []any {
+	imports := NewModuleImportBuilder("env").
+		AddHostFunc("multiply", func(module *ModuleInstance, args ...any) []any {
 			a := args[0].(int32)
 			b := args[1].(int32)
 			return []any{a * b}
@@ -96,8 +96,8 @@ func TestRuntimeImportedMemory(t *testing.T) {
 		t.Fatalf("failed to set memory: %v", err)
 	}
 
-	imports := NewImportBuilder().
-		AddMemory("env", "memory", memory).
+	imports := NewModuleImportBuilder("env").
+		AddMemory("memory", memory).
 		Build()
 
 	instance, err := NewRuntime().
@@ -140,8 +140,8 @@ func TestRuntimeImportedGlobal(t *testing.T) {
 			i32.add)
 	)`)
 
-	imports := NewImportBuilder().
-		AddGlobal("env", "offset", int32(100), false, I32).
+	imports := NewModuleImportBuilder("env").
+		AddGlobal("offset", int32(100), false, I32).
 		Build()
 
 	instance, err := NewRuntime().
@@ -180,12 +180,12 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 			call_indirect (type $op))
 	)`)
 
-	imports := NewImportBuilder().
-		AddHostFunc("env", "host_sub", func(args ...any) []any {
+	imports := NewModuleImportBuilder("env").
+		AddHostFunc("host_sub", func(module *ModuleInstance, args ...any) []any {
 			x := args[0].(int32)
 			return []any{x - 1}
 		}).
-		AddTable("env", "table", NewTable(TableType{
+		AddTable("table", NewTable(TableType{
 			ReferenceType: FuncRefType,
 			Limits:        Limits{Min: 2},
 		})).
@@ -244,7 +244,7 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 
 	module2, err := runtime.InstantiateModuleWithImports(
 		bytes.NewReader(module2Wasm),
-		NewImportBuilder().AddModuleExports("math", module1).Build(),
+		NewModuleImportBuilder("math").AddModuleExports(module1).Build(),
 	)
 	if err != nil {
 		t.Fatalf("failed to instantiate module2: %v", err)
