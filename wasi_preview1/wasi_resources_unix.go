@@ -127,6 +127,17 @@ func renameat(
 	return unix.Renameat(int(oldDir.Fd()), oldPath, int(newDir.Fd()), newPath)
 }
 
+// unlinkat removes a file or directory at path relative to dir.
+// If isDir is true, uses AT_REMOVEDIR to atomically verify it's a directory.
+// If isDir is false, uses 0 flag which fails with EISDIR on directories.
+func unlinkat(dir *os.File, path string, isDir bool) error {
+	var flags int
+	if isDir {
+		flags = unix.AT_REMOVEDIR
+	}
+	return unix.Unlinkat(int(dir.Fd()), path, flags)
+}
+
 // getFileTypeFromMode converts Unix stat mode bits to a WASI file type.
 func getFileTypeFromMode(mode uint32) wasiFileType {
 	switch mode & unix.S_IFMT {

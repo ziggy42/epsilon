@@ -753,16 +753,10 @@ func (w *wasiResourceTable) pathLink(
 	if err != nil {
 		return errnoFault
 	}
-	if !filepath.IsLocal(oldPath) {
-		return errnoPerm
-	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
 		return errnoFault
-	}
-	if !filepath.IsLocal(newPath) {
-		return errnoPerm
 	}
 
 	// Hard link creation does not support directory targets (implied by trailing
@@ -1025,15 +1019,20 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoFault
 	}
 
-	info, err := fd.root.Lstat(path)
-	if err != nil {
-		return mapError(err)
+	parent, base, errCode := openParent(fd.root, path)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if !info.IsDir() {
-		return errnoNotDir
+	if parent != nil {
+		defer parent.Close()
 	}
 
-	if err := fd.root.Remove(path); err != nil {
+	dirFile := fd.file
+	if parent != nil {
+		dirFile = parent
+	}
+
+	if err := unlinkat(dirFile, base, true); err != nil {
 		return mapError(err)
 	}
 
@@ -1058,16 +1057,10 @@ func (w *wasiResourceTable) pathRename(
 	if err != nil {
 		return errnoFault
 	}
-	if !filepath.IsLocal(oldPath) {
-		return errnoPerm
-	}
 
 	newPath, err := w.readString(memory, newPathPtr, newPathLen)
 	if err != nil {
 		return errnoFault
-	}
-	if !filepath.IsLocal(newPath) {
-		return errnoPerm
 	}
 
 	oldParent, oldBase, errCode := openParent(oldDirFd.root, oldPath)
@@ -1129,9 +1122,6 @@ func (w *wasiResourceTable) pathSymlink(
 	if !filepath.IsLocal(targetPath) {
 		return errnoNoEnt
 	}
-	if !filepath.IsLocal(linkPath) {
-		return errnoPerm
-	}
 
 	if err := fd.root.Symlink(targetPath, linkPath); err != nil {
 		return mapError(err)
@@ -1154,15 +1144,28 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoFault
 	}
 
-	info, err := fd.root.Lstat(path)
-	if err != nil {
-		return mapError(err)
+	// Preserve trailing slash for proper syscall semantics
+	hasTrailingSlash := strings.HasSuffix(path, "/")
+
+	parent, base, errCode := openParent(fd.root, path)
+	if errCode != errnoSuccess {
+		return errCode
 	}
-	if info.IsDir() {
-		return errnoIsDir
+	if parent != nil {
+		defer parent.Close()
 	}
 
-	if err := fd.root.Remove(path); err != nil {
+	dirFile := fd.file
+	if parent != nil {
+		dirFile = parent
+	}
+
+	// Restore trailing slash so syscall returns correct error
+	if hasTrailingSlash {
+		base = base + "/"
+	}
+
+	if err := unlinkat(dirFile, base, false); err != nil {
 		return mapError(err)
 	}
 
