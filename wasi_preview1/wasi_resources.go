@@ -1094,57 +1094,7 @@ func (w *wasiResourceTable) pathRename(
 		newDirFile = newParent
 	}
 
-	oldInfo, err := oldDirFd.root.Stat(oldPath)
-
-	if err != nil {
-		return mapError(err)
-	}
-
-	newInfo, err := newDirFd.root.Stat(newPath)
-	if err != nil && !os.IsNotExist(err) {
-		return mapError(err)
-	}
-
-	if err == nil {
-		// Destination exists - check POSIX rename semantics
-		if oldInfo.IsDir() != newInfo.IsDir() {
-			if newInfo.IsDir() {
-				return errnoIsDir
-			}
-			return errnoNotDir
-		}
-
-		// If both are directories, destination must be empty
-		if oldInfo.IsDir() && newInfo.IsDir() {
-			// Open the destination directory via root to check if empty
-			destDir, err := newDirFd.root.Open(newPath)
-			if err != nil {
-				return mapError(err)
-			}
-			entries, err := destDir.Readdirnames(1)
-			destDir.Close()
-			if err != nil && err != io.EOF {
-				return mapError(err)
-			}
-			if len(entries) > 0 {
-				return errnoNotEmpty
-			}
-			// Remove the empty destination directory first
-			// os.Rename doesn't replace directories on all platforms (e.g., macOS)
-			if err := newDirFd.root.Remove(newPath); err != nil {
-				return mapError(err)
-			}
-		}
-		// For files replacing files, Renameat will handle the overwrite
-	}
-
-	err = renameat(
-		oldDirFile,
-		oldBase,
-		newDirFile,
-		newBase,
-	)
-
+	err = renameat(oldDirFile, oldBase, newDirFile, newBase)
 	if err != nil {
 		return mapError(err)
 	}
