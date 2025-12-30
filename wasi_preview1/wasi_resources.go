@@ -30,36 +30,10 @@ import (
 
 var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
-const rightsAll int64 = ^0
-
-// DefaultDirRights are the rights inherent to the directory handle itself. We
-// exclude rights that imply reading/writing "data" from the directory stream
-// itself (which is not how WASI reads directories, it uses fd_readdir) or
-// seeking.
-const DefaultDirRights int64 = rightsAll &^
-	(RightsFdRead | RightsFdWrite | RightsFdSeek | RightsFdTell)
-
-// DefaultDirInheritingRights are the rights that newly opened files/directories
-// will inherit from this directory. This effectively allows full access to
-// children.
-const DefaultDirInheritingRights int64 = rightsAll
-
 const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
 	RightsPollFdReadwrite | RightsFdFilestatGet | RightsSockShutdown
 
 const maxFileDescriptors = 2048
-
-// WasiPreopen represents a pre-opened os.File to be provided to WASI.
-//
-// If the WasiModule is successfully created, it takes ownership of the File and
-// will close it when appropriate. If creation fails, ownership stays with the
-// caller.
-type WasiPreopen struct {
-	File             *os.File
-	GuestPath        string
-	Rights           int64
-	RightsInheriting int64
-}
 
 type wasiFileDescriptor struct {
 	file             *os.File

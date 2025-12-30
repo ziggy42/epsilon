@@ -14,32 +14,29 @@
 
 package wasi_preview1
 
-import "encoding/binary"
-
-// See github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/witx/typenames.witx
-// for a lot more error codes.
-const (
-	errnoSuccess     int32 = 0  // No error occurred.
-	errnoAcces       int32 = 2  // Permission denied.
-	errnoAgain       int32 = 6  // Try again.
-	errnoBadF        int32 = 8  // Bad file descriptor.
-	errnoExist       int32 = 20 // File exists.
-	errnoFault       int32 = 21 // Bad address.
-	errnoInval       int32 = 28 // Invalid argument.
-	errnoIO          int32 = 29 // I/O error.
-	errnoIsDir       int32 = 31 // Is a directory.
-	errnoLoop        int32 = 32 // Too many levels of symbolic links.
-	errnoNameTooLong int32 = 37 // Filename too long.
-	errnoNFile       int32 = 41 // Too many files open in system.
-	errnoNoEnt       int32 = 44 // No such file or directory.
-	errnoNotDir      int32 = 54 // Not a directory or symbolic link.
-	errnoNotEmpty    int32 = 55 // Directory not empty.
-	errnoNotSock     int32 = 57 // Not a socket.
-	errnoNotSup      int32 = 58 // Not supported.
-	errnoPerm        int32 = 63 // Operation not permitted.
-	errnoPipe        int32 = 64 // Broken pipe.
-	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
+import (
+	"encoding/binary"
+	"os"
 )
+
+const (
+	WASIMemoryExportName = "memory"
+	WASIModuleName       = "wasi_snapshot_preview1"
+)
+
+const rightsAll int64 = ^0
+
+// DefaultDirRights are the rights inherent to the directory handle itself. We
+// exclude rights that imply reading/writing "data" from the directory stream
+// itself (which is not how WASI reads directories, it uses fd_readdir) or
+// seeking.
+const DefaultDirRights int64 = rightsAll &^
+	(RightsFdRead | RightsFdWrite | RightsFdSeek | RightsFdTell)
+
+// DefaultDirInheritingRights are the rights that newly opened files/directories
+// will inherit from this directory. This effectively allows full access to
+// children.
+const DefaultDirInheritingRights int64 = rightsAll
 
 const (
 	RightsFdDatasync           int64 = 1 << 0
@@ -71,6 +68,43 @@ const (
 	RightsPathUnlinkFile       int64 = 1 << 26
 	RightsPollFdReadwrite      int64 = 1 << 27
 	RightsSockShutdown         int64 = 1 << 28
+)
+
+// WasiPreopen represents a pre-opened os.File to be provided to WASI.
+//
+// If the WasiModule is successfully created, it takes ownership of the File and
+// will close it when appropriate. If creation fails, ownership stays with the
+// caller.
+type WasiPreopen struct {
+	File             *os.File
+	GuestPath        string
+	Rights           int64
+	RightsInheriting int64
+}
+
+// See github.com/WebAssembly/WASI/blob/wasi-0.1/preview1/witx/typenames.witx
+// for a lot more error codes.
+const (
+	errnoSuccess     int32 = 0  // No error occurred.
+	errnoAcces       int32 = 2  // Permission denied.
+	errnoAgain       int32 = 6  // Try again.
+	errnoBadF        int32 = 8  // Bad file descriptor.
+	errnoExist       int32 = 20 // File exists.
+	errnoFault       int32 = 21 // Bad address.
+	errnoInval       int32 = 28 // Invalid argument.
+	errnoIO          int32 = 29 // I/O error.
+	errnoIsDir       int32 = 31 // Is a directory.
+	errnoLoop        int32 = 32 // Too many levels of symbolic links.
+	errnoNameTooLong int32 = 37 // Filename too long.
+	errnoNFile       int32 = 41 // Too many files open in system.
+	errnoNoEnt       int32 = 44 // No such file or directory.
+	errnoNotDir      int32 = 54 // Not a directory or symbolic link.
+	errnoNotEmpty    int32 = 55 // Directory not empty.
+	errnoNotSock     int32 = 57 // Not a socket.
+	errnoNotSup      int32 = 58 // Not supported.
+	errnoPerm        int32 = 63 // Operation not permitted.
+	errnoPipe        int32 = 64 // Broken pipe.
+	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
 )
 
 type wasiFileType uint8

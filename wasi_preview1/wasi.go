@@ -22,11 +22,6 @@ import (
 	"github.com/ziggy42/epsilon/epsilon"
 )
 
-const (
-	WASIMemoryExportName = "memory"
-	WASIModuleName       = "wasi_snapshot_preview1"
-)
-
 type WasiModule struct {
 	fs                    *wasiResourceTable
 	args                  []string
