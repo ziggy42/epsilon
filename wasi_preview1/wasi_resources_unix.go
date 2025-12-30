@@ -22,10 +22,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// filestatFromFd returns a filestat from a file descriptor.
-func filestatFromFd(fd int) (filestat, error) {
+// getFilestat returns a filestat from a file.
+func getFilestat(file *os.File) (filestat, error) {
 	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
+	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return filestat{}, err
 	}
 	return filestat{
@@ -40,9 +40,9 @@ func filestatFromFd(fd int) (filestat, error) {
 	}, nil
 }
 
-// filestatFromPath returns a filestat from a path relative to dirFd.
-func filestatFromPath(
-	dirFd int,
+// getFilestatFromPath returns a filestat from a path relative to dir.
+func getFilestatFromPath(
+	dir *os.File,
 	path string,
 	followSymlink bool,
 ) (filestat, error) {
@@ -52,7 +52,7 @@ func filestatFromPath(
 	}
 
 	var stat unix.Stat_t
-	if err := unix.Fstatat(dirFd, path, &stat, flags); err != nil {
+	if err := unix.Fstatat(int(dir.Fd()), path, &stat, flags); err != nil {
 		return filestat{}, err
 	}
 
@@ -69,7 +69,7 @@ func filestatFromPath(
 }
 
 // setFdFlags sets the file descriptor flags using fcntl F_SETFL.
-func setFdFlags(fd uintptr, fdFlags int32) error {
+func setFdFlags(file *os.File, fdFlags int32) error {
 	var osFlags int
 	if fdFlags&int32(fdFlagsAppend) != 0 {
 		osFlags |= unix.O_APPEND
@@ -78,13 +78,12 @@ func setFdFlags(fd uintptr, fdFlags int32) error {
 		osFlags |= unix.O_NONBLOCK
 	}
 
-	_, err := unix.FcntlInt(fd, unix.F_SETFL, osFlags)
+	_, err := unix.FcntlInt(file.Fd(), unix.F_SETFL, osFlags)
 	return err
 }
 
-// writeAt writes data at the specified offset. It handles the case where
-// the file was opened with O_APPEND, which normally causes os.File.WriteAt to
-// fail.
+// writeAt writes data at the specified offset. It handles the case where the
+// file was opened with O_APPEND, which normally causes os.File.WriteAt to fail.
 func writeAt(
 	file *os.File,
 	data []byte,
@@ -97,13 +96,13 @@ func writeAt(
 	return file.WriteAt(data, offset)
 }
 
-// linkat creates a hard link from oldPath (relative to oldDirFd) to newPath
-// (relative to newDirFd). If followSymlink is true, symlinks are followed
-// when resolving oldPath.
+// linkat creates a hard link from oldPath (relative to oldDir) to newPath
+// (relative to newDir). If followSymlink is true, symlinks are followed when
+// resolving oldPath.
 func linkat(
-	oldDirFd int,
+	oldDir *os.File,
 	oldPath string,
-	newDirFd int,
+	newDir *os.File,
 	newPath string,
 	followSymlink bool,
 ) error {
@@ -111,18 +110,20 @@ func linkat(
 	if followSymlink {
 		flags = unix.AT_SYMLINK_FOLLOW
 	}
+	oldDirFd := int(oldDir.Fd())
+	newDirFd := int(newDir.Fd())
 	return unix.Linkat(oldDirFd, oldPath, newDirFd, newPath, flags)
 }
 
-// renameat renames/moves oldPath (relative to oldDirFd) to newPath
-// (relative to newDirFd).
+// renameat renames/moves oldPath (relative to oldDir) to newPath (relative to
+// newDir).
 func renameat(
-	oldDirFd int,
+	oldDir *os.File,
 	oldPath string,
-	newDirFd int,
+	newDir *os.File,
 	newPath string,
 ) error {
-	return unix.Renameat(oldDirFd, oldPath, newDirFd, newPath)
+	return unix.Renameat(int(oldDir.Fd()), oldPath, int(newDir.Fd()), newPath)
 }
 
 // getFileTypeFromMode converts Unix stat mode bits to a WASI file type.
@@ -155,19 +156,19 @@ func getInodeByPath(path string) (uint64, error) {
 	return stat.Ino, nil
 }
 
-func getInodeByFd(fd int) (uint64, error) {
+func getInode(file *os.File) (uint64, error) {
 	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
+	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return 0, err
 	}
 	return stat.Ino, nil
 }
 
-// getTimestampsFromFd returns the access and modification times in nanoseconds
-// for the given file descriptor.
-func getTimestampsFromFd(fd int) (int64, int64, error) {
+// getTimestamps returns the access and modification times in ns for the given
+// file.
+func getTimestamps(file *os.File) (int64, int64, error) {
 	var stat unix.Stat_t
-	if err := unix.Fstat(fd, &stat); err != nil {
+	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
 		return 0, 0, err
 	}
 	atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
@@ -175,10 +176,10 @@ func getTimestampsFromFd(fd int) (int64, int64, error) {
 	return atimNs, mtimNs, nil
 }
 
-// getTimestampsFromPath returns the access and modification times in
-// nanoseconds for the path relative to dirFd.
+// getTimestampsFromPath returns the access and modification times in ns for the
+// path relative to dir.
 func getTimestampsFromPath(
-	dirFd int,
+	dir *os.File,
 	path string,
 	followSymlink bool,
 ) (int64, int64, error) {
@@ -187,7 +188,7 @@ func getTimestampsFromPath(
 		flags = unix.AT_SYMLINK_NOFOLLOW
 	}
 	var stat unix.Stat_t
-	if err := unix.Fstatat(dirFd, path, &stat, flags); err != nil {
+	if err := unix.Fstatat(int(dir.Fd()), path, &stat, flags); err != nil {
 		return 0, 0, err
 	}
 	atimNs := stat.Atim.Sec*1e9 + stat.Atim.Nsec
@@ -195,10 +196,10 @@ func getTimestampsFromPath(
 	return atimNs, mtimNs, nil
 }
 
-// utimesNanoAt sets the access and modification times for the path relative
-// to dirFd.
+// utimesNanoAt sets the access and modification times for the path relative to
+// dir.
 func utimesNanoAt(
-	dirFd int,
+	dir *os.File,
 	path string,
 	atimNs, mtimNs int64,
 	followSymlink bool,
@@ -211,22 +212,22 @@ func utimesNanoAt(
 	if !followSymlink {
 		flags = unix.AT_SYMLINK_NOFOLLOW
 	}
-	return unix.UtimesNanoAt(dirFd, path, ts, flags)
+	return unix.UtimesNanoAt(int(dir.Fd()), path, ts, flags)
 }
 
-// utimesNanoFd sets the access and modification times for the file descriptor
-// by using its path. This relies on the path being reachable from the current
+// utimesNano sets the access and modification times for the file descriptor by
+// using its path. This relies on the path being reachable from the current
 // working directory.
-func utimesNanoFd(path string, atimNs, mtimNs int64) error {
+func utimesNano(file *os.File, atimNs, mtimNs int64) error {
 	ts := []unix.Timespec{
 		{Sec: atimNs / 1e9, Nsec: atimNs % 1e9},
 		{Sec: mtimNs / 1e9, Nsec: mtimNs % 1e9},
 	}
-	return unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, 0)
+	return unix.UtimesNanoAt(unix.AT_FDCWD, file.Name(), ts, 0)
 }
 
 // accept accepts a connection on the socket file descriptor.
-func accept(fd int) (int, error) {
-	nfd, _, err := unix.Accept(fd)
+func accept(file *os.File) (int, error) {
+	nfd, _, err := unix.Accept(int(file.Fd()))
 	return nfd, err
 }

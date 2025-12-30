@@ -151,7 +151,7 @@ func newFileDescriptor(
 		root = r
 	}
 
-	ino, err := getInodeByFd(int(file.Fd()))
+	ino, err := getInode(file)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +281,7 @@ func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 
 	fd.flags = uint16(fdFlags)
 
-	if err := setFdFlags(fd.file.Fd(), fdFlags); err != nil {
+	if err := setFdFlags(fd.file, fdFlags); err != nil {
 		return mapError(err)
 	}
 
@@ -319,7 +319,7 @@ func (w *wasiResourceTable) getFileStat(
 		return errCode
 	}
 
-	fs, err := filestatFromFd(int(fd.file.Fd()))
+	fs, err := getFilestat(fd.file)
 	if err != nil {
 		return mapError(err)
 	}
@@ -353,13 +353,12 @@ func (w *wasiResourceTable) setFileStatTimes(
 		return errCode
 	}
 
-	fileFd := int(fd.file.Fd())
 	getTimestamps := func() (int64, int64, error) {
-		return getTimestampsFromFd(fileFd)
+		return getTimestamps(fd.file)
 	}
 
 	setTimestamps := func(atimNs, mtimNs int64) error {
-		return utimesNanoFd(fd.file.Name(), atimNs, mtimNs)
+		return utimesNano(fd.file, atimNs, mtimNs)
 	}
 
 	return updateTimestampsAt(
@@ -710,7 +709,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	}
 
 	followSymlink := flags&lookupFlagsSymlinkFollow != 0
-	fs, err := filestatFromPath(int(dirFd.file.Fd()), path, followSymlink)
+	fs, err := getFilestatFromPath(dirFd.file, path, followSymlink)
 	if err != nil {
 		return mapError(err)
 	}
@@ -741,15 +740,13 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 		return errnoPerm
 	}
 
-	fd := int(dirFd.file.Fd())
 	followSymlink := flags&lookupFlagsSymlinkFollow != 0
-
 	getTimestamps := func() (int64, int64, error) {
-		return getTimestampsFromPath(fd, path, followSymlink)
+		return getTimestampsFromPath(dirFd.file, path, followSymlink)
 	}
 
 	setTimestamps := func(atimNs, mtimNs int64) error {
-		return utimesNanoAt(fd, path, atimNs, mtimNs, followSymlink)
+		return utimesNanoAt(dirFd.file, path, atimNs, mtimNs, followSymlink)
 	}
 
 	return updateTimestampsAt(
@@ -792,7 +789,8 @@ func (w *wasiResourceTable) pathLink(
 		return errnoPerm
 	}
 
-	// Hard link creation does not support directory targets (implied by trailing slash)
+	// Hard link creation does not support directory targets (implied by trailing
+	// slash)
 	if strings.HasSuffix(oldPath, "/") {
 		return errnoNotDir
 	}
@@ -808,9 +806,9 @@ func (w *wasiResourceTable) pathLink(
 	if oldParent != nil {
 		defer oldParent.Close()
 	}
-	oldDirFdInt := int(oldDirFd.file.Fd())
+	oldDirFile := oldDirFd.file
 	if oldParent != nil {
-		oldDirFdInt = int(oldParent.Fd())
+		oldDirFile = oldParent
 	}
 
 	newParent, newBase, errCode := openParent(newDirFd.root, newPath)
@@ -820,18 +818,20 @@ func (w *wasiResourceTable) pathLink(
 	if newParent != nil {
 		defer newParent.Close()
 	}
-	newDirFdInt := int(newDirFd.file.Fd())
+
+	newDirFile := newDirFd.file
 	if newParent != nil {
-		newDirFdInt = int(newParent.Fd())
+		newDirFile = newParent
 	}
 
 	err = linkat(
-		oldDirFdInt,
+		oldDirFile,
 		oldBase,
-		newDirFdInt,
+		newDirFile,
 		newBase,
 		oldFlags&lookupFlagsSymlinkFollow != 0,
 	)
+
 	if err != nil {
 		return mapError(err)
 	}
@@ -1101,9 +1101,9 @@ func (w *wasiResourceTable) pathRename(
 	if oldParent != nil {
 		defer oldParent.Close()
 	}
-	oldDirFdInt := int(oldDirFd.file.Fd())
+	oldDirFile := oldDirFd.file
 	if oldParent != nil {
-		oldDirFdInt = int(oldParent.Fd())
+		oldDirFile = oldParent
 	}
 
 	newParent, newBase, errCode := openParent(newDirFd.root, newPath)
@@ -1113,12 +1113,13 @@ func (w *wasiResourceTable) pathRename(
 	if newParent != nil {
 		defer newParent.Close()
 	}
-	newDirFdInt := int(newDirFd.file.Fd())
+	newDirFile := newDirFd.file
 	if newParent != nil {
-		newDirFdInt = int(newParent.Fd())
+		newDirFile = newParent
 	}
 
 	oldInfo, err := oldDirFd.root.Stat(oldPath)
+
 	if err != nil {
 		return mapError(err)
 	}
@@ -1162,11 +1163,12 @@ func (w *wasiResourceTable) pathRename(
 	}
 
 	err = renameat(
-		oldDirFdInt,
+		oldDirFile,
 		oldBase,
-		newDirFdInt,
+		newDirFile,
 		newBase,
 	)
+
 	if err != nil {
 		return mapError(err)
 	}
@@ -1250,7 +1252,7 @@ func (w *wasiResourceTable) sockAccept(
 		return errCode
 	}
 
-	connectedSocketFd, err := accept(int(fd.file.Fd()))
+	connectedSocketFd, err := accept(fd.file)
 	if err != nil {
 		if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
 			return errnoAgain
