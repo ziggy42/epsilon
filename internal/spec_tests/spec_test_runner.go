@@ -50,14 +50,11 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 			Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
 			ReferenceType: epsilon.FuncRefType,
 		})).
-		AddMemory(
-			"memory",
-			epsilon.NewMemory(
-				epsilon.MemoryType{
-					Limits: epsilon.Limits{Min: 1, Max: &importMemoryLimitMax},
-				},
-			),
-		).
+		AddMemory("memory", epsilon.NewMemory(
+			epsilon.MemoryType{
+				Limits: epsilon.Limits{Min: 1, Max: &importMemoryLimitMax},
+			},
+		)).
 		AddHostFunc(
 			"print_i32",
 			func(m *epsilon.ModuleInstance, args ...any) []any {

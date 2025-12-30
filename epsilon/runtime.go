@@ -88,15 +88,18 @@ func (r *Runtime) ensureVm() {
 //
 // Example:
 //
-//	envImports := epsilon.NewModuleImportBuilder("env").
-//	    AddHostFunc("log", func(x int32) { fmt.Println("WASM says:", x) }).
+//	imports := epsilon.NewModuleImportBuilder("env").
+//	    AddHostFunc("log", func(m *epsilon.ModuleInstance, args ...any) []any {
+//	        fmt.Println("WASM says:", args[0])
+//	        return nil
+//	    }).
 //	    AddMemory("memory", epsilon.NewMemory(epsilon.MemoryType{
 //	        Limits: epsilon.Limits{Min: 1},
 //	    })).
 //	    AddGlobal("offset", int32(1024), false, epsilon.I32).
 //	    Build()
 //
-//	instance, err := runtime.InstantiateModuleWithImports(wasmReader, envImports)
+//	instance, err := runtime.InstantiateModuleWithImports(wasmReader, imports)
 type ModuleImportBuilder struct {
 	moduleName string
 	imports    map[string]any
@@ -160,7 +163,5 @@ func (b *ModuleImportBuilder) AddModuleExports(
 }
 
 func (b *ModuleImportBuilder) Build() map[string]map[string]any {
-	return map[string]map[string]any{
-		b.moduleName: b.imports,
-	}
+	return map[string]map[string]any{b.moduleName: b.imports}
 }

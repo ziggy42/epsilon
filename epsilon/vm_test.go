@@ -796,7 +796,7 @@ func TestFunctionImport(t *testing.T) {
 	)`
 	imports := map[string]map[string]any{
 		"module": {
-			"sum": func(m *ModuleInstance, args ...any) []any {
+			"sum": func(module *ModuleInstance, args ...any) []any {
 				val := args[0].(int32) + args[1].(int32)
 				return []any{val}
 			},

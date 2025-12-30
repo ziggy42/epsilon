@@ -56,7 +56,7 @@ func TestRuntimeImportedFunction(t *testing.T) {
 	)`)
 
 	imports := NewModuleImportBuilder("env").
-		AddHostFunc("multiply", func(m *ModuleInstance, args ...any) []any {
+		AddHostFunc("multiply", func(module *ModuleInstance, args ...any) []any {
 			a := args[0].(int32)
 			b := args[1].(int32)
 			return []any{a * b}
@@ -181,7 +181,7 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 	)`)
 
 	imports := NewModuleImportBuilder("env").
-		AddHostFunc("host_sub", func(m *ModuleInstance, args ...any) []any {
+		AddHostFunc("host_sub", func(module *ModuleInstance, args ...any) []any {
 			x := args[0].(int32)
 			return []any{x - 1}
 		}).

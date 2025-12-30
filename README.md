@@ -77,7 +77,7 @@ imports := epsilon.NewModuleImportBuilder("env").
 
 // Instantiate with imports
 instance, _ := epsilon.NewRuntime().
-	InstantiateModuleWithImports(wasmFile, imports)
+	InstantiateModuleWithImports(bytes.NewReader(wasmBytes), imports)
 ```
 
 ## CLI
