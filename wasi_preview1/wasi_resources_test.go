@@ -75,6 +75,7 @@ func TestWasiSocketSend(t *testing.T) {
 	defer hostFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
+	defer wasiMod.Close()
 	const socketFd = 3 // After stdin, stdout, stderr
 
 	mem := createMemory()
@@ -104,6 +105,7 @@ func TestWasiSocketReceive(t *testing.T) {
 	defer hostFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
+	defer wasiMod.Close()
 	const socketFd = 3 // After stdin, stdout, stderr
 
 	payload := "payload"
@@ -143,6 +145,7 @@ func TestWasiSocketAccept(t *testing.T) {
 	defer listenerFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, listenerFile, "listener")
+	defer wasiMod.Close()
 	const listenerFd = 3
 
 	// Start a dialer in background
@@ -174,6 +177,7 @@ func TestWasiSocketShutdown(t *testing.T) {
 	defer hostFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, wasiFile, "socket")
+	defer wasiMod.Close()
 	const socketFd = 3
 
 	errCode := wasiMod.fs.sockShutdown(socketFd, shutWr)
@@ -204,6 +208,7 @@ func TestPathOpen_Normal(t *testing.T) {
 	defer dirFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, dirFile, ".")
+	defer wasiMod.Close()
 	const dirFd = 3
 
 	// Write the path to memory
@@ -291,6 +296,7 @@ func TestPathOpen_SymlinkEscape(t *testing.T) {
 	defer dirFile.Close()
 
 	wasiMod := createWasiModuleWithPreopen(t, dirFile, ".")
+	defer wasiMod.Close()
 	const dirFd = 3
 
 	mem := createMemory()

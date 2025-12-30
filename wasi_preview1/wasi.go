@@ -821,3 +821,10 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 		}).
 		Build()
 }
+
+// Close releases all resources held by the WasiModule, including file
+// descriptors for preopened directories and any files opened during execution.
+// After calling Close, the WasiModule should not be used.
+func (w *WasiModule) Close() {
+	w.fs.closeAll()
+}

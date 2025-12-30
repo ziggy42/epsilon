@@ -143,6 +143,7 @@ func runCLI(
 	if err != nil {
 		return err
 	}
+	defer wasiModule.Close()
 
 	instance, err := epsilon.NewRuntime().
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())
