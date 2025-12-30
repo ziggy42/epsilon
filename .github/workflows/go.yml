@@ -37,6 +37,9 @@ jobs:
         tar -xzf wabt-1.0.39-linux-x64.tar.gz 
         echo "$(pwd)/wabt-1.0.39/bin" >> $GITHUB_PATH 
     - name: Build
-      run: go build ./...
+      run: |
+        go build ./...
+        GOOS=darwin go build -o epsilon-darwin ./cmd/epsilon
+        GOOS=windows go build -o epsilon.exe ./cmd/epsilon
     - name: Test
       run: go test ./...
