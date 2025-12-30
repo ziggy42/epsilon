@@ -163,7 +163,5 @@ func (b *ModuleImportBuilder) AddModuleExports(
 }
 
 func (b *ModuleImportBuilder) Build() map[string]map[string]any {
-	return map[string]map[string]any{
-		b.moduleName: b.imports,
-	}
+	return map[string]map[string]any{b.moduleName: b.imports}
 }
