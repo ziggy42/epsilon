@@ -89,7 +89,10 @@ func (r *Runtime) ensureVm() {
 // Example:
 //
 //	imports := epsilon.NewModuleImportBuilder("env").
-//	    AddHostFunc("log", func(x int32) { fmt.Println("WASM says:", x) }).
+//	    AddHostFunc("log", func(m *epsilon.ModuleInstance, args ...any) []any {
+//	        fmt.Println("WASM says:", args[0])
+//	        return nil
+//	    }).
 //	    AddMemory("memory", epsilon.NewMemory(epsilon.MemoryType{
 //	        Limits: epsilon.Limits{Min: 1},
 //	    })).
