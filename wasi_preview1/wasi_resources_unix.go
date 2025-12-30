@@ -17,6 +17,7 @@
 package wasi_preview1
 
 import (
+	"fmt"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -205,8 +206,8 @@ func utimesNanoAt(
 	followSymlink bool,
 ) error {
 	ts := []unix.Timespec{
-		{Sec: atimNs / 1e9, Nsec: atimNs % 1e9},
-		{Sec: mtimNs / 1e9, Nsec: mtimNs % 1e9},
+		unix.NsecToTimespec(atimNs),
+		unix.NsecToTimespec(mtimNs),
 	}
 	var flags int
 	if !followSymlink {
@@ -215,15 +216,16 @@ func utimesNanoAt(
 	return unix.UtimesNanoAt(int(dir.Fd()), path, ts, flags)
 }
 
-// utimesNano sets the access and modification times for the file descriptor by
-// using its path. This relies on the path being reachable from the current
-// working directory.
+// utimesNano sets the access and modification times for the file descriptor.
 func utimesNano(file *os.File, atimNs, mtimNs int64) error {
 	ts := []unix.Timespec{
-		{Sec: atimNs / 1e9, Nsec: atimNs % 1e9},
-		{Sec: mtimNs / 1e9, Nsec: mtimNs % 1e9},
+		unix.NsecToTimespec(atimNs),
+		unix.NsecToTimespec(mtimNs),
 	}
-	return unix.UtimesNanoAt(unix.AT_FDCWD, file.Name(), ts, 0)
+	// Uses /dev/fd/N to reference the open file descriptor, avoiding TOCTOU races
+	// while maintaining nanosecond precision.
+	path := fmt.Sprintf("/dev/fd/%d", file.Fd())
+	return unix.UtimesNanoAt(unix.AT_FDCWD, path, ts, 0)
 }
 
 // accept accepts a connection on the socket file descriptor.
