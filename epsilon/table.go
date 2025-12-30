@@ -87,9 +87,10 @@ func (t *Table) Init(
 		return errTableOutOfBounds
 	}
 
-	for i := range n {
-		t.elements[tableStartIndex+i] = funcIndexes[funcStartIndex+i]
-	}
+	copy(
+		t.elements[tableStartIndex:tableStartIndex+n],
+		funcIndexes[funcStartIndex:funcStartIndex+n],
+	)
 	return nil
 }
 
