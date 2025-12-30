@@ -1692,10 +1692,7 @@ func (vm *vm) handleLoadV128FromBytes(
 	return nil
 }
 
-func (vm *vm) handleSimdLoadLane(
-	frame *callFrame,
-	laneSize uint32,
-) error {
+func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
 	_ = frame.next() // align (unused)
 	memory := vm.getMemory(frame, uint32(frame.next()))
 	offset := uint32(frame.next())
@@ -1712,10 +1709,7 @@ func (vm *vm) handleSimdLoadLane(
 	return nil
 }
 
-func (vm *vm) handleSimdStoreLane(
-	frame *callFrame,
-	laneSize uint32,
-) error {
+func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 	_ = frame.next() // align (unused)
 	memory := vm.getMemory(frame, uint32(frame.next()))
 	offset := uint32(frame.next())
@@ -1938,10 +1932,7 @@ func (vm *vm) getFunction(
 	return vm.store.funcs[functionIndex]
 }
 
-func (vm *vm) getTable(
-	frame *callFrame,
-	localIndex uint32,
-) *Table {
+func (vm *vm) getTable(frame *callFrame, localIndex uint32) *Table {
 	tableIndex := frame.module.tableAddrs[localIndex]
 	return vm.store.tables[tableIndex]
 }
