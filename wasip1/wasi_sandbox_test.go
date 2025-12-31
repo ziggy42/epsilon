@@ -531,3 +531,162 @@ func TestOpenat_CurrentDir(t *testing.T) {
 		t.Error("expected directory")
 	}
 }
+
+func TestMkdirat_Basic(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	if err := mkdirat(dirFd, "newdir", 0o755); err != nil {
+		t.Fatalf("mkdirat failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "newdir"))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected directory")
+	}
+}
+
+func TestMkdirat_NestedPath(t *testing.T) {
+	dir := t.TempDir()
+	// Create intermediate directory
+	if err := os.Mkdir(filepath.Join(dir, "a"), 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	if err := mkdirat(dirFd, "a/b", 0o755); err != nil {
+		t.Fatalf("mkdirat nested failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "a", "b"))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected directory")
+	}
+}
+
+func TestMkdirat_IntermediateSymlinkBlocked(t *testing.T) {
+	dir := t.TempDir()
+	// Create /tmp/someplace outside the sandbox
+	escape := t.TempDir()
+	// Create symlink inside sandbox pointing to escape location
+	if err := os.Symlink(escape, filepath.Join(dir, "escape")); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attempt to create a directory through the symlink
+	err = mkdirat(dirFd, "escape/newdir", 0o755)
+	if err == nil {
+		t.Fatal("mkdirat through symlink should fail")
+	}
+
+	// Verify that no directory was created in the escape directory
+	if _, statErr := os.Stat(filepath.Join(escape, "newdir")); statErr == nil {
+		t.Fatal("directory was created in escape location")
+	}
+}
+
+func TestMkdirat_DotDotRejected(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, "../escape", 0o755)
+	if err != os.ErrInvalid {
+		t.Errorf("expected os.ErrInvalid, got %v", err)
+	}
+}
+
+func TestMkdirat_AbsolutePathRejected(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, "/tmp/escape", 0o755)
+	if err != os.ErrInvalid {
+		t.Errorf("expected os.ErrInvalid, got %v", err)
+	}
+}
+
+func TestMkdirat_EmptyPathRejected(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, "", 0o755)
+	if err != os.ErrInvalid {
+		t.Errorf("expected os.ErrInvalid, got %v", err)
+	}
+}
+
+func TestMkdirat_DotPathRejected(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, ".", 0o755)
+	if err != os.ErrInvalid {
+		t.Errorf("expected os.ErrInvalid for '.', got %v", err)
+	}
+}
+
+func TestMkdirat_ExistingDirectoryFails(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "existing"), 0o755); err != nil {
+		t.Fatalf("failed to create dir: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, "existing", 0o755)
+	if err != os.ErrExist {
+		t.Errorf("expected os.ErrExist, got %v", err)
+	}
+}
+
+func TestMkdirat_ParentNotExistsFails(t *testing.T) {
+	dir := t.TempDir()
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	err = mkdirat(dirFd, "nonexistent/newdir", 0o755)
+	if err != os.ErrNotExist {
+		t.Errorf("expected os.ErrNotExist, got %v", err)
+	}
+}

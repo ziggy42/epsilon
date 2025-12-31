@@ -40,6 +40,46 @@ import (
 // maxSymlinkDepth is the maximum number of symlink resolutions allowed.
 const maxSymlinkDepth = 40
 
+// mkdirat creates a directory relative to a directory.
+// This is similar to mkdirat in POSIX.
+//
+// Parameters:
+//   - dir: the directory os.File to create relative to
+//   - path: the relative path of the directory to create
+//   - mode: the file mode bits for the new directory
+//
+// Returns an error if the operation fails.
+func mkdirat(dir *os.File, path string, mode uint32) error {
+	if !filepath.IsLocal(path) {
+		return os.ErrInvalid
+	}
+
+	components := splitPath(path)
+	if len(components) == 0 {
+		return os.ErrInvalid
+	}
+
+	if len(components) == 1 && components[0] == "." {
+		return os.ErrInvalid
+	}
+
+	parentFd, _, err := walkToParent(dir, "", components)
+	if err != nil {
+		return err
+	}
+
+	if parentFd != int(dir.Fd()) {
+		defer unix.Close(parentFd)
+	}
+
+	finalName := components[len(components)-1]
+	if err := unix.Mkdirat(parentFd, finalName, mode); err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
 // openat opens a file or directory relative to a directory.
 // This is similar to openat in POSIX.
 //
@@ -130,45 +170,18 @@ func pathOpenInternal(
 		)
 	}
 
-	// Walk through intermediate directories (all except the last component).
-	// Each intermediate component is opened with O_NOFOLLOW|O_DIRECTORY to
-	// prevent symlink following and to ensure we're always opening directories.
-	dirFd := int(currentDir.Fd())
-	currentDirFd := dirFd
-	currentVirtualPath := virtualPath
-
-	for _, component := range components[:len(components)-1] {
-		// Skip "." components in the middle of the path
-		if component == "." {
-			continue
-		}
-
-		newFd, err := unix.Openat(
-			currentDirFd,
-			component,
-			unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_DIRECTORY|unix.O_CLOEXEC,
-			0,
-		)
-
-		// Close intermediate fds we opened (but not the original dir)
-		if currentDirFd != dirFd {
-			unix.Close(currentDirFd)
-		}
-
-		if err != nil {
-			return nil, mapErrno(err)
-		}
-
-		currentDirFd = newFd
-		currentVirtualPath = filepath.Join(currentVirtualPath, component)
+	// Walk through intermediate directories to reach the parent of the target.
+	parentFd, currentVirtualPath, err := walkToParent(currentDir, virtualPath, components)
+	if err != nil {
+		return nil, err
 	}
 
 	// Create a temporary os.File for the parent directory so we can pass it
 	// to openFinalSecure. If we opened intermediate dirs, os.NewFile takes
 	// ownership.
 	var parentDir *os.File
-	if currentDirFd != dirFd {
-		parentDir = os.NewFile(uintptr(currentDirFd), "")
+	if parentFd != int(currentDir.Fd()) {
+		parentDir = os.NewFile(uintptr(parentFd), "")
 		defer parentDir.Close()
 	} else {
 		parentDir = currentDir
@@ -321,6 +334,55 @@ func openFinal(
 	}
 
 	return os.NewFile(uintptr(fd), name), nil
+}
+
+// walkToParent walks through intermediate path components (all except the last)
+// and returns the file descriptor of the parent directory of the final component.
+//
+// Parameters:
+//   - dir: the starting directory
+//   - virtualPath: the virtual path from root to dir (for symlink resolution tracking)
+//   - components: the path components to walk
+//
+// Returns:
+//   - parentFd: file descriptor of the parent directory (may equal dir.Fd() if no
+//     intermediate directories were opened)
+//   - newVirtualPath: the updated virtual path after walking
+//   - error: any error encountered
+//
+// The caller is responsible for closing parentFd if it differs from dir.Fd().
+func walkToParent(dir *os.File, virtualPath string, components []string) (int, string, error) {
+	dirFd := int(dir.Fd())
+	currentDirFd := dirFd
+	currentVirtualPath := virtualPath
+
+	for _, component := range components[:len(components)-1] {
+		// Skip "." components in the middle of the path
+		if component == "." {
+			continue
+		}
+
+		newFd, err := unix.Openat(
+			currentDirFd,
+			component,
+			unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_DIRECTORY|unix.O_CLOEXEC,
+			0,
+		)
+
+		// Close intermediate fds we opened (but not the original dir)
+		if currentDirFd != dirFd {
+			unix.Close(currentDirFd)
+		}
+
+		if err != nil {
+			return 0, "", mapErrno(err)
+		}
+
+		currentDirFd = newFd
+		currentVirtualPath = filepath.Join(currentVirtualPath, component)
+	}
+
+	return currentDirFd, currentVirtualPath, nil
 }
 
 // splitPath splits a path into its components.
