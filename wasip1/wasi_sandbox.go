@@ -40,7 +40,7 @@ import (
 // maxSymlinkDepth is the maximum number of symlink resolutions allowed.
 const maxSymlinkDepth = 40
 
-// pathOpen opens a file or directory relative to a directory.
+// openat opens a file or directory relative to a directory.
 // This is similar to openat in POSIX.
 //
 // Parameters:
@@ -55,7 +55,7 @@ const maxSymlinkDepth = 40
 // if and only if those rights do not apply to the type of file being opened.
 //
 // Returns the opened os.File and an error if the operation fails.
-func pathOpen(
+func openat(
 	dir *os.File,
 	path string,
 	lookupFlags, oflags, fdflags int32,
