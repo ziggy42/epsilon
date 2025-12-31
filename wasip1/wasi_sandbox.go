@@ -27,17 +27,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// This file contains Unix-specific file system operations similar to POSIX *at
-// functions.
-// Each operation takes an os.File and a path relative to it.
-// Unlike POSIX *at functions, these do not support `AT_FDCWD`:
-// every operation is strictly relative to a valid file descriptor.
-//
-// This design prevents sandbox escape attacks using symlinks.
-// Additionally, all operations are implemented to avoid TOCTOU attacks.
-//
-// Any new function added to this file MUST follow these security principles.
-
 // maxSymlinkDepth is the maximum number of symlink resolutions allowed.
 const maxSymlinkDepth = 40
 
