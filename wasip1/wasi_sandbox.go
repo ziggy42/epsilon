@@ -63,11 +63,6 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		return os.ErrInvalid
 	}
 
-	// SECURITY: If the final component is "..", append "." to force safe resolution
-	if components[len(components)-1] == ".." {
-		components = append(components, ".")
-	}
-
 	parentFd, _, err := walkToParent(dir, "", components)
 	if err != nil {
 		return err
@@ -127,11 +122,6 @@ func statInternal(
 		return statFromUnix(&statBuf), nil
 	}
 
-	// SECURITY: If the final component is "..", append "." to force safe resolution
-	if components[len(components)-1] == ".." {
-		components = append(components, ".")
-	}
-
 	parentFd, parentPath, err := walkToParent(dir, "", components)
 	if err != nil {
 		return filestat{}, err
@@ -163,7 +153,7 @@ func statInternal(
 	}
 	// Resolve the symlink target.
 	// Absolute symlinks are resolved relative to the sandbox root.
-	// Relative symlinks are resolved relative to the symlink's containing directory.
+	// Relative symlinks are resolved relative to the symlink's containing dir.
 	var resolvedPath string
 	if filepath.IsAbs(target) {
 		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
@@ -257,10 +247,8 @@ func openat(
 //   - path: the remaining path to open
 //   - depth: symlink resolution depth counter
 func pathOpenInternal(
-	root *os.File,
-	currentDir *os.File,
-	virtualPath string,
-	path string,
+	root, currentDir *os.File,
+	virtualPath, path string,
 	lookupFlags, oflags, fdflags int32,
 	fsRights uint64,
 	depth int,
@@ -274,7 +262,7 @@ func pathOpenInternal(
 		return nil, os.ErrInvalid
 	}
 
-	// POSIX/WASI: a trailing slash means the path must be a directory.
+	// A trailing slash means the path must be a directory.
 	// We detect this before splitting since filepath.Clean removes it.
 	if strings.HasSuffix(path, string(filepath.Separator)) {
 		oflags |= int32(oFlagsDirectory)
@@ -283,13 +271,6 @@ func pathOpenInternal(
 	components := splitPath(path)
 	if len(components) == 0 {
 		return nil, os.ErrInvalid
-	}
-
-	// SECURITY: If the final component is "..", we must NOT pass it directly
-	// to syscalls as that would bypass sandbox enforcement. Append "." to force
-	// walkToParent to process the ".." through safe logical resolution.
-	if components[len(components)-1] == ".." {
-		components = append(components, ".")
 	}
 
 	followFinalSymlink := lookupFlags&lookupFlagsSymlinkFollow != 0
@@ -309,15 +290,13 @@ func pathOpenInternal(
 		)
 	}
 
-	// Walk through intermediate directories to reach the parent of the target.
-	parentFd, currentVirtualPath, err := walkToParent(currentDir, virtualPath, components)
+	parentFd, parentPath, err := walkToParent(currentDir, virtualPath, components)
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a temporary os.File for the parent directory so we can pass it
-	// to openFinalSecure. If we opened intermediate dirs, os.NewFile takes
-	// ownership.
+	// Create a temporary os.File for the parent directory so we can pass it to
+	// openFinalSecure. If we opened intermediate dirs, NewFile takes ownership.
 	var parentDir *os.File
 	if parentFd != int(currentDir.Fd()) {
 		parentDir = os.NewFile(uintptr(parentFd), "")
@@ -329,7 +308,7 @@ func pathOpenInternal(
 	return openFinalSecure(
 		root,
 		parentDir,
-		currentVirtualPath,
+		parentPath,
 		components[len(components)-1],
 		followFinalSymlink,
 		oflags,
@@ -343,10 +322,8 @@ func pathOpenInternal(
 // When followSymlink is true and the target is a symlink, it manually resolves
 // it by reading the link target and recursively walking through pathOpen.
 func openFinalSecure(
-	root *os.File,
-	parentDir *os.File,
-	virtualPath string,
-	name string,
+	root, parentDir *os.File,
+	virtualPath, name string,
 	followSymlink bool,
 	oflags, fdflags int32,
 	fsRights uint64,
@@ -371,7 +348,7 @@ func openFinalSecure(
 
 	// Resolve the symlink target.
 	// Absolute symlinks are resolved relative to the sandbox root.
-	// Relative symlinks are resolved relative to the symlink's containing directory.
+	// Relative symlinks are resolved relative to the symlink's containing dir.
 	var resolvedPath string
 	if filepath.IsAbs(target) {
 		// Strip leading "/" to make it relative to sandbox root
@@ -474,7 +451,6 @@ func openFinal(
 	}
 
 	// Default to 0o600 (owner read/write only) for secure file creation.
-	// The process umask may further restrict this, but we don't rely on it.
 	fd, err := unix.Openat(int(parentDir.Fd()), name, flags, 0o600)
 	if err != nil {
 		return nil, mapErrno(err)
@@ -484,22 +460,28 @@ func openFinal(
 }
 
 // walkToParent walks through intermediate path components (all except the last)
-// and returns the file descriptor of the parent directory of the final component.
+// and returns the fd of the parent directory of the final component.
 // Symlinks in intermediate components are followed securely within the sandbox.
 //
 // Parameters:
 //   - dir: the sandbox root directory (symlinks are resolved relative to this)
-//   - basePath: prepended to the returned parentPath (use "" to get a path relative to dir)
+//   - basePath: prepended to the returned parentPath (use "" to get a path
+//     relative to dir)
 //   - components: the path components to walk
 //
 // Returns:
-//   - parentFd: file descriptor of the parent directory (may equal dir.Fd() if no
+//   - parentFd: fd of the parent directory (may equal dir.Fd() if no
 //     intermediate directories were opened)
-//   - parentPath: the path of parentFd relative to dir (with basePath prepended)
+//   - parentPath: the path of parentFd relative to dir (with basePath
+//     prepended)
 //   - error: any error encountered
 //
 // The caller is responsible for closing parentFd if it differs from dir.Fd().
-func walkToParent(dir *os.File, basePath string, components []string) (int, string, error) {
+func walkToParent(
+	dir *os.File,
+	basePath string,
+	components []string,
+) (int, string, error) {
 	return walkToParentInternal(dir, basePath, components, 0)
 }
 
@@ -512,6 +494,14 @@ func walkToParentInternal(
 ) (int, string, error) {
 	if depth >= maxSymlinkDepth {
 		return 0, "", syscall.ELOOP
+	}
+
+	// SECURITY: If the final component is "..", we must NOT pass it directly
+	// to syscalls as that would bypass sandbox enforcement. Append "." to force
+	// the ".." to be processed as an intermediate component through safe
+	// logical resolution.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
 	}
 
 	dirFd := int(dir.Fd())
