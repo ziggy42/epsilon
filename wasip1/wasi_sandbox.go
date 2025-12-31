@@ -187,6 +187,152 @@ func linkat(
 	return nil
 }
 
+// readlink reads the contents of a symbolic link.
+// This is similar to readlinkat in POSIX.
+//
+// Parameters:
+//   - dir: the directory os.File to resolve relative to
+//   - path: the relative path of the symbolic link
+//
+// Returns the symlink target and an error if the operation fails.
+func readlink(dir *os.File, path string) (string, error) {
+	dirFd, name, err := resolvePath(dir, path, false, 0)
+	if err != nil {
+		return "", err
+	}
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
+	}
+
+	buf := make([]byte, 256)
+	for {
+		n, err := unix.Readlinkat(dirFd, name, buf)
+		if err != nil {
+			return "", mapErrno(err)
+		}
+		if n < len(buf) {
+			return string(buf[:n]), nil
+		}
+		buf = make([]byte, len(buf)*2)
+	}
+}
+
+// rmdirat removes an empty directory.
+// This is similar to unlinkat(fd, path, AT_REMOVEDIR) in POSIX.
+//
+// Parameters:
+//   - dir: the directory os.File to resolve relative to
+//   - path: the relative path of the directory to remove
+//
+// Returns an error if the operation fails (e.g., ENOTEMPTY if not empty).
+func rmdirat(dir *os.File, path string) error {
+	dirFd, name, err := resolvePath(dir, path, false, 0)
+	if err != nil {
+		return err
+	}
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
+	}
+
+	err = unix.Unlinkat(dirFd, name, unix.AT_REMOVEDIR)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
+// renameat renames a file or directory.
+// This is similar to renameat in POSIX.
+//
+// Parameters:
+//   - oldDir: the directory os.File for the source path resolution
+//   - oldPath: the relative path of the source file or directory
+//   - newDir: the directory os.File for the destination path resolution
+//   - newPath: the relative path of the destination
+//
+// Returns an error if the operation fails.
+func renameat(
+	oldDir *os.File,
+	oldPath string,
+	newDir *os.File,
+	newPath string,
+) error {
+	oldDirFd, oldName, err := resolvePath(oldDir, oldPath, false, 0)
+	if err != nil {
+		return err
+	}
+	if oldDirFd != int(oldDir.Fd()) {
+		defer unix.Close(oldDirFd)
+	}
+
+	newDirFd, newName, err := resolvePath(newDir, newPath, false, 0)
+	if err != nil {
+		return err
+	}
+	if newDirFd != int(newDir.Fd()) {
+		defer unix.Close(newDirFd)
+	}
+
+	err = unix.Renameat(oldDirFd, oldName, newDirFd, newName)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
+// symlinkat creates a symbolic link.
+// This is similar to symlinkat in POSIX.
+//
+// Parameters:
+//   - target: the contents of the symbolic link (what it points to)
+//   - dir: the directory os.File for the link path resolution
+//   - path: the relative path at which to create the symlink
+//
+// Returns an error if the operation fails.
+func symlinkat(target string, dir *os.File, path string) error {
+	dirFd, name, err := resolvePath(dir, path, false, 0)
+	if err != nil {
+		return err
+	}
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
+	}
+
+	err = unix.Symlinkat(target, dirFd, name)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
+// unlinkat removes a file (but not a directory).
+// This is similar to unlinkat(fd, path, 0) in POSIX.
+//
+// Parameters:
+//   - dir: the directory os.File to resolve relative to
+//   - path: the relative path of the file to unlink
+//
+// Returns EISDIR if the path refers to a directory.
+func unlinkat(dir *os.File, path string) error {
+	dirFd, name, err := resolvePath(dir, path, false, 0)
+	if err != nil {
+		return err
+	}
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
+	}
+
+	err = unix.Unlinkat(dirFd, name, 0)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
 // openat opens a file or directory relative to a directory.
 // This is similar to openat in POSIX.
 //

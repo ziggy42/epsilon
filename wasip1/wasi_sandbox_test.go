@@ -1047,3 +1047,112 @@ func TestLinkat_SymlinkEscapeBlocked(t *testing.T) {
 		t.Fatal("linkat through escape symlink should fail")
 	}
 }
+
+func TestReadlink_Basic(t *testing.T) {
+	_, dirFd := testFS(t, link("mylink", "target.txt"))
+	defer dirFd.Close()
+
+	target, err := readlink(dirFd, "mylink")
+	if err != nil {
+		t.Fatalf("readlink failed: %v", err)
+	}
+	if target != "target.txt" {
+		t.Errorf("got %q, want %q", target, "target.txt")
+	}
+}
+
+func TestReadlink_NonSymlink(t *testing.T) {
+	_, dirFd := testFS(t, file("regular.txt", "content"))
+	defer dirFd.Close()
+
+	_, err := readlink(dirFd, "regular.txt")
+	if err == nil {
+		t.Fatal("readlink on regular file should fail")
+	}
+}
+
+func TestRmdirat_Basic(t *testing.T) {
+	root, dirFd := testFS(t, dir("emptydir"))
+	defer dirFd.Close()
+
+	if err := rmdirat(dirFd, "emptydir"); err != nil {
+		t.Fatalf("rmdirat failed: %v", err)
+	}
+
+	name := filepath.Join(root, "emptydir")
+	if _, statErr := os.Stat(name); !os.IsNotExist(statErr) {
+		t.Error("directory should have been removed")
+	}
+}
+
+func TestRmdirat_NotEmpty(t *testing.T) {
+	_, dirFd := testFS(t, file("notempty/file.txt", "content"))
+	defer dirFd.Close()
+
+	err := rmdirat(dirFd, "notempty")
+	if err == nil {
+		t.Fatal("rmdirat on non-empty directory should fail")
+	}
+}
+
+func TestRenameat_Basic(t *testing.T) {
+	root, dirFd := testFS(t, file("old.txt", "content"))
+	defer dirFd.Close()
+
+	if err := renameat(dirFd, "old.txt", dirFd, "new.txt"); err != nil {
+		t.Fatalf("renameat failed: %v", err)
+	}
+
+	name := filepath.Join(root, "old.txt")
+	if _, statErr := os.Stat(name); !os.IsNotExist(statErr) {
+		t.Error("old file should not exist")
+	}
+
+	content, err := os.ReadFile(filepath.Join(root, "new.txt"))
+	if err != nil {
+		t.Fatalf("failed to read new file: %v", err)
+	}
+	if string(content) != "content" {
+		t.Errorf("got %q, want %q", string(content), "content")
+	}
+}
+
+func TestSymlinkat_Basic(t *testing.T) {
+	root, dirFd := testFS(t, file("target.txt", "content"))
+	defer dirFd.Close()
+
+	if err := symlinkat("target.txt", dirFd, "newlink"); err != nil {
+		t.Fatalf("symlinkat failed: %v", err)
+	}
+
+	linkTarget, err := os.Readlink(filepath.Join(root, "newlink"))
+	if err != nil {
+		t.Fatalf("Readlink failed: %v", err)
+	}
+	if linkTarget != "target.txt" {
+		t.Errorf("got %q, want %q", linkTarget, "target.txt")
+	}
+}
+
+func TestUnlinkat_Basic(t *testing.T) {
+	root, dirFd := testFS(t, file("file.txt", "content"))
+	defer dirFd.Close()
+
+	if err := unlinkat(dirFd, "file.txt"); err != nil {
+		t.Fatalf("unlinkat failed: %v", err)
+	}
+
+	name := filepath.Join(root, "file.txt")
+	if _, statErr := os.Stat(name); !os.IsNotExist(statErr) {
+		t.Error("file should have been deleted")
+	}
+}
+
+func TestUnlinkat_Directory(t *testing.T) {
+	_, dirFd := testFS(t, dir("mydir"))
+	defer dirFd.Close()
+
+	if err := unlinkat(dirFd, "mydir"); err == nil {
+		t.Fatal("unlinkat on directory should fail")
+	}
+}
