@@ -63,6 +63,13 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		return os.ErrInvalid
 	}
 
+	// If the final component is "..", append "." to ensure it's processed as an
+	// intermediate component through safe logical resolution, and we use "." as
+	// the final name for the syscall.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
+	}
+
 	parentFd, _, err := walkToParent(dir, "", components)
 	if err != nil {
 		return err
@@ -120,6 +127,13 @@ func statInternal(
 			return filestat{}, mapErrno(err)
 		}
 		return statFromUnix(&statBuf), nil
+	}
+
+	// If the final component is "..", append "." to ensure it's processed as an
+	// intermediate component through safe logical resolution, and we use "." as
+	// the final name for the syscall.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
 	}
 
 	parentFd, parentPath, err := walkToParent(dir, "", components)
@@ -224,12 +238,8 @@ func openat(
 	fsRights uint64,
 ) (*os.File, error) {
 	root := dir
-	currentDir := dir
-	virtualPath := ""
 	return pathOpenInternal(
 		root,
-		currentDir,
-		virtualPath,
 		path,
 		followSymlinks,
 		oflags,
@@ -242,13 +252,11 @@ func openat(
 // pathOpenInternal implements the core path opening logic.
 // Parameters:
 //   - root: the original sandbox root directory (never changes)
-//   - currentDir: the current directory we're opening relative to
-//   - virtualPath: the path from root to currentDir (for symlink resolution)
 //   - path: the remaining path to open
 //   - depth: symlink resolution depth counter
 func pathOpenInternal(
-	root, currentDir *os.File,
-	virtualPath, path string,
+	root *os.File,
+	path string,
 	followSymlinks bool,
 	oflags, fdflags int32,
 	fsRights uint64,
@@ -278,8 +286,8 @@ func pathOpenInternal(
 	if len(components) == 1 && components[0] == "." {
 		return openFinalSecure(
 			root,
-			currentDir,
-			virtualPath,
+			root,
+			"",
 			".",
 			followSymlinks,
 			oflags,
@@ -289,7 +297,14 @@ func pathOpenInternal(
 		)
 	}
 
-	parentFd, parentPath, err := walkToParent(currentDir, virtualPath, components)
+	// If the final component is "..", append "." to ensure it's processed as an
+	// intermediate component through safe logical resolution, and we use "." as
+	// the final name for the syscall.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
+	}
+
+	parentFd, parentPath, err := walkToParent(root, "", components)
 	if err != nil {
 		return nil, err
 	}
@@ -297,11 +312,11 @@ func pathOpenInternal(
 	// Create a temporary os.File for the parent directory so we can pass it to
 	// openFinalSecure. If we opened intermediate dirs, NewFile takes ownership.
 	var parentDir *os.File
-	if parentFd != int(currentDir.Fd()) {
+	if parentFd != int(root.Fd()) {
 		parentDir = os.NewFile(uintptr(parentFd), "")
 		defer parentDir.Close()
 	} else {
-		parentDir = currentDir
+		parentDir = root
 	}
 
 	return openFinalSecure(
@@ -367,8 +382,6 @@ func openFinalSecure(
 	// This ensures we apply all security checks to the resolved path.
 	return pathOpenInternal(
 		root,
-		root,
-		"",
 		resolvedPath,
 		true, // followSymlinks
 		oflags,
@@ -493,14 +506,6 @@ func walkToParentInternal(
 ) (int, string, error) {
 	if depth >= maxSymlinkDepth {
 		return 0, "", syscall.ELOOP
-	}
-
-	// SECURITY: If the final component is "..", we must NOT pass it directly
-	// to syscalls as that would bypass sandbox enforcement. Append "." to force
-	// the ".." to be processed as an intermediate component through safe
-	// logical resolution.
-	if components[len(components)-1] == ".." {
-		components = append(components, ".")
 	}
 
 	dirFd := int(dir.Fd())
