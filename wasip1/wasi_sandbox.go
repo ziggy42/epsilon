@@ -145,6 +145,48 @@ func utimes(
 	return nil
 }
 
+// linkat creates a hard link to an existing file.
+// This is similar to linkat in POSIX.
+//
+// Parameters:
+//   - oldDir: the directory os.File for the source path resolution
+//   - oldPath: the relative path of the source file
+//   - followSymlinks: whether to follow symlinks when resolving oldPath
+//   - newDir: the directory os.File for the destination path resolution
+//   - newPath: the relative path for the new hard link
+//
+// Returns an error if the operation fails.
+func linkat(
+	oldDir *os.File,
+	oldPath string,
+	followSymlinks bool,
+	newDir *os.File,
+	newPath string,
+) error {
+	oldDirFd, oldName, err := resolvePath(oldDir, oldPath, followSymlinks, 0)
+	if err != nil {
+		return err
+	}
+	if oldDirFd != int(oldDir.Fd()) {
+		defer unix.Close(oldDirFd)
+	}
+
+	newDirFd, newName, err := resolvePath(newDir, newPath, false, 0)
+	if err != nil {
+		return err
+	}
+	if newDirFd != int(newDir.Fd()) {
+		defer unix.Close(newDirFd)
+	}
+
+	err = unix.Linkat(oldDirFd, oldName, newDirFd, newName, 0)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	return nil
+}
+
 // openat opens a file or directory relative to a directory.
 // This is similar to openat in POSIX.
 //

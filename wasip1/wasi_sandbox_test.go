@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -999,5 +1000,50 @@ func TestUtimes_Directory(t *testing.T) {
 	}
 	if info.ModTime().Sub(mtime).Abs() > time.Second {
 		t.Errorf("dir Mtime: got %v, want %v", info.ModTime(), mtime)
+	}
+}
+
+func TestLinkat_Basic(t *testing.T) {
+	root, dirFd := testFS(t, file("original.txt", "content"))
+	defer dirFd.Close()
+
+	err := linkat(dirFd, "original.txt", false, dirFd, "hardlink.txt")
+	if err != nil {
+		t.Fatalf("linkat failed: %v", err)
+	}
+
+	// Verify hard link exists and has same content
+	content, err := os.ReadFile(filepath.Join(root, "hardlink.txt"))
+	if err != nil {
+		t.Fatalf("failed to read hard link: %v", err)
+	}
+	if string(content) != "content" {
+		t.Errorf("got %q, want %q", string(content), "content")
+	}
+
+	// Verify they share the same inode
+	origInfo, _ := os.Stat(filepath.Join(root, "original.txt"))
+	linkInfo, _ := os.Stat(filepath.Join(root, "hardlink.txt"))
+	origStat := origInfo.Sys().(*syscall.Stat_t)
+	linkStat := linkInfo.Sys().(*syscall.Stat_t)
+	if origStat.Ino != linkStat.Ino {
+		t.Errorf("inodes differ: %d vs %d", origStat.Ino, linkStat.Ino)
+	}
+}
+
+func TestLinkat_SymlinkEscapeBlocked(t *testing.T) {
+	escape := t.TempDir()
+	targetFile := filepath.Join(escape, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("failed to create target: %v", err)
+	}
+
+	_, dirFd := testFS(t, link("escape", escape))
+	defer dirFd.Close()
+
+	// Try to create a hard link through the escape symlink
+	err := linkat(dirFd, "escape/target.txt", true, dirFd, "stolen.txt")
+	if err == nil {
+		t.Fatal("linkat through escape symlink should fail")
 	}
 }
