@@ -64,7 +64,7 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		return os.ErrInvalid
 	}
 
-	parentFd, _, err := walkToParent(dir, "", components)
+	parentFd, _, _, err := walkToParent(dir, "", components, 0)
 	if err != nil {
 		return err
 	}
@@ -91,81 +91,20 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 //
 // Returns the filestat and an error if the operation fails.
 func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
-	return statInternal(dir, path, followSymlinks, 0)
-}
-
-// statInternal implements the core stat logic with symlink resolution.
-func statInternal(
-	dir *os.File,
-	path string,
-	followSymlinks bool,
-	depth int,
-) (filestat, error) {
-	if depth >= maxSymlinkDepth {
-		return filestat{}, syscall.ELOOP
-	}
-
-	if !isRelativePath(path) {
-		return filestat{}, os.ErrInvalid
-	}
-
-	components, err := getComponents(path)
+	dirFd, fileName, err := resolvePath(dir, path, followSymlinks, 0)
 	if err != nil {
 		return filestat{}, err
 	}
-
-	// Handle special case of stat on "." (the directory itself)
-	if len(components) == 1 && components[0] == "." {
-		var statBuf unix.Stat_t
-		if err := unix.Fstat(int(dir.Fd()), &statBuf); err != nil {
-			return filestat{}, mapErrno(err)
-		}
-		return statFromUnix(&statBuf), nil
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
 	}
 
-	parentFd, parentPath, err := walkToParent(dir, "", components)
-	if err != nil {
-		return filestat{}, err
-	}
-	if parentFd != int(dir.Fd()) {
-		defer unix.Close(parentFd)
-	}
-
-	finalName := components[len(components)-1]
-
-	// Always stat with AT_SYMLINK_NOFOLLOW first to check if it's a symlink
 	var statBuf unix.Stat_t
 	flags := unix.AT_SYMLINK_NOFOLLOW
-	if err := unix.Fstatat(parentFd, finalName, &statBuf, flags); err != nil {
+	if err := unix.Fstatat(dirFd, fileName, &statBuf, flags); err != nil {
 		return filestat{}, mapErrno(err)
 	}
-
-	// If it's not a symlink, or we don't want to follow, return immediately
-	if statBuf.Mode&unix.S_IFMT != unix.S_IFLNK || !followSymlinks {
-		return statFromUnix(&statBuf), nil
-	}
-
-	// It's a symlink and we need to follow it securely.
-	// Read the symlink target and resolve it within the sandbox.
-	target, err := readlinkat(parentFd, finalName)
-	if err != nil {
-		return filestat{}, mapErrno(err)
-	}
-	// Resolve the symlink target.
-	// Absolute symlinks are resolved relative to the sandbox root.
-	// Relative symlinks are resolved relative to the symlink's containing dir.
-	var resolvedPath string
-	if filepath.IsAbs(target) {
-		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
-	} else {
-		resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
-	}
-	if !filepath.IsLocal(resolvedPath) {
-		return filestat{}, os.ErrPermission
-	}
-
-	// Recursively stat from the root with the resolved path.
-	return statInternal(dir, resolvedPath, followSymlinks, depth+1)
+	return statFromUnix(&statBuf), nil
 }
 
 // statFromUnix converts a unix.Stat_t to a filestat.
@@ -221,95 +160,20 @@ func utimes(
 	fstFlags int32,
 	followSymlinks bool,
 ) error {
-	return utimesInternal(dir, path, atim, mtim, fstFlags, followSymlinks, 0)
-}
-
-// utimesInternal implements the core utimes logic with symlink resolution.
-func utimesInternal(
-	dir *os.File,
-	path string,
-	atim, mtim int64,
-	fstFlags int32,
-	followSymlinks bool,
-	depth int,
-) error {
-	if depth >= maxSymlinkDepth {
-		return syscall.ELOOP
-	}
-
-	if !isRelativePath(path) {
-		return os.ErrInvalid
-	}
-
-	components, err := getComponents(path)
+	dirFd, fileName, err := resolvePath(dir, path, followSymlinks, 0)
 	if err != nil {
 		return err
 	}
-
-	// Handle special case of utimes on "." (the directory itself)
-	if len(components) == 1 && components[0] == "." {
-		times := buildTimespec(atim, mtim, fstFlags)
-		if err := unix.UtimesNanoAt(int(dir.Fd()), ".", times, 0); err != nil {
-			return mapErrno(err)
-		}
-		return nil
+	if dirFd != int(dir.Fd()) {
+		defer unix.Close(dirFd)
 	}
 
-	parentFd, parentPath, err := walkToParent(dir, "", components)
-	if err != nil {
-		return err
-	}
-	if parentFd != int(dir.Fd()) {
-		defer unix.Close(parentFd)
-	}
-
-	finalName := components[len(components)-1]
-
-	// Always Lstat first to check if it's a symlink
-	var statBuf unix.Stat_t
+	times := buildTimespec(atim, mtim, fstFlags)
 	flags := unix.AT_SYMLINK_NOFOLLOW
-	if err := unix.Fstatat(parentFd, finalName, &statBuf, flags); err != nil {
+	if err := unix.UtimesNanoAt(dirFd, fileName, times, flags); err != nil {
 		return mapErrno(err)
 	}
-
-	// If it's not a symlink, or we don't want to follow, perform the operation
-	if statBuf.Mode&unix.S_IFMT != unix.S_IFLNK || !followSymlinks {
-		times := buildTimespec(atim, mtim, fstFlags)
-		// Use AT_SYMLINK_NOFOLLOW to ensure we don't follow if it is a symlink
-		flags := unix.AT_SYMLINK_NOFOLLOW
-		if err := unix.UtimesNanoAt(parentFd, finalName, times, flags); err != nil {
-			return mapErrno(err)
-		}
-		return nil
-	}
-
-	// It's a symlink and we need to follow it securely.
-	target, err := readlinkat(parentFd, finalName)
-	if err != nil {
-		return mapErrno(err)
-	}
-
-	// Resolve the symlink target.
-	var resolvedPath string
-	if filepath.IsAbs(target) {
-		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
-	} else {
-		resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
-	}
-	if !filepath.IsLocal(resolvedPath) {
-		return os.ErrPermission
-	}
-
-	// Recursively utimes from the root with the resolved path.
-	return utimesInternal(
-		dir,
-		resolvedPath,
-		atim,
-		mtim,
-		fstFlags,
-		followSymlinks,
-		depth+1,
-	)
+	return nil
 }
 
 func buildTimespec(atim, mtim int64, fstFlags int32) []unix.Timespec {
@@ -353,151 +217,25 @@ func openat(
 	oflags, fdflags int32,
 	fsRights uint64,
 ) (*os.File, error) {
-	root := dir
-	return pathOpenInternal(
-		root,
-		path,
-		followSymlinks,
-		oflags,
-		fdflags,
-		fsRights,
-		0,
-	)
-}
-
-// pathOpenInternal implements the core path opening logic.
-// Parameters:
-//   - root: the original sandbox root directory (never changes)
-//   - path: the remaining path to open
-//   - depth: symlink resolution depth counter
-func pathOpenInternal(
-	root *os.File,
-	path string,
-	followSymlinks bool,
-	oflags, fdflags int32,
-	fsRights uint64,
-	depth int,
-) (*os.File, error) {
-	if depth >= maxSymlinkDepth {
-		return nil, syscall.ELOOP
-	}
-
-	// The path must be local (no absolute paths, no leading ..)
-	if !isRelativePath(path) {
-		return nil, os.ErrInvalid
-	}
-
 	// A trailing slash means the path must be a directory.
-	// We detect this before splitting since filepath.Clean removes it.
+	// We detect this before calling resolvePath because we lose that info.
 	if strings.HasSuffix(path, string(filepath.Separator)) {
 		oflags |= int32(oFlagsDirectory)
 	}
 
-	components, err := getComponents(path)
+	dirFd, fileName, err := resolvePath(dir, path, followSymlinks, 0)
 	if err != nil {
 		return nil, err
 	}
+	parentDir := os.NewFile(uintptr(dirFd), "")
 
-	// Handle special case of opening "." (the directory itself)
-	if len(components) == 1 && components[0] == "." {
-		return openFinalSecure(
-			root,
-			root,
-			"",
-			".",
-			followSymlinks,
-			oflags,
-			fdflags,
-			fsRights,
-			depth,
-		)
-	}
-
-	parentFd, parentPath, err := walkToParent(root, "", components)
-	if err != nil {
-		return nil, err
-	}
-
-	// Create a temporary os.File for the parent directory so we can pass it to
-	// openFinalSecure. If we opened intermediate dirs, NewFile takes ownership.
-	var parentDir *os.File
-	if parentFd != int(root.Fd()) {
-		parentDir = os.NewFile(uintptr(parentFd), "")
+	if dirFd == int(dir.Fd()) {
+		parentDir = dir
+	} else {
 		defer parentDir.Close()
-	} else {
-		parentDir = root
 	}
 
-	return openFinalSecure(
-		root,
-		parentDir,
-		parentPath,
-		components[len(components)-1],
-		followSymlinks,
-		oflags,
-		fdflags,
-		fsRights,
-		depth,
-	)
-}
-
-// openFinalSecure opens the final path component securely.
-// When followSymlink is true and the target is a symlink, it manually resolves
-// it by reading the link target and recursively walking through pathOpen.
-func openFinalSecure(
-	root, parentDir *os.File,
-	virtualPath, name string,
-	followSymlink bool,
-	oflags, fdflags int32,
-	fsRights uint64,
-	depth int,
-) (*os.File, error) {
-	// Always try opening with O_NOFOLLOW first
-	file, err := openFinal(parentDir, name, oflags, fdflags, fsRights)
-	if err == nil {
-		return file, nil
-	}
-
-	// If not following symlinks, or error isn't ELOOP, return the error
-	if !followSymlink || !errors.Is(err, syscall.ELOOP) {
-		return nil, err
-	}
-
-	// The target is a symlink and we need to follow it. Read the symlink target.
-	target, err := readlinkat(int(parentDir.Fd()), name)
-	if err != nil {
-		return nil, mapErrno(err)
-	}
-
-	// Resolve the symlink target.
-	// Absolute symlinks are resolved relative to the sandbox root.
-	// Relative symlinks are resolved relative to the symlink's containing dir.
-	var resolvedPath string
-	if filepath.IsAbs(target) {
-		// Strip leading "/" to make it relative to sandbox root
-		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
-	} else {
-		// Relative symlink: join with virtualPath and clean
-		resolvedPath = filepath.Clean(filepath.Join(virtualPath, target))
-	}
-
-	// Security check: the resolved path must stay within the sandbox.
-	// After cleaning, if it starts with ".." it would escape.
-	if !filepath.IsLocal(resolvedPath) {
-		return nil, os.ErrPermission
-	}
-
-	// Resolve the symlink by walking from the root with the resolved path.
-	// This ensures we apply all security checks to the resolved path.
-	return pathOpenInternal(
-		root,
-		resolvedPath,
-		true, // followSymlinks
-		oflags,
-		fdflags,
-		fsRights,
-		depth+1,
-	)
+	return openFinal(parentDir, fileName, oflags, fdflags, fsRights)
 }
 
 // readlinkat reads the target of a symlink relative to a directory fd.
@@ -589,12 +327,12 @@ func openFinal(
 //   - basePath: prepended to the returned parentPath (use "" to get a path
 //     relative to dir)
 //   - components: the path components to walk
+//   - depth: current symlink resolution depth
 //
 // Returns:
-//   - parentFd: fd of the parent directory (may equal dir.Fd() if no
-//     intermediate directories were opened)
-//   - parentPath: the path of parentFd relative to dir (with basePath
-//     prepended)
+//   - parentFd: fd of the parent directory
+//   - parentPath: the path of parentFd relative to dir
+//   - newDepth: updated symlink resolution depth
 //   - error: any error encountered
 //
 // The caller is responsible for closing parentFd if it differs from dir.Fd().
@@ -602,19 +340,10 @@ func walkToParent(
 	dir *os.File,
 	basePath string,
 	components []string,
-) (int, string, error) {
-	return walkToParentInternal(dir, basePath, components, 0)
-}
-
-// walkToParentInternal implements walkToParent with symlink depth tracking.
-func walkToParentInternal(
-	dir *os.File,
-	basePath string,
-	components []string,
 	depth int,
-) (int, string, error) {
+) (int, string, int, error) {
 	if depth >= maxSymlinkDepth {
-		return 0, "", syscall.ELOOP
+		return 0, "", depth, syscall.ELOOP
 	}
 
 	dirFd := int(dir.Fd())
@@ -637,7 +366,7 @@ func walkToParentInternal(
 				if currentDirFd != dirFd {
 					unix.Close(currentDirFd)
 				}
-				return 0, "", os.ErrPermission
+				return 0, "", depth, os.ErrPermission
 			}
 
 			// Close current fd before restarting
@@ -665,7 +394,7 @@ func walkToParentInternal(
 			}
 
 			// Restart from root with the new path (safe, no physical ".." used)
-			return walkToParentInternal(dir, "", newComponents, depth+1)
+			return walkToParent(dir, "", newComponents, depth+1)
 		}
 
 		newFd, err := unix.Openat(
@@ -685,7 +414,7 @@ func walkToParentInternal(
 					if currentDirFd != dirFd {
 						unix.Close(currentDirFd)
 					}
-					return 0, "", err
+					return 0, "", depth, err
 				}
 
 				// Resolve the symlink target.
@@ -701,7 +430,7 @@ func walkToParentInternal(
 					if currentDirFd != dirFd {
 						unix.Close(currentDirFd)
 					}
-					return 0, "", os.ErrPermission
+					return 0, "", depth, os.ErrPermission
 				}
 
 				// Build the new full path: resolved symlink + remaining components
@@ -715,14 +444,14 @@ func walkToParentInternal(
 				}
 
 				// Restart from root with the resolved path
-				return walkToParentInternal(dir, "", newComponents, depth+1)
+				return walkToParent(dir, "", newComponents, depth+1)
 			}
 
 			// Close intermediate fds we opened (but not the original dir)
 			if currentDirFd != dirFd {
 				unix.Close(currentDirFd)
 			}
-			return 0, "", mapErrno(err)
+			return 0, "", depth, mapErrno(err)
 		}
 
 		// Close intermediate fds we opened (but not the original dir)
@@ -734,7 +463,7 @@ func walkToParentInternal(
 		parentPath = filepath.Join(parentPath, component)
 	}
 
-	return currentDirFd, parentPath, nil
+	return currentDirFd, parentPath, depth, nil
 }
 
 func getComponents(path string) ([]string, error) {
@@ -830,4 +559,100 @@ func mapErrno(err error) error {
 	}
 
 	return err
+}
+
+// resolvePath resolves a path relative to a directory os.File. It returns the
+// file descriptor of the parent directory and the file or directory name.
+//
+// It does so by securely resolving path relative to dirFd, following symlinks
+// in intermediate components and, if followSymlinks is true, in the final
+// component.
+//
+// If the final path component does not exist, it returns success (and ENOENT
+// checks are deferred to the caller), which allows support for O_CREAT.
+//
+// All of this is done while never escaping the sandbox root.
+func resolvePath(
+	dir *os.File,
+	path string,
+	followSymlinks bool,
+	depth int,
+) (int, string, error) {
+	if depth >= maxSymlinkDepth {
+		return 0, "", syscall.ELOOP
+	}
+
+	if !isRelativePath(path) {
+		return 0, "", os.ErrInvalid
+	}
+
+	comps, err := getComponents(path)
+	if err != nil {
+		return 0, "", err
+	}
+
+	// Handle special case of stat on "." (the directory itself)
+	if len(comps) == 1 && comps[0] == "." {
+		return int(dir.Fd()), ".", nil
+	}
+
+	parentFd, parentPath, newDepth, err := walkToParent(dir, "", comps, depth)
+	if err != nil {
+		return 0, "", err
+	}
+	// Note: We MUST NOT defer close parentFd here because we might return it.
+	// We must manually close it on all error paths or recursive calls if it
+	// differs from dir.Fd().
+
+	finalName := comps[len(comps)-1]
+
+	// Always stat with AT_SYMLINK_NOFOLLOW first to check if it's a symlink
+	var statBuf unix.Stat_t
+	flags := unix.AT_SYMLINK_NOFOLLOW
+	if err := unix.Fstatat(parentFd, finalName, &statBuf, flags); err != nil {
+		// If the error is ENOENT, it simply means the file doesn't exist.
+		if errors.Is(err, syscall.ENOENT) {
+			return parentFd, finalName, nil
+		}
+
+		if parentFd != int(dir.Fd()) {
+			unix.Close(parentFd)
+		}
+		return 0, "", mapErrno(err)
+	}
+
+	// If it's not a symlink, or we don't want to follow, return immediately
+	if statBuf.Mode&unix.S_IFMT != unix.S_IFLNK || !followSymlinks {
+		return parentFd, finalName, nil
+	}
+
+	// It's a symlink and we need to follow it securely.
+	// Read the symlink target and resolve it within the sandbox.
+	target, err := readlinkat(parentFd, finalName)
+	if err != nil {
+		if parentFd != int(dir.Fd()) {
+			unix.Close(parentFd)
+		}
+		return 0, "", mapErrno(err)
+	}
+
+	// We are done with parentFd for this level.
+	if parentFd != int(dir.Fd()) {
+		unix.Close(parentFd)
+	}
+	// Resolve the symlink target.
+	// Absolute symlinks are resolved relative to the sandbox root.
+	// Relative symlinks are resolved relative to the symlink's containing dir.
+	var resolvedPath string
+	if filepath.IsAbs(target) {
+		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
+	} else {
+		resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
+	}
+	if !filepath.IsLocal(resolvedPath) {
+		return 0, "", os.ErrPermission
+	}
+
+	// Restart resolution with the new target and updated depth
+	return resolvePath(dir, resolvedPath, followSymlinks, newDepth+1)
 }
