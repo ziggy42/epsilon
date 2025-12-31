@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -199,6 +200,135 @@ func fileTypeFromMode(mode uint32) int8 {
 	default:
 		return int8(fileTypeUnknown)
 	}
+}
+
+// utimes sets the access and modification times of a file or directory.
+// This is similar to utimensat in POSIX.
+//
+// Parameters:
+//   - dir: the directory os.File to resolve relative to
+//   - path: the relative path of the file or directory
+//   - atim: access time in nanoseconds (used if fstFlagsAtim is set)
+//   - mtim: modification time in nanoseconds (used if fstFlagsMtim is set)
+//   - fstFlags: bitmask controlling which times to set and how
+//   - followSymlinks: whether to follow the final symlink
+//
+// Returns an error if the operation fails.
+func utimes(
+	dir *os.File,
+	path string,
+	atim, mtim int64,
+	fstFlags int32,
+	followSymlinks bool,
+) error {
+	return utimesInternal(dir, path, atim, mtim, fstFlags, followSymlinks, 0)
+}
+
+// utimesInternal implements the core utimes logic with symlink resolution.
+func utimesInternal(
+	dir *os.File,
+	path string,
+	atim, mtim int64,
+	fstFlags int32,
+	followSymlinks bool,
+	depth int,
+) error {
+	if depth >= maxSymlinkDepth {
+		return syscall.ELOOP
+	}
+
+	if !isRelativePath(path) {
+		return os.ErrInvalid
+	}
+
+	components, err := getComponents(path)
+	if err != nil {
+		return err
+	}
+
+	// Handle special case of utimes on "." (the directory itself)
+	if len(components) == 1 && components[0] == "." {
+		times := buildTimespec(atim, mtim, fstFlags)
+		if err := unix.UtimesNanoAt(int(dir.Fd()), ".", times, 0); err != nil {
+			return mapErrno(err)
+		}
+		return nil
+	}
+
+	parentFd, parentPath, err := walkToParent(dir, "", components)
+	if err != nil {
+		return err
+	}
+	if parentFd != int(dir.Fd()) {
+		defer unix.Close(parentFd)
+	}
+
+	finalName := components[len(components)-1]
+
+	// Always Lstat first to check if it's a symlink
+	var statBuf unix.Stat_t
+	flags := unix.AT_SYMLINK_NOFOLLOW
+	if err := unix.Fstatat(parentFd, finalName, &statBuf, flags); err != nil {
+		return mapErrno(err)
+	}
+
+	// If it's not a symlink, or we don't want to follow, perform the operation
+	if statBuf.Mode&unix.S_IFMT != unix.S_IFLNK || !followSymlinks {
+		times := buildTimespec(atim, mtim, fstFlags)
+		// Use AT_SYMLINK_NOFOLLOW to ensure we don't follow if it is a symlink
+		flags := unix.AT_SYMLINK_NOFOLLOW
+		if err := unix.UtimesNanoAt(parentFd, finalName, times, flags); err != nil {
+			return mapErrno(err)
+		}
+		return nil
+	}
+
+	// It's a symlink and we need to follow it securely.
+	target, err := readlinkat(parentFd, finalName)
+	if err != nil {
+		return mapErrno(err)
+	}
+
+	// Resolve the symlink target.
+	var resolvedPath string
+	if filepath.IsAbs(target) {
+		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
+	} else {
+		resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
+	}
+	if !filepath.IsLocal(resolvedPath) {
+		return os.ErrPermission
+	}
+
+	// Recursively utimes from the root with the resolved path.
+	return utimesInternal(
+		dir,
+		resolvedPath,
+		atim,
+		mtim,
+		fstFlags,
+		followSymlinks,
+		depth+1,
+	)
+}
+
+func buildTimespec(atim, mtim int64, fstFlags int32) []unix.Timespec {
+	now := time.Now().UnixNano()
+
+	var atimSpec, mtimSpec unix.Timespec
+	if fstFlags&fstFlagsAtimNow != 0 {
+		atimSpec = unix.NsecToTimespec(now)
+	} else if fstFlags&fstFlagsAtim != 0 {
+		atimSpec = unix.NsecToTimespec(atim)
+	}
+
+	if fstFlags&fstFlagsMtimNow != 0 {
+		mtimSpec = unix.NsecToTimespec(now)
+	} else if fstFlags&fstFlagsMtim != 0 {
+		mtimSpec = unix.NsecToTimespec(mtim)
+	}
+
+	return []unix.Timespec{atimSpec, mtimSpec}
 }
 
 // openat opens a file or directory relative to a directory.

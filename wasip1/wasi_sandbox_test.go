@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // fsEntry describes a filesystem entry to create in a test.
@@ -896,5 +897,107 @@ func TestOpenat_SubdirTrailingDotDotBlocked(t *testing.T) {
 	_, err = openat(dirFd, "subdir/../..", false, 0, 0, uint64(RightsFdRead))
 	if err == nil {
 		t.Fatal("openat allowed escape via subdir/../..")
+	}
+}
+
+func TestUtimes_BasicFile(t *testing.T) {
+	root, dirFd := testFS(t, file("test.txt", "hello"))
+	defer dirFd.Close()
+	atime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+	mtime := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+
+	fstFlags := fstFlagsAtim | fstFlagsMtim
+	err := utimes(dirFd, "test.txt", atime, mtime, fstFlags, false)
+	if err != nil {
+		t.Fatalf("utimes failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(root, "test.txt"))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	// Note: AccessTime check depends on FS support so we only verify ModTime.
+	if info.ModTime().UnixNano() != mtime {
+		t.Errorf("dir Mtime: got %v, want %v", info.ModTime(), mtime)
+	}
+}
+
+func TestUtimes_SymlinkFollow(t *testing.T) {
+	root, dirFd := testFS(t,
+		file("target.txt", "content"),
+		link("link", "target.txt"),
+	)
+	defer dirFd.Close()
+	mtime := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+
+	err := utimes(dirFd, "link", 0, mtime, fstFlagsMtim, true)
+	if err != nil {
+		t.Fatalf("utimes with followSymlinks=true failed: %v", err)
+	}
+
+	targetInfo, err := os.Stat(filepath.Join(root, "target.txt"))
+	if err != nil {
+		t.Fatalf("Stat target failed: %v", err)
+	}
+	if targetInfo.ModTime().UnixNano() != mtime {
+		t.Errorf("dir Mtime: got %v, want %v", targetInfo.ModTime(), mtime)
+	}
+}
+
+func TestUtimes_SymlinkNoFollow(t *testing.T) {
+	root, dirFd := testFS(t,
+		file("target.txt", "content"),
+		link("link", "target.txt"),
+	)
+	defer dirFd.Close()
+	// Capture initial target time
+	targetBefore, err := os.Stat(filepath.Join(root, "target.txt"))
+	if err != nil {
+		t.Fatalf("Stat target failed: %v", err)
+	}
+	mtime := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
+
+	// No follow symlink: should update symlink itself, NOT target
+	err = utimes(dirFd, "link", 0, mtime, fstFlagsMtim, false)
+	if err != nil {
+		t.Fatalf("utimes with followSymlinks=false failed: %v", err)
+	}
+
+	// Verify target did NOT change
+	targetAfter, err := os.Stat(filepath.Join(root, "target.txt"))
+	if err != nil {
+		t.Fatalf("Stat target failed: %v", err)
+	}
+	if !targetAfter.ModTime().Equal(targetBefore.ModTime()) {
+		t.Errorf("target Mtime changed")
+	}
+
+	// Verify symlink itself WAS updated
+	linkInfo, err := os.Lstat(filepath.Join(root, "link"))
+	if err != nil {
+		t.Fatalf("Lstat link failed: %v", err)
+	}
+	if linkInfo.ModTime().UnixNano() != mtime {
+		t.Errorf("symlink Mtime: got %v, want %v", linkInfo.ModTime(), mtime)
+	}
+}
+
+func TestUtimes_Directory(t *testing.T) {
+	root, dirFd := testFS(t, dir("subdir"))
+	defer dirFd.Close()
+
+	mtime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	err := utimes(dirFd, "subdir", 0, mtime.UnixNano(), fstFlagsMtim, false)
+	if err != nil {
+		t.Fatalf("utimes on directory failed: %v", err)
+	}
+
+	info, err := os.Stat(filepath.Join(root, "subdir"))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if info.ModTime().Sub(mtime).Abs() > time.Second {
+		t.Errorf("dir Mtime: got %v, want %v", info.ModTime(), mtime)
 	}
 }
