@@ -922,12 +922,10 @@ func TestStat_SymlinkFollowEscapeBlocked(t *testing.T) {
 	defer dirFd.Close()
 
 	// With SYMLINK_FOLLOW, should NOT follow to /etc/passwd (sandbox escape)
+	// The symlink resolves to "etc/passwd" relative to sandbox root, which doesn't exist
 	_, err = stat(dirFd, "escape", lookupFlagsSymlinkFollow)
 	if err == nil {
 		t.Fatal("stat with symlink follow should fail for escape symlink")
-	}
-	if err != os.ErrPermission {
-		t.Errorf("expected os.ErrPermission, got %v", err)
 	}
 }
 
@@ -955,5 +953,361 @@ func TestStat_SymlinkChainWithDotDotEscapeBlocked(t *testing.T) {
 	}
 	if err != os.ErrPermission {
 		t.Errorf("expected os.ErrPermission, got %v", err)
+	}
+}
+
+func TestOpenat_IntermediateSymlinkAllowed(t *testing.T) {
+	dir := t.TempDir()
+	// Structure:
+	// root/
+	//   target_dir/
+	//     file.txt
+	//   link -> target_dir   (symlink to directory inside sandbox)
+	targetDir := filepath.Join(dir, "target_dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("failed to create target_dir: %v", err)
+	}
+	testFile := filepath.Join(targetDir, "file.txt")
+	if err := os.WriteFile(testFile, []byte("through link"), 0o644); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	linkPath := filepath.Join(dir, "link")
+	if err := os.Symlink("target_dir", linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Access file through symlink directory
+	file, err := openat(dirFd, "link/file.txt", 0, 0, 0, uint64(RightsFdRead))
+	if err != nil {
+		t.Fatalf("openat through intermediate symlink failed: %v", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	if string(content) != "through link" {
+		t.Errorf("got %q, want %q", string(content), "through link")
+	}
+}
+
+func TestOpenat_IntermediateSymlinkWithDotDotAllowed(t *testing.T) {
+	dir := t.TempDir()
+	// Structure:
+	// root/
+	//   target_dir/
+	//     file.txt
+	//   subdir/
+	//     link -> ../target_dir   (symlink using .. but staying in sandbox)
+	targetDir := filepath.Join(dir, "target_dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("failed to create target_dir: %v", err)
+	}
+	testFile := filepath.Join(targetDir, "file.txt")
+	if err := os.WriteFile(testFile, []byte("via dotdot"), 0o644); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+	linkPath := filepath.Join(subdir, "link")
+	if err := os.Symlink("../target_dir", linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	rights := uint64(RightsFdRead)
+	file, err := openat(dirFd, "subdir/link/file.txt", 0, 0, 0, rights)
+	if err != nil {
+		t.Fatalf("openat through symlink with .. failed: %v", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	if string(content) != "via dotdot" {
+		t.Errorf("got %q, want %q", string(content), "via dotdot")
+	}
+}
+
+func TestStat_IntermediateSymlinkAllowed(t *testing.T) {
+	dir := t.TempDir()
+	// Structure:
+	// root/
+	//   target_dir/
+	//     file.txt
+	//   link -> target_dir
+	targetDir := filepath.Join(dir, "target_dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("failed to create target_dir: %v", err)
+	}
+	testFile := filepath.Join(targetDir, "file.txt")
+	content := []byte("stat through link")
+	if err := os.WriteFile(testFile, content, 0o644); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	linkPath := filepath.Join(dir, "link")
+	if err := os.Symlink("target_dir", linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	fs, err := stat(dirFd, "link/file.txt", 0)
+	if err != nil {
+		t.Fatalf("stat through intermediate symlink failed: %v", err)
+	}
+
+	if fs.filetype != int8(fileTypeRegularFile) {
+		t.Errorf("expected regular file, got filetype %d", fs.filetype)
+	}
+}
+
+func TestMkdirat_IntermediateSymlinkAllowed(t *testing.T) {
+	dir := t.TempDir()
+	// Structure:
+	// root/
+	//   target_dir/
+	//   link -> target_dir
+	targetDir := filepath.Join(dir, "target_dir")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("failed to create target_dir: %v", err)
+	}
+	linkPath := filepath.Join(dir, "link")
+	if err := os.Symlink("target_dir", linkPath); err != nil {
+		t.Fatalf("failed to create symlink: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Create directory through symlink
+	if err := mkdirat(dirFd, "link/newdir", 0o755); err != nil {
+		t.Fatalf("mkdirat through intermediate symlink failed: %v", err)
+	}
+
+	// Verify the directory was created in the actual target
+	info, err := os.Stat(filepath.Join(targetDir, "newdir"))
+	if err != nil {
+		t.Fatalf("Stat failed: %v", err)
+	}
+	if !info.IsDir() {
+		t.Error("expected directory")
+	}
+}
+
+func TestOpenat_ChainedIntermediateSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	// Structure:
+	// root/
+	//   a/
+	//     b/
+	//       file.txt
+	//   link1 -> a
+	//   link2 -> link1/b
+	if err := os.MkdirAll(filepath.Join(dir, "a/b"), 0o755); err != nil {
+		t.Fatalf("failed to create dirs: %v", err)
+	}
+	testFile := filepath.Join(dir, "a/b/file.txt")
+	if err := os.WriteFile(testFile, []byte("chained"), 0o644); err != nil {
+		t.Fatalf("failed to create file: %v", err)
+	}
+	if err := os.Symlink("a", filepath.Join(dir, "link1")); err != nil {
+		t.Fatalf("failed to create link1: %v", err)
+	}
+	if err := os.Symlink("link1/b", filepath.Join(dir, "link2")); err != nil {
+		t.Fatalf("failed to create link2: %v", err)
+	}
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	file, err := openat(dirFd, "link2/file.txt", 0, 0, 0, uint64(RightsFdRead))
+	if err != nil {
+		t.Fatalf("openat through chained symlinks failed: %v", err)
+	}
+	defer file.Close()
+
+	content, err := io.ReadAll(file)
+	if err != nil {
+		t.Fatalf("failed to read: %v", err)
+	}
+	if string(content) != "chained" {
+		t.Errorf("got %q, want %q", string(content), "chained")
+	}
+}
+
+func TestOpenat_PermissionBypass_DotDot(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a directory "locked" with no permissions (000).
+	lockedDir := filepath.Join(dir, "locked")
+	if err := os.Mkdir(lockedDir, 0o700); err != nil {
+		t.Fatalf("failed to create locked dir: %v", err)
+	}
+
+	// Create a target file "target.txt" in the root.
+	targetFile := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("failed to create target file: %v", err)
+	}
+
+	// Remove permissions from "locked".
+	if err := os.Chmod(lockedDir, 0o000); err != nil {
+		t.Fatalf("failed to chmod locked dir: %v", err)
+	}
+	t.Cleanup(func() {
+		os.Chmod(lockedDir, 0o700)
+	})
+
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attempt to open "locked/../target.txt".
+	// POSIX: traversing "locked" requires +x permission. Since it is 000, this should FAIL.
+	_, err = openat(dirFd, "locked/../target.txt", 0, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("openat bypassed permission check on 'locked' directory")
+	}
+}
+
+func TestOpenat_NonExistent_DotDot(t *testing.T) {
+	dir := t.TempDir()
+
+	targetFile := filepath.Join(dir, "target.txt")
+	if err := os.WriteFile(targetFile, []byte("secret"), 0o644); err != nil {
+		t.Fatalf("failed to create target file: %v", err)
+	}
+
+	dirFd, err := os.Open(dir)
+	if err != nil {
+		t.Fatalf("failed to open dir: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attempt to open "nonexistent/../target.txt".
+	// POSIX: Should fail because "nonexistent" does not exist.
+	_, err = openat(dirFd, "nonexistent/../target.txt", 0, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("openat bypassed existence check on 'nonexistent' directory")
+	}
+}
+
+func TestOpenat_DotDotEscapeSandboxBlocked(t *testing.T) {
+	// Structure (outside sandbox):
+	// tmp/
+	//   outside.txt      <- file outside sandbox
+	//   sandbox/         <- sandbox root
+	//     subdir/
+	tmpDir := t.TempDir()
+	outsideFile := filepath.Join(tmpDir, "outside.txt")
+	if err := os.WriteFile(outsideFile, []byte("outside content"), 0o644); err != nil {
+		t.Fatalf("failed to create outside file: %v", err)
+	}
+
+	sandboxRoot := filepath.Join(tmpDir, "sandbox")
+	if err := os.Mkdir(sandboxRoot, 0o755); err != nil {
+		t.Fatalf("failed to create sandbox root: %v", err)
+	}
+
+	subdir := filepath.Join(sandboxRoot, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	dirFd, err := os.Open(sandboxRoot)
+	if err != nil {
+		t.Fatalf("failed to open sandbox root: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attack: "subdir/../../outside.txt" should fail (escapes sandbox)
+	_, err = openat(dirFd, "subdir/../../outside.txt", 0, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("openat allowed sandbox escape via subdir/../..")
+	}
+}
+
+func TestOpenat_TrailingDotDotBlocked(t *testing.T) {
+	// Structure:
+	// tmp/
+	//   outside.txt      <- file outside sandbox
+	//   sandbox/         <- sandbox root
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatalf("failed to create outside file: %v", err)
+	}
+
+	sandboxRoot := filepath.Join(tmpDir, "sandbox")
+	if err := os.Mkdir(sandboxRoot, 0o755); err != nil {
+		t.Fatalf("failed to create sandbox root: %v", err)
+	}
+
+	dirFd, err := os.Open(sandboxRoot)
+	if err != nil {
+		t.Fatalf("failed to open sandbox root: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attack: "./.." - trailing .. should fail
+	_, err = openat(dirFd, "./..", 0, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("openat allowed escape via ./..")
+	}
+}
+
+func TestOpenat_SubdirTrailingDotDotBlocked(t *testing.T) {
+	// Structure:
+	// tmp/
+	//   outside.txt
+	//   sandbox/
+	//     subdir/
+	tmpDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpDir, "outside.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatalf("failed to create outside file: %v", err)
+	}
+
+	sandboxRoot := filepath.Join(tmpDir, "sandbox")
+	if err := os.Mkdir(sandboxRoot, 0o755); err != nil {
+		t.Fatalf("failed to create sandbox root: %v", err)
+	}
+	subdir := filepath.Join(sandboxRoot, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatalf("failed to create subdir: %v", err)
+	}
+
+	dirFd, err := os.Open(sandboxRoot)
+	if err != nil {
+		t.Fatalf("failed to open sandbox root: %v", err)
+	}
+	defer dirFd.Close()
+
+	// Attack: "subdir/../.." - should fail (escapes sandbox)
+	_, err = openat(dirFd, "subdir/../..", 0, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("openat allowed escape via subdir/../..")
 	}
 }

@@ -50,7 +50,7 @@ const maxSymlinkDepth = 40
 //
 // Returns an error if the operation fails.
 func mkdirat(dir *os.File, path string, mode uint32) error {
-	if !filepath.IsLocal(path) {
+	if !isRelativePath(path) {
 		return os.ErrInvalid
 	}
 
@@ -61,6 +61,11 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 
 	if len(components) == 1 && components[0] == "." {
 		return os.ErrInvalid
+	}
+
+	// SECURITY: If the final component is "..", append "." to force safe resolution
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
 	}
 
 	parentFd, _, err := walkToParent(dir, "", components)
@@ -80,7 +85,7 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 	return nil
 }
 
-// stat returns the attributes of a file or directory relative to a directory.
+// stat returns the filestat of a file or directory relative to a directory.
 // This is similar to fstatat in POSIX.
 //
 // Parameters:
@@ -90,14 +95,12 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 //
 // Returns the filestat and an error if the operation fails.
 func stat(dir *os.File, path string, lookupFlags int32) (filestat, error) {
-	return statInternal(dir, dir, "", path, lookupFlags, 0)
+	return statInternal(dir, path, lookupFlags, 0)
 }
 
 // statInternal implements the core stat logic with symlink resolution.
 func statInternal(
-	root *os.File,
-	currentDir *os.File,
-	virtualPath string,
+	dir *os.File,
 	path string,
 	lookupFlags int32,
 	depth int,
@@ -106,7 +109,7 @@ func statInternal(
 		return filestat{}, syscall.ELOOP
 	}
 
-	if !filepath.IsLocal(path) {
+	if !isRelativePath(path) {
 		return filestat{}, os.ErrInvalid
 	}
 
@@ -118,22 +121,22 @@ func statInternal(
 	// Handle special case of stat on "." (the directory itself)
 	if len(components) == 1 && components[0] == "." {
 		var statBuf unix.Stat_t
-		if err := unix.Fstat(int(currentDir.Fd()), &statBuf); err != nil {
+		if err := unix.Fstat(int(dir.Fd()), &statBuf); err != nil {
 			return filestat{}, mapErrno(err)
 		}
 		return statFromUnix(&statBuf), nil
 	}
 
-	parentFd, currentVirtualPath, err := walkToParent(
-		currentDir,
-		virtualPath,
-		components,
-	)
+	// SECURITY: If the final component is "..", append "." to force safe resolution
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
+	}
+
+	parentFd, parentPath, err := walkToParent(dir, "", components)
 	if err != nil {
 		return filestat{}, err
 	}
-
-	if parentFd != int(currentDir.Fd()) {
+	if parentFd != int(dir.Fd()) {
 		defer unix.Close(parentFd)
 	}
 
@@ -158,15 +161,21 @@ func statInternal(
 	if err != nil {
 		return filestat{}, mapErrno(err)
 	}
-
-	resolvedPath := filepath.Clean(filepath.Join(currentVirtualPath, target))
-
+	// Resolve the symlink target.
+	// Absolute symlinks are resolved relative to the sandbox root.
+	// Relative symlinks are resolved relative to the symlink's containing directory.
+	var resolvedPath string
+	if filepath.IsAbs(target) {
+		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
+	} else {
+		resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
+	}
 	if !filepath.IsLocal(resolvedPath) {
 		return filestat{}, os.ErrPermission
 	}
 
 	// Recursively stat from the root with the resolved path.
-	return statInternal(root, root, "", resolvedPath, lookupFlags, depth+1)
+	return statInternal(dir, resolvedPath, lookupFlags, depth+1)
 }
 
 // statFromUnix converts a unix.Stat_t to a filestat.
@@ -261,7 +270,7 @@ func pathOpenInternal(
 	}
 
 	// The path must be local (no absolute paths, no leading ..)
-	if !filepath.IsLocal(path) {
+	if !isRelativePath(path) {
 		return nil, os.ErrInvalid
 	}
 
@@ -274,6 +283,13 @@ func pathOpenInternal(
 	components := splitPath(path)
 	if len(components) == 0 {
 		return nil, os.ErrInvalid
+	}
+
+	// SECURITY: If the final component is "..", we must NOT pass it directly
+	// to syscalls as that would bypass sandbox enforcement. Append "." to force
+	// walkToParent to process the ".." through safe logical resolution.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
 	}
 
 	followFinalSymlink := lookupFlags&lookupFlagsSymlinkFollow != 0
@@ -353,10 +369,17 @@ func openFinalSecure(
 		return nil, mapErrno(err)
 	}
 
-	// Resolve the symlink target relative to its containing directory.
-	// Join the virtual path with the symlink target, then clean it.
-	// This handles cases like "link -> ../other/file.txt" correctly.
-	resolvedPath := filepath.Clean(filepath.Join(virtualPath, target))
+	// Resolve the symlink target.
+	// Absolute symlinks are resolved relative to the sandbox root.
+	// Relative symlinks are resolved relative to the symlink's containing directory.
+	var resolvedPath string
+	if filepath.IsAbs(target) {
+		// Strip leading "/" to make it relative to sandbox root
+		resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
+	} else {
+		// Relative symlink: join with virtualPath and clean
+		resolvedPath = filepath.Clean(filepath.Join(virtualPath, target))
+	}
 
 	// Security check: the resolved path must stay within the sandbox.
 	// After cleaning, if it starts with ".." it would escape.
@@ -450,7 +473,9 @@ func openFinal(
 		flags |= unix.O_SYNC
 	}
 
-	fd, err := unix.Openat(int(parentDir.Fd()), name, flags, 0o666)
+	// Default to 0o600 (owner read/write only) for secure file creation.
+	// The process umask may further restrict this, but we don't rely on it.
+	fd, err := unix.Openat(int(parentDir.Fd()), name, flags, 0o600)
 	if err != nil {
 		return nil, mapErrno(err)
 	}
@@ -460,28 +485,84 @@ func openFinal(
 
 // walkToParent walks through intermediate path components (all except the last)
 // and returns the file descriptor of the parent directory of the final component.
+// Symlinks in intermediate components are followed securely within the sandbox.
 //
 // Parameters:
-//   - dir: the starting directory
-//   - virtualPath: the virtual path from root to dir (for symlink resolution tracking)
+//   - dir: the sandbox root directory (symlinks are resolved relative to this)
+//   - basePath: prepended to the returned parentPath (use "" to get a path relative to dir)
 //   - components: the path components to walk
 //
 // Returns:
 //   - parentFd: file descriptor of the parent directory (may equal dir.Fd() if no
 //     intermediate directories were opened)
-//   - newVirtualPath: the updated virtual path after walking
+//   - parentPath: the path of parentFd relative to dir (with basePath prepended)
 //   - error: any error encountered
 //
 // The caller is responsible for closing parentFd if it differs from dir.Fd().
-func walkToParent(dir *os.File, virtualPath string, components []string) (int, string, error) {
+func walkToParent(dir *os.File, basePath string, components []string) (int, string, error) {
+	return walkToParentInternal(dir, basePath, components, 0)
+}
+
+// walkToParentInternal implements walkToParent with symlink depth tracking.
+func walkToParentInternal(
+	dir *os.File,
+	basePath string,
+	components []string,
+	depth int,
+) (int, string, error) {
+	if depth >= maxSymlinkDepth {
+		return 0, "", syscall.ELOOP
+	}
+
 	dirFd := int(dir.Fd())
 	currentDirFd := dirFd
-	currentVirtualPath := virtualPath
+	parentPath := basePath
 
-	for _, component := range components[:len(components)-1] {
+	for i, component := range components[:len(components)-1] {
 		// Skip "." components in the middle of the path
 		if component == "." {
 			continue
+		}
+
+		// Handle ".." component - must traverse to parent safely
+		// SECURITY: We do NOT use physical ".." traversal (unix.Openat with "..")
+		// because that is vulnerable to TOCTOU attacks via directory renaming.
+		// Instead, we compute the new logical path and re-walk from root.
+		if component == ".." {
+			// Check if we're at the root - cannot go above sandbox
+			if parentPath == "" {
+				if currentDirFd != dirFd {
+					unix.Close(currentDirFd)
+				}
+				return 0, "", os.ErrPermission
+			}
+
+			// Close current fd before restarting
+			if currentDirFd != dirFd {
+				unix.Close(currentDirFd)
+			}
+
+			// Compute new path: remove last component from parentPath, add remaining
+			newParentPath := filepath.Dir(parentPath)
+			if newParentPath == "." {
+				newParentPath = ""
+			}
+
+			// Build new components: newParentPath + remaining components
+			remaining := components[i+1:]
+			var newComponents []string
+			if newParentPath != "" {
+				newComponents = splitPath(newParentPath)
+			}
+			newComponents = append(newComponents, remaining...)
+
+			// If no components left, we're at root - add a placeholder
+			if len(newComponents) == 0 {
+				newComponents = []string{"."}
+			}
+
+			// Restart from root with the new path (safe, no physical ".." used)
+			return walkToParentInternal(dir, "", newComponents, depth+1)
 		}
 
 		newFd, err := unix.Openat(
@@ -491,40 +572,115 @@ func walkToParent(dir *os.File, virtualPath string, components []string) (int, s
 			0,
 		)
 
+		if err != nil {
+			// Check if this is a symlink we need to follow
+			if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
+				// Could be a symlink - try to read it
+				target, readErr := readlinkat(currentDirFd, component)
+				if readErr != nil {
+					// Not a symlink, return the original error
+					if currentDirFd != dirFd {
+						unix.Close(currentDirFd)
+					}
+					return 0, "", err
+				}
+
+				// Resolve the symlink target.
+				// Absolute symlinks are resolved relative to the sandbox root.
+				// Relative symlinks are resolved relative to the current path.
+				var resolvedPath string
+				if filepath.IsAbs(target) {
+					resolvedPath = strings.TrimPrefix(target, string(filepath.Separator))
+				} else {
+					resolvedPath = filepath.Clean(filepath.Join(parentPath, target))
+				}
+				if !filepath.IsLocal(resolvedPath) {
+					if currentDirFd != dirFd {
+						unix.Close(currentDirFd)
+					}
+					return 0, "", os.ErrPermission
+				}
+
+				// Build the new full path: resolved symlink + remaining components
+				remaining := components[i+1:]
+				newComponents := splitPath(resolvedPath)
+				newComponents = append(newComponents, remaining...)
+
+				// Close current fd before restarting
+				if currentDirFd != dirFd {
+					unix.Close(currentDirFd)
+				}
+
+				// Restart from root with the resolved path
+				return walkToParentInternal(dir, "", newComponents, depth+1)
+			}
+
+			// Close intermediate fds we opened (but not the original dir)
+			if currentDirFd != dirFd {
+				unix.Close(currentDirFd)
+			}
+			return 0, "", mapErrno(err)
+		}
+
 		// Close intermediate fds we opened (but not the original dir)
 		if currentDirFd != dirFd {
 			unix.Close(currentDirFd)
 		}
 
-		if err != nil {
-			return 0, "", mapErrno(err)
-		}
-
 		currentDirFd = newFd
-		currentVirtualPath = filepath.Join(currentVirtualPath, component)
+		parentPath = filepath.Join(parentPath, component)
 	}
 
-	return currentDirFd, currentVirtualPath, nil
+	return currentDirFd, parentPath, nil
 }
 
-// splitPath splits a path into its components.
+// splitPath splits a path into its components without lexically resolving "..".
+// This is critical for security: ".." must be traversed at runtime to enforce
+// permission and existence checks on intermediate directories.
 // It handles both forward slashes and the OS-specific separator.
 func splitPath(path string) []string {
-	path = filepath.Clean(path)
+	// Normalize multiple slashes and handle "." components, but preserve ".."
+	// We cannot use filepath.Clean because it lexically removes ".."
 	parts := strings.Split(path, string(filepath.Separator))
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
-		if part != "" {
+		switch part {
+		case "", ".":
+			// Skip empty parts and current directory references
+			continue
+		default:
 			result = append(result, part)
 		}
 	}
 
-	// If the path was just ".", return that
-	if len(result) == 0 && (path == "." || path == "") {
+	// If the path was just "." or empty, return that
+	if len(result) == 0 {
 		return []string{"."}
 	}
 
 	return result
+}
+
+// isRelativePath checks if a path is a valid relative path for sandbox
+// traversal. It rejects:
+//   - Absolute paths (starting with /)
+//   - Paths that start with .. (immediate sandbox escape)
+//   - Empty paths
+//
+// Unlike filepath.IsLocal, it ALLOWS internal ".." components like "a/../b"
+// because these will be traversed at runtime, enforcing permission checks.
+func isRelativePath(path string) bool {
+	if path == "" {
+		return false
+	}
+	if filepath.IsAbs(path) {
+		return false
+	}
+	// Check if path starts with ".."
+	if path == ".." || strings.HasPrefix(path, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
 }
 
 // mapErrno converts a syscall error to an appropriate os error.
