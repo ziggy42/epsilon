@@ -71,12 +71,7 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		defer unix.Close(parentFd)
 	}
 
-	finalName := components[len(components)-1]
-	if err := unix.Mkdirat(parentFd, finalName, mode); err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Mkdirat(parentFd, components[len(components)-1], mode)
 }
 
 // stat returns the filestat of a file or directory relative to a directory.
@@ -218,11 +213,7 @@ func utimes(
 		defer unix.Close(dirFd)
 	}
 
-	flags := unix.AT_SYMLINK_NOFOLLOW
-	if err := unix.UtimesNanoAt(dirFd, fileName, times, flags); err != nil {
-		return err
-	}
-	return nil
+	return unix.UtimesNanoAt(dirFd, fileName, times, unix.AT_SYMLINK_NOFOLLOW)
 }
 
 func utimesNanoAt(file *os.File, atim, mtim int64, fstFlags int32) error {
@@ -291,12 +282,7 @@ func linkat(
 		defer unix.Close(newDirFd)
 	}
 
-	err = unix.Linkat(oldDirFd, oldName, newDirFd, newName, 0)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Linkat(oldDirFd, oldName, newDirFd, newName, 0)
 }
 
 // readlink reads the contents of a symbolic link.
@@ -346,12 +332,7 @@ func rmdirat(dir *os.File, path string) error {
 		defer unix.Close(dirFd)
 	}
 
-	err = unix.Unlinkat(dirFd, name, unix.AT_REMOVEDIR)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Unlinkat(dirFd, name, unix.AT_REMOVEDIR)
 }
 
 // renameat renames a file or directory.
@@ -386,12 +367,7 @@ func renameat(
 		defer unix.Close(newDirFd)
 	}
 
-	err = unix.Renameat(oldDirFd, oldName, newDirFd, newName)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Renameat(oldDirFd, oldName, newDirFd, newName)
 }
 
 // symlinkat creates a symbolic link.
@@ -420,12 +396,7 @@ func symlinkat(target string, dir *os.File, path string) error {
 		defer unix.Close(dirFd)
 	}
 
-	err = unix.Symlinkat(target, dirFd, name)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Symlinkat(target, dirFd, name)
 }
 
 // unlinkat removes a file (but not a directory).
@@ -450,12 +421,7 @@ func unlinkat(dir *os.File, path string) error {
 		name += string(filepath.Separator)
 	}
 
-	err = unix.Unlinkat(dirFd, name, 0)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return unix.Unlinkat(dirFd, name, 0)
 }
 
 // openat opens a file or directory relative to a directory.
@@ -573,10 +539,7 @@ func shutdown(file *os.File, how int32) error {
 		return syscall.EINVAL
 	}
 
-	if err := unix.Shutdown(int(file.Fd()), sysHow); err != nil {
-		return err
-	}
-	return nil
+	return unix.Shutdown(int(file.Fd()), sysHow)
 }
 
 // walkToParent walks through intermediate path components (all except the last)
