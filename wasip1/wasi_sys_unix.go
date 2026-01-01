@@ -62,7 +62,7 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		return os.ErrInvalid
 	}
 
-	parentFd, _, _, err := walkToParent(dir, "", components, 0)
+	parentFd, _, _, err := walkToParent(dir, components, 0)
 	if err != nil {
 		return err
 	}
@@ -578,8 +578,6 @@ func shutdown(file *os.File, how int32) error {
 //
 // Parameters:
 //   - dir: the sandbox root directory (symlinks are resolved relative to this)
-//   - basePath: prepended to the returned parentPath (use "" to get a path
-//     relative to dir)
 //   - components: the path components to walk
 //   - depth: current symlink resolution depth
 //
@@ -592,7 +590,6 @@ func shutdown(file *os.File, how int32) error {
 // The caller is responsible for closing parentFd if it differs from dir.Fd().
 func walkToParent(
 	dir *os.File,
-	basePath string,
 	components []string,
 	depth int,
 ) (int, string, int, error) {
@@ -601,29 +598,26 @@ func walkToParent(
 	}
 
 	dirFd := int(dir.Fd())
-	currentDirFd := dirFd
-	parentPath := basePath
+	parentFd := dirFd
+	parentPath := ""
 
-	// Helper to close currentDirFd if it differs from dir.Fd
-	closeCurrentDir := func() {
-		if currentDirFd != dirFd {
-			unix.Close(currentDirFd)
+	// Helper to close parentFd if it differs from dir.Fd
+	closeParent := func() {
+		if parentFd != dirFd {
+			unix.Close(parentFd)
 		}
 	}
 
 	// Re-calculates path components and restarts the walk from root
 	restart := func(newBase string, remain []string) (int, string, int, error) {
-		closeCurrentDir()
+		closeParent()
 
-		// Rebuild component list: split(newBase) + remaining
-		newComponents := splitPath(newBase)
-		newComponents = append(newComponents, remain...)
-
+		newComponents := append(splitPath(newBase), remain...)
 		if len(newComponents) == 0 {
 			newComponents = []string{"."}
 		}
 
-		return walkToParent(dir, "", newComponents, depth+1)
+		return walkToParent(dir, newComponents, depth+1)
 	}
 
 	for i, component := range components[:len(components)-1] {
@@ -644,35 +638,28 @@ func walkToParent(
 		}
 
 		mode := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_DIRECTORY | unix.O_CLOEXEC
-		newFd, err := unix.Openat(currentDirFd, component, mode, 0)
+		newFd, err := unix.Openat(parentFd, component, mode, 0)
 
 		// Check if this is a symlink we need to follow
 		if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
-			// Could be a symlink - try to read it
-			target, readErr := readlinkat(currentDirFd, component)
-			if readErr != nil {
-				closeCurrentDir()
+			resolvedPath, err := resolveSymlink(parentFd, parentPath, component)
+			if err != nil {
+				closeParent()
 				return 0, "", depth, err
-			}
-
-			resolvedPath, pathErr := resolveSymlinkTarget(parentPath, target)
-			if pathErr != nil {
-				closeCurrentDir()
-				return 0, "", depth, pathErr
 			}
 			return restart(resolvedPath, components[i+1:])
 		}
 
-		closeCurrentDir()
+		closeParent()
 		if err != nil {
 			return 0, "", depth, err
 		}
 
-		currentDirFd = newFd
+		parentFd = newFd
 		parentPath = filepath.Join(parentPath, component)
 	}
 
-	return currentDirFd, parentPath, depth, nil
+	return parentFd, parentPath, depth, nil
 }
 
 func getComponents(path string) ([]string, error) {
@@ -727,10 +714,33 @@ func isRelativePath(path string) bool {
 	return true
 }
 
-// resolveSymlinkTarget computes a sandbox-safe resolved path for a symlink.
-// Absolute symlinks are resolved relative to the sandbox root, relative
-// symlinks are resolved relative to parentPath.
-func resolveSymlinkTarget(parentPath, target string) (string, error) {
+// resolveSymlink reads a symlink and returns a sandbox-safe resolved path.
+//
+// Parameters:
+//   - parentFd: fd of the directory containing the symlink
+//   - parentPath: path of parentFd relative to the sandbox root
+//   - name: name of the symlink within the parent directory
+//
+// Returns the resolved path relative to the sandbox root. Absolute symlink
+// targets are resolved relative to the sandbox root (not the filesystem root),
+// while relative targets are resolved relative to parentPath.
+//
+// Returns EPERM if the resolved path would escape the sandbox.
+func resolveSymlink(parentFd int, parentPath, name string) (string, error) {
+	buf := make([]byte, 256)
+	var target string
+	for {
+		n, err := unix.Readlinkat(parentFd, name, buf)
+		if err != nil {
+			return "", err
+		}
+		if n < len(buf) {
+			target = string(buf[:n])
+			break
+		}
+		buf = make([]byte, len(buf)*2)
+	}
+
 	var resolved string
 	if filepath.IsAbs(target) {
 		resolved = strings.TrimPrefix(target, string(filepath.Separator))
@@ -778,7 +788,7 @@ func resolvePath(
 		return int(dir.Fd()), ".", nil
 	}
 
-	parentFd, parentPath, newDepth, err := walkToParent(dir, "", comps, depth)
+	parentFd, parentPath, newDepth, err := walkToParent(dir, comps, depth)
 	if err != nil {
 		return 0, "", err
 	}
@@ -814,36 +824,14 @@ func resolvePath(
 	}
 
 	// It's a symlink and we need to follow it securely.
-	// Read the symlink target and resolve it within the sandbox.
-	target, err := readlinkat(parentFd, finalName)
+	resolvedPath, err := resolveSymlink(parentFd, parentPath, finalName)
 	closeParent()
 	if err != nil {
 		return 0, "", err
 	}
 
-	resolvedPath, pathErr := resolveSymlinkTarget(parentPath, target)
-	if pathErr != nil {
-		return 0, "", pathErr
-	}
-
 	// Restart resolution with the new target and updated depth
 	return resolvePath(dir, resolvedPath, followSymlinks, newDepth+1)
-}
-
-// readlinkat reads the target of a symlink relative to a directory fd.
-func readlinkat(dirFd int, name string) (string, error) {
-	buf := make([]byte, 256)
-	for {
-		n, err := unix.Readlinkat(dirFd, name, buf)
-		if err != nil {
-			return "", err
-		}
-		if n < len(buf) {
-			return string(buf[:n]), nil
-		}
-		// Buffer was too small, double it and retry
-		buf = make([]byte, len(buf)*2)
-	}
 }
 
 // statFromUnix converts a unix.Stat_t to a filestat.
