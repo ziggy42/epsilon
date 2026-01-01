@@ -604,105 +604,68 @@ func walkToParent(
 	currentDirFd := dirFd
 	parentPath := basePath
 
+	// Helper to close currentDirFd if it differs from dir.Fd
+	closeCurrentDir := func() {
+		if currentDirFd != dirFd {
+			unix.Close(currentDirFd)
+		}
+	}
+
+	// Re-calculates path components and restarts the walk from root
+	restart := func(newBase string, remain []string) (int, string, int, error) {
+		closeCurrentDir()
+
+		// Rebuild component list: split(newBase) + remaining
+		newComponents := splitPath(newBase)
+		newComponents = append(newComponents, remain...)
+
+		if len(newComponents) == 0 {
+			newComponents = []string{"."}
+		}
+
+		return walkToParent(dir, "", newComponents, depth+1)
+	}
+
 	for i, component := range components[:len(components)-1] {
-		// Skip "." components in the middle of the path
 		if component == "." {
 			continue
 		}
 
-		// Handle ".." component - must traverse to parent safely
-		// SECURITY: We do NOT use physical ".." traversal (unix.Openat with "..")
-		// because that is vulnerable to TOCTOU attacks via directory renaming.
-		// Instead, we compute the new logical path and re-walk from root.
 		if component == ".." {
-			// Check if we're at the root - cannot go above sandbox
+			// Check if we're at the root, we cannot go above sandbox
 			if parentPath == "" {
-				if currentDirFd != dirFd {
-					unix.Close(currentDirFd)
-				}
 				return 0, "", depth, syscall.EPERM
 			}
-
-			// Close current fd before restarting
-			if currentDirFd != dirFd {
-				unix.Close(currentDirFd)
-			}
-
-			// Compute new path: remove last component from parentPath, add remaining
 			newParentPath := filepath.Dir(parentPath)
 			if newParentPath == "." {
 				newParentPath = ""
 			}
-
-			// Build new components: newParentPath + remaining components
-			remaining := components[i+1:]
-			var newComponents []string
-			if newParentPath != "" {
-				newComponents = splitPath(newParentPath)
-			}
-			newComponents = append(newComponents, remaining...)
-
-			// If no components left, we're at root - add a placeholder
-			if len(newComponents) == 0 {
-				newComponents = []string{"."}
-			}
-
-			// Restart from root with the new path (safe, no physical ".." used)
-			return walkToParent(dir, "", newComponents, depth+1)
+			return restart(newParentPath, components[i+1:])
 		}
 
-		newFd, err := unix.Openat(
-			currentDirFd,
-			component,
-			unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_DIRECTORY|unix.O_CLOEXEC,
-			0,
-		)
+		mode := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_DIRECTORY | unix.O_CLOEXEC
+		newFd, err := unix.Openat(currentDirFd, component, mode, 0)
 
+		// Check if this is a symlink we need to follow
+		if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
+			// Could be a symlink - try to read it
+			target, readErr := readlinkat(currentDirFd, component)
+			if readErr != nil {
+				closeCurrentDir()
+				return 0, "", depth, err
+			}
+
+			resolvedPath, pathErr := resolveSymlinkTarget(parentPath, target)
+			if pathErr != nil {
+				closeCurrentDir()
+				return 0, "", depth, pathErr
+			}
+			return restart(resolvedPath, components[i+1:])
+		}
+
+		closeCurrentDir()
 		if err != nil {
-			// Check if this is a symlink we need to follow
-			if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
-				// Could be a symlink - try to read it
-				target, readErr := readlinkat(currentDirFd, component)
-				if readErr != nil {
-					// Not a symlink, return the original error
-					if currentDirFd != dirFd {
-						unix.Close(currentDirFd)
-					}
-					return 0, "", depth, err
-				}
-
-				resolvedPath, pathErr := resolveSymlinkTarget(parentPath, target)
-				if pathErr != nil {
-					if currentDirFd != dirFd {
-						unix.Close(currentDirFd)
-					}
-					return 0, "", depth, pathErr
-				}
-
-				// Build the new full path: resolved symlink + remaining components
-				remaining := components[i+1:]
-				newComponents := splitPath(resolvedPath)
-				newComponents = append(newComponents, remaining...)
-
-				// Close current fd before restarting
-				if currentDirFd != dirFd {
-					unix.Close(currentDirFd)
-				}
-
-				// Restart from root with the resolved path
-				return walkToParent(dir, "", newComponents, depth+1)
-			}
-
-			// Close intermediate fds we opened (but not the original dir)
-			if currentDirFd != dirFd {
-				unix.Close(currentDirFd)
-			}
 			return 0, "", depth, err
-		}
-
-		// Close intermediate fds we opened (but not the original dir)
-		if currentDirFd != dirFd {
-			unix.Close(currentDirFd)
 		}
 
 		currentDirFd = newFd
