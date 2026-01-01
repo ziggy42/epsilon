@@ -301,18 +301,7 @@ func readlink(dir *os.File, path string) (string, error) {
 	if dirFd != int(dir.Fd()) {
 		defer unix.Close(dirFd)
 	}
-
-	buf := make([]byte, 256)
-	for {
-		n, err := unix.Readlinkat(dirFd, name, buf)
-		if err != nil {
-			return "", err
-		}
-		if n < len(buf) {
-			return string(buf[:n]), nil
-		}
-		buf = make([]byte, len(buf)*2)
-	}
+	return readlinkat(dirFd, name)
 }
 
 // rmdirat removes an empty directory.
@@ -697,18 +686,9 @@ func isRelativePath(path string) bool {
 //
 // Returns EPERM if the resolved path would escape the sandbox.
 func resolveSymlink(parentFd int, parentPath, name string) (string, error) {
-	buf := make([]byte, 256)
-	var target string
-	for {
-		n, err := unix.Readlinkat(parentFd, name, buf)
-		if err != nil {
-			return "", err
-		}
-		if n < len(buf) {
-			target = string(buf[:n])
-			break
-		}
-		buf = make([]byte, len(buf)*2)
+	target, err := readlinkat(parentFd, name)
+	if err != nil {
+		return "", err
 	}
 
 	var resolved string
@@ -721,6 +701,21 @@ func resolveSymlink(parentFd int, parentPath, name string) (string, error) {
 		return "", syscall.EPERM
 	}
 	return resolved, nil
+}
+
+// readlinkat reads a symlink target, growing the buffer as needed.
+func readlinkat(dirFd int, name string) (string, error) {
+	buf := make([]byte, 256)
+	for {
+		n, err := unix.Readlinkat(dirFd, name, buf)
+		if err != nil {
+			return "", err
+		}
+		if n < len(buf) {
+			return string(buf[:n]), nil
+		}
+		buf = make([]byte, len(buf)*2)
+	}
 }
 
 // resolvePath resolves a path relative to a directory os.File. It returns the
