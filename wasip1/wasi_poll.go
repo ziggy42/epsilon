@@ -33,11 +33,10 @@ const (
 )
 
 type subscriptionClock struct {
-	identifier uint64
-	clockId    uint32
-	timeout    uint64
-	precision  uint64
-	flags      uint16
+	clockId   uint32
+	timeout   uint64
+	precision uint64
+	flags     uint16
 }
 
 type subscriptionFdReadwrite struct {
@@ -53,7 +52,6 @@ type subscription struct {
 	// because it contains u64 fields. So we add 7 bytes of padding (9 + 7 = 16).
 	_ [7]byte
 	// body contains the union of SubscriptionClock and SubscriptionFdReadwrite.
-	// Max size is SubscriptionClock (30 bytes: u64 + u32 + u64 + u64 + u16).
 	body [32]byte
 }
 
@@ -89,11 +87,11 @@ func parseSubscription(
 // parseSubscriptionClock extracts clock subscription fields from the body.
 func parseSubscriptionClock(body [32]byte) subscriptionClock {
 	return subscriptionClock{
-		identifier: binary.LittleEndian.Uint64(body[0:8]),
-		clockId:    binary.LittleEndian.Uint32(body[8:12]),
-		timeout:    binary.LittleEndian.Uint64(body[12:20]),
-		precision:  binary.LittleEndian.Uint64(body[20:28]),
-		flags:      binary.LittleEndian.Uint16(body[28:30]),
+		clockId: binary.LittleEndian.Uint32(body[0:4]),
+		// body[4:8] is padding
+		timeout:   binary.LittleEndian.Uint64(body[8:16]),
+		precision: binary.LittleEndian.Uint64(body[16:24]),
+		flags:     binary.LittleEndian.Uint16(body[24:26]),
 	}
 }
 

@@ -59,23 +59,26 @@ func (rt *wasiResourceTable) closeAll() {
 	}
 }
 
-func newWasiResourceTable(preopens []WasiPreopen) (*wasiResourceTable, error) {
+func newWasiResourceTable(
+	preopens []WasiPreopen,
+	stdin, stdout, stderr *os.File,
+) (*wasiResourceTable, error) {
 	stdRights := RightsFdFilestatGet | RightsPollFdReadwrite
-	stdin, err := newStdFileDescriptor(os.Stdin, RightsFdRead|stdRights)
+	stdinFd, err := newStdFileDescriptor(stdin, RightsFdRead|stdRights)
 	if err != nil {
 		return nil, err
 	}
-	stdout, err := newStdFileDescriptor(os.Stdout, RightsFdWrite|stdRights)
+	stdoutFd, err := newStdFileDescriptor(stdout, RightsFdWrite|stdRights)
 	if err != nil {
 		return nil, err
 	}
-	stderr, err := newStdFileDescriptor(os.Stderr, RightsFdWrite|stdRights)
+	stderrFd, err := newStdFileDescriptor(stderr, RightsFdWrite|stdRights)
 	if err != nil {
 		return nil, err
 	}
 
 	resourceTable := &wasiResourceTable{
-		fds: map[int32]*wasiFileDescriptor{0: stdin, 1: stdout, 2: stderr},
+		fds: map[int32]*wasiFileDescriptor{0: stdinFd, 1: stdoutFd, 2: stderrFd},
 	}
 
 	for _, dir := range preopens {

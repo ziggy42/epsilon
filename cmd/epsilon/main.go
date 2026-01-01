@@ -140,7 +140,11 @@ func runCLI(
 		})
 	}
 
-	wasiModule, err := wasip1.NewWasiModule(fullArgs, wasiEnv, preopens)
+	wasiModule, err := wasip1.NewWasiModule(wasip1.WasiConfig{
+		Args:     fullArgs,
+		Env:      wasiEnv,
+		Preopens: preopens,
+	})
 	if err != nil {
 		return err
 	}

@@ -19,10 +19,21 @@ package wasip1
 import (
 	"crypto/rand"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/ziggy42/epsilon/epsilon"
 )
+
+// WasiConfig contains configuration for creating a new WasiModule.
+type WasiConfig struct {
+	Args     []string
+	Env      map[string]string
+	Preopens []WasiPreopen
+	Stdin    *os.File // If nil, os.Stdin is used.
+	Stdout   *os.File // If nil, os.Stdout is used.
+	Stderr   *os.File // If nil, os.Stderr is used.
+}
 
 type WasiModule struct {
 	fs                    *wasiResourceTable
@@ -52,19 +63,28 @@ func (e *ProcExitError) Error() string {
 // On failure (err != nil), the WasiModule is not created, and the ownership of
 // the files remains with the caller. The caller is responsible for closing the
 // files in this case.
-func NewWasiModule(
-	args []string,
-	env map[string]string,
-	preopens []WasiPreopen,
-) (*WasiModule, error) {
-	fs, err := newWasiResourceTable(preopens)
+func NewWasiModule(config WasiConfig) (*WasiModule, error) {
+	stdin := config.Stdin
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	stdout := config.Stdout
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	stderr := config.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+
+	fs, err := newWasiResourceTable(config.Preopens, stdin, stdout, stderr)
 	if err != nil {
 		return nil, err
 	}
 	return &WasiModule{
 		fs:                    fs,
-		args:                  args,
-		env:                   env,
+		args:                  config.Args,
+		env:                   config.Env,
 		monotonicClockStartNs: time.Now().UnixNano(),
 	}, nil
 }
