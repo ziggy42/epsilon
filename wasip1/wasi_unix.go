@@ -554,19 +554,18 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 			)
 		})).
-		AddHostFunc("poll_oneoff", func(
-			inst *epsilon.ModuleInstance,
-			args ...any,
-		) []any {
-			errCode := w.pollOneoff(
-				inst,
+		AddHostFunc("poll_oneoff", bindMem(func(
+			m *epsilon.Memory,
+			args []any,
+		) int32 {
+			return w.pollOneoff(
+				m,
 				args[0].(int32),
 				args[1].(int32),
 				args[2].(int32),
 				args[3].(int32),
 			)
-			return []any{errCode}
-		}).
+		})).
 		AddHostFunc("proc_raise", bind(func(args []any) int32 {
 			return w.procRaise(args[0].(int32))
 		})).

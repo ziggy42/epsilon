@@ -116,16 +116,11 @@ func writeEvent(memory *epsilon.Memory, offset uint32, event event) error {
 const maxSubscriptions = 4096
 
 func (w *WasiModule) pollOneoff(
-	inst *epsilon.ModuleInstance,
+	memory *epsilon.Memory,
 	inPtr, outPtr, nsubscriptions, neventsPtr int32,
 ) int32 {
 	if nsubscriptions <= 0 || nsubscriptions > maxSubscriptions {
 		return errnoInval
-	}
-
-	memory, err := inst.GetMemory(WASIMemoryExportName)
-	if err != nil {
-		return errnoFault
 	}
 
 	subscriptions := make([]subscription, nsubscriptions)
@@ -266,7 +261,7 @@ func (w *WasiModule) pollOneoff(
 	}
 
 	// Write the number of events
-	err = memory.StoreUint32(0, uint32(neventsPtr), uint32(len(events)))
+	err := memory.StoreUint32(0, uint32(neventsPtr), uint32(len(events)))
 	if err != nil {
 		return errnoFault
 	}
