@@ -19,6 +19,7 @@ package wasip1
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,7 +129,7 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	}
 
 	// Seek to start to ensure we read all entries
-	if _, err := dir.Seek(0, 0); err != nil {
+	if _, err := dir.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 

@@ -426,35 +426,38 @@ func (w *wasiResourceTable) readdir(
 		return errCode
 	}
 
-	// Seek to beginning before reading directory entries
-	if _, err := fd.file.Seek(0, io.SeekStart); err != nil {
-		return mapError(err)
-	}
-
 	entries, err := readDirEntries(fd.file)
 	if err != nil {
 		return mapError(err)
 	}
 
-	var written int32
-	for i := int64(0); i < int64(len(entries)); i++ {
-		// Skip entries before cookie
-		if i < cookie {
-			continue
-		}
+	bufOffset := uint32(bufPtr)
+	bufEnd := bufOffset + uint32(bufLen)
+	written := uint32(0)
 
-		// Next cookie is (i + 1)
-		entryBytes := entries[i].bytes(uint64(i + 1))
-
-		// Check if there's room for this entry
-		if written+int32(len(entryBytes)) > bufLen {
+	for i := cookie; i < int64(len(entries)); i++ {
+		available := bufEnd - bufOffset
+		if available == 0 {
 			break
 		}
 
-		if err := memory.Set(0, uint32(bufPtr+written), entryBytes); err != nil {
+		entryBytes := entries[i].bytes(uint64(i + 1))
+		toWrite := min(uint32(len(entryBytes)), available)
+
+		if err := memory.Set(0, bufOffset, entryBytes[:toWrite]); err != nil {
 			return errnoFault
 		}
-		written += int32(len(entryBytes))
+
+		bufOffset += toWrite
+		written += toWrite
+
+		// If we couldn't write the full entry, we stop here.
+		// The client will see a full buffer and a partial last entry (or no last
+		// entry if it didn't fit header), and should handle it (e.g. by re-reading
+		// with larger buffer or checking cookies).
+		if toWrite < uint32(len(entryBytes)) {
+			break
+		}
 	}
 
 	err = memory.StoreUint32(0, uint32(bufusedPtr), uint32(written))
