@@ -683,6 +683,19 @@ func (w *wasiResourceTable) pathOpen(
 		return errCode
 	}
 
+	// O_CREAT requires RightsPathCreateFile
+	if oflags&int32(oFlagsCreat) != 0 {
+		if fd.rights&RightsPathCreateFile == 0 {
+			return errnoNotCapable
+		}
+	}
+	// O_TRUNC requires RightsPathFilestatSetSize
+	if oflags&int32(oFlagsTrunc) != 0 {
+		if fd.rights&RightsPathFilestatSetSize == 0 {
+			return errnoNotCapable
+		}
+	}
+
 	// Validate rights: can only request rights that the parent fd can inherit
 	if (rightsBase & fd.rightsInheriting) != rightsBase {
 		return errnoNotCapable
