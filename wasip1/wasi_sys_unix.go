@@ -430,9 +430,6 @@ func symlinkat(target string, dir *os.File, path string) error {
 //
 // Returns EISDIR if the path refers to a directory.
 func unlinkat(dir *os.File, path string) error {
-	// Preserve trailing slash for proper syscall semantics
-	hasTrailingSlash := strings.HasSuffix(path, string(filepath.Separator))
-
 	dirFd, name, err := resolvePath(dir, path, false, 0)
 	if err != nil {
 		return err
@@ -442,7 +439,7 @@ func unlinkat(dir *os.File, path string) error {
 	}
 
 	// Restore trailing slash so syscall returns correct error
-	if hasTrailingSlash {
+	if strings.HasSuffix(path, string(filepath.Separator)) {
 		name += string(filepath.Separator)
 	}
 
