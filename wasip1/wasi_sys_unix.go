@@ -736,26 +736,13 @@ func getComponents(path string) ([]string, error) {
 // permission and existence checks on intermediate directories.
 // It handles both forward slashes and the OS-specific separator.
 func splitPath(path string) []string {
-	// Normalize multiple slashes and handle "." components, but preserve ".."
-	// We cannot use filepath.Clean because it lexically removes ".."
-	parts := strings.Split(path, string(filepath.Separator))
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		switch part {
-		case "", ".":
-			// Skip empty parts and current directory references
-			continue
-		default:
-			result = append(result, part)
-		}
-	}
-
-	// If the path was just "." or empty, return that
-	if len(result) == 0 {
+	parts := strings.FieldsFunc(path, func(r rune) bool {
+		return r == filepath.Separator
+	})
+	if len(parts) == 0 {
 		return []string{"."}
 	}
-
-	return result
+	return parts
 }
 
 // isRelativePath checks if a path is a valid relative path for sandbox
@@ -965,33 +952,10 @@ func buildTimespec(atim, mtim int64, fstFlags int32) ([]unix.Timespec, error) {
 
 // mapError maps Go/Syscall errors to WASI errno.
 func mapError(err error) int32 {
-	if err == nil {
-		return errnoSuccess
+	if unwrapped := errors.Unwrap(err); unwrapped != nil {
+		err = unwrapped
 	}
 
-	// Unpack os.PathError/LinkError
-	if pe, ok := err.(*os.PathError); ok {
-		err = pe.Err
-	}
-	if le, ok := err.(*os.LinkError); ok {
-		err = le.Err
-	}
-	if se, ok := err.(*os.SyscallError); ok {
-		err = se.Err
-	}
-
-	// Check specific errors
-	if err == os.ErrNotExist {
-		return errnoNoEnt
-	}
-	if err == os.ErrExist {
-		return errnoExist
-	}
-	if err == os.ErrPermission {
-		return errnoAcces
-	}
-
-	// Check syscall errno
 	if errno, ok := err.(syscall.Errno); ok {
 		switch errno {
 		case syscall.EACCES:
@@ -1025,40 +989,5 @@ func mapError(err error) int32 {
 		}
 	}
 
-	// Also check unix.Errno
-	if errno, ok := err.(unix.Errno); ok {
-		switch errno {
-		case unix.EACCES:
-			return errnoAcces
-		case unix.EPERM:
-			return errnoPerm
-		case unix.ENOENT:
-			return errnoNoEnt
-		case unix.EEXIST:
-			return errnoExist
-		case unix.EISDIR:
-			return errnoIsDir
-		case unix.ENOTDIR:
-			return errnoNotDir
-		case unix.EINVAL:
-			return errnoInval
-		case unix.ENOTEMPTY:
-			return errnoNotEmpty
-		case unix.ELOOP:
-			return errnoLoop
-		case unix.EBADF:
-			return errnoBadF
-		case unix.EMFILE, unix.ENFILE:
-			return errnoNFile
-		case unix.ENAMETOOLONG:
-			return errnoNameTooLong
-		case unix.EPIPE:
-			return errnoPipe
-		case unix.EAGAIN:
-			return errnoAgain
-		}
-	}
-
-	// Fallback
 	return errnoNotCapable
 }
