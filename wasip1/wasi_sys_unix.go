@@ -819,24 +819,29 @@ func resolvePath(
 	if err != nil {
 		return 0, "", err
 	}
-	// Note: We MUST NOT defer close parentFd here because we might return it.
-	// We must manually close it on all error paths or recursive calls if it
-	// differs from dir.Fd().
+
+	// closeParent closes parentFd if we own it (differs from dir.Fd). We cannot
+	// use defer because we may return parentFd to the caller.
+	closeParent := func() {
+		if parentFd != int(dir.Fd()) {
+			unix.Close(parentFd)
+		}
+	}
 
 	finalName := comps[len(comps)-1]
 
 	// Always stat with AT_SYMLINK_NOFOLLOW first to check if it's a symlink
 	var statBuf unix.Stat_t
-	flags := unix.AT_SYMLINK_NOFOLLOW
-	if err := unix.Fstatat(parentFd, finalName, &statBuf, flags); err != nil {
-		// If the error is ENOENT, it simply means the file doesn't exist.
-		if errors.Is(err, syscall.ENOENT) {
-			return parentFd, finalName, nil
-		}
+	err = unix.Fstatat(parentFd, finalName, &statBuf, unix.AT_SYMLINK_NOFOLLOW)
 
-		if parentFd != int(dir.Fd()) {
-			unix.Close(parentFd)
-		}
+	// If the error is ENOENT, the file doesn't exist. We return success (for
+	// O_CREAT support)
+	if errors.Is(err, syscall.ENOENT) {
+		return parentFd, finalName, nil
+	}
+
+	if err != nil {
+		closeParent()
 		return 0, "", err
 	}
 
@@ -848,16 +853,9 @@ func resolvePath(
 	// It's a symlink and we need to follow it securely.
 	// Read the symlink target and resolve it within the sandbox.
 	target, err := readlinkat(parentFd, finalName)
+	closeParent()
 	if err != nil {
-		if parentFd != int(dir.Fd()) {
-			unix.Close(parentFd)
-		}
 		return 0, "", err
-	}
-
-	// We are done with parentFd for this level.
-	if parentFd != int(dir.Fd()) {
-		unix.Close(parentFd)
 	}
 
 	resolvedPath, pathErr := resolveSymlinkTarget(parentPath, target)
