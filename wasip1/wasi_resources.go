@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -21,17 +19,16 @@ import (
 	"errors"
 	"io"
 	"os"
-	"syscall"
 
 	"github.com/ziggy42/epsilon/epsilon"
 )
-
-var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
 const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
 	RightsPollFdReadwrite | RightsFdFilestatGet | RightsSockShutdown
 
 const maxFileDescriptors = 2048
+
+var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
 type wasiFileDescriptor struct {
 	file             *os.File
@@ -877,9 +874,6 @@ func (w *wasiResourceTable) sockAccept(
 
 	connectedSocketFd, err := accept(fd.file)
 	if err != nil {
-		if err == syscall.EAGAIN || err == syscall.EWOULDBLOCK {
-			return errnoAgain
-		}
 		return mapError(err)
 	}
 
@@ -949,19 +943,7 @@ func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 		return errCode
 	}
 
-	var sysHow int
-	switch how {
-	case shutRd:
-		sysHow = syscall.SHUT_RD
-	case shutWr:
-		sysHow = syscall.SHUT_WR
-	case shutRdWr:
-		sysHow = syscall.SHUT_RDWR
-	default:
-		return errnoInval
-	}
-
-	if err := syscall.Shutdown(int(fd.file.Fd()), sysHow); err != nil {
+	if err := shutdown(fd.file, how); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -1168,71 +1150,4 @@ func (w *wasiResourceTable) readString(
 		return "", err
 	}
 	return string(oldPathBytes), nil
-}
-
-func mapError(err error) int32 {
-	if err == nil {
-		return errnoSuccess
-	}
-
-	if err == errMaxFileDescriptorsReached {
-		return errnoNFile
-	}
-
-	// Unpack os.PathError/LinkError
-	if pe, ok := err.(*os.PathError); ok {
-		err = pe.Err
-	}
-	if le, ok := err.(*os.LinkError); ok {
-		err = le.Err
-	}
-	if se, ok := err.(*os.SyscallError); ok {
-		err = se.Err
-	}
-
-	// Check specific errors
-	if err == os.ErrNotExist {
-		return errnoNoEnt
-	}
-	if err == os.ErrExist {
-		return errnoExist
-	}
-	if err == os.ErrPermission {
-		return errnoAcces
-	}
-
-	// Check syscall errno
-	if errno, ok := err.(syscall.Errno); ok {
-		switch errno {
-		case syscall.EACCES:
-			return errnoAcces
-		case syscall.EPERM:
-			return errnoPerm
-		case syscall.ENOENT:
-			return errnoNoEnt
-		case syscall.EEXIST:
-			return errnoExist
-		case syscall.EISDIR:
-			return errnoIsDir
-		case syscall.ENOTDIR:
-			return errnoNotDir
-		case syscall.EINVAL:
-			return errnoInval
-		case syscall.ENOTEMPTY:
-			return errnoNotEmpty
-		case syscall.ELOOP:
-			return errnoLoop
-		case syscall.EBADF:
-			return errnoBadF
-		case syscall.EMFILE, syscall.ENFILE:
-			return errnoNFile
-		case syscall.ENAMETOOLONG:
-			return errnoNameTooLong
-		case syscall.EPIPE:
-			return errnoPipe
-		}
-	}
-
-	// Fallback
-	return errnoNotCapable
 }

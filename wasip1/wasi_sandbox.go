@@ -555,6 +555,26 @@ func accept(file *os.File) (int, error) {
 	return nfd, err
 }
 
+// shutdown shuts down a socket.
+func shutdown(file *os.File, how int32) error {
+	var sysHow int
+	switch how {
+	case shutRd:
+		sysHow = unix.SHUT_RD
+	case shutWr:
+		sysHow = unix.SHUT_WR
+	case shutRdWr:
+		sysHow = unix.SHUT_RDWR
+	default:
+		return syscall.EINVAL
+	}
+
+	if err := unix.Shutdown(int(file.Fd()), sysHow); err != nil {
+		return err
+	}
+	return nil
+}
+
 // walkToParent walks through intermediate path components (all except the last)
 // and returns the fd of the parent directory of the final component.
 // Symlinks in intermediate components are followed securely within the sandbox.
@@ -941,4 +961,104 @@ func buildTimespec(atim, mtim int64, fstFlags int32) ([]unix.Timespec, error) {
 	}
 
 	return []unix.Timespec{atimSpec, mtimSpec}, nil
+}
+
+// mapError maps Go/Syscall errors to WASI errno.
+func mapError(err error) int32 {
+	if err == nil {
+		return errnoSuccess
+	}
+
+	// Unpack os.PathError/LinkError
+	if pe, ok := err.(*os.PathError); ok {
+		err = pe.Err
+	}
+	if le, ok := err.(*os.LinkError); ok {
+		err = le.Err
+	}
+	if se, ok := err.(*os.SyscallError); ok {
+		err = se.Err
+	}
+
+	// Check specific errors
+	if err == os.ErrNotExist {
+		return errnoNoEnt
+	}
+	if err == os.ErrExist {
+		return errnoExist
+	}
+	if err == os.ErrPermission {
+		return errnoAcces
+	}
+
+	// Check syscall errno
+	if errno, ok := err.(syscall.Errno); ok {
+		switch errno {
+		case syscall.EACCES:
+			return errnoAcces
+		case syscall.EPERM:
+			return errnoPerm
+		case syscall.ENOENT:
+			return errnoNoEnt
+		case syscall.EEXIST:
+			return errnoExist
+		case syscall.EISDIR:
+			return errnoIsDir
+		case syscall.ENOTDIR:
+			return errnoNotDir
+		case syscall.EINVAL:
+			return errnoInval
+		case syscall.ENOTEMPTY:
+			return errnoNotEmpty
+		case syscall.ELOOP:
+			return errnoLoop
+		case syscall.EBADF:
+			return errnoBadF
+		case syscall.EMFILE, syscall.ENFILE:
+			return errnoNFile
+		case syscall.ENAMETOOLONG:
+			return errnoNameTooLong
+		case syscall.EPIPE:
+			return errnoPipe
+		case syscall.EAGAIN:
+			return errnoAgain
+		}
+	}
+
+	// Also check unix.Errno
+	if errno, ok := err.(unix.Errno); ok {
+		switch errno {
+		case unix.EACCES:
+			return errnoAcces
+		case unix.EPERM:
+			return errnoPerm
+		case unix.ENOENT:
+			return errnoNoEnt
+		case unix.EEXIST:
+			return errnoExist
+		case unix.EISDIR:
+			return errnoIsDir
+		case unix.ENOTDIR:
+			return errnoNotDir
+		case unix.EINVAL:
+			return errnoInval
+		case unix.ENOTEMPTY:
+			return errnoNotEmpty
+		case unix.ELOOP:
+			return errnoLoop
+		case unix.EBADF:
+			return errnoBadF
+		case unix.EMFILE, unix.ENFILE:
+			return errnoNFile
+		case unix.ENAMETOOLONG:
+			return errnoNameTooLong
+		case unix.EPIPE:
+			return errnoPipe
+		case unix.EAGAIN:
+			return errnoAgain
+		}
+	}
+
+	// Fallback
+	return errnoNotCapable
 }
