@@ -114,6 +114,13 @@ func fdstat(file *os.File) (filestat, error) {
 	return statFromUnix(&stat), nil
 }
 
+// datasync synchronizes file data to storage.
+// Ideally this would use fdatasync (data only, not metadata) but it's not
+// available on macOS. Using fsync is a safe superset that also syncs metadata.
+func datasync(file *os.File) error {
+	return unix.Fsync(int(file.Fd()))
+}
+
 // readDirEntries reads directory entries from a directory, returning synthetic
 // "." and ".." entries followed by actual directory content. This is required
 // by WASI fd_readdir specification.

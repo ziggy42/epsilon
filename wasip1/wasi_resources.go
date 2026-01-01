@@ -194,7 +194,7 @@ func (w *wasiResourceTable) dataSync(fdIndex int32) int32 {
 	if !ok {
 		return errnoBadF
 	}
-	if err := fd.file.Sync(); err != nil {
+	if err := datasync(fd.file); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -531,7 +531,7 @@ func (w *wasiResourceTable) sync(fdIndex int32) int32 {
 		return errnoBadF
 	}
 	if err := fd.file.Sync(); err != nil {
-		return errnoIO
+		return mapError(err)
 	}
 	return errnoSuccess
 }
