@@ -329,6 +329,16 @@ func unlinkat(dir *os.File, path string) error {
 	if err != nil {
 		return err
 	}
+
+	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+		return syscall.EACCES
+	}
+
+	fi, err := os.Lstat(fullPath)
+	if err == nil && fi.IsDir() {
+		return syscall.EACCES
+	}
+
 	return os.Remove(fullPath)
 }
 
@@ -511,7 +521,7 @@ func secureJoin(root, path string) (string, error) {
 			return "", err
 		}
 		if !fi.IsDir() {
-			return "", syscall.ENOTDIR
+			return "", syscall.ENOENT
 		}
 	}
 
