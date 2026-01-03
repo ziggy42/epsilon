@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -35,10 +33,10 @@ type WasiConfig struct {
 }
 
 type WasiModule struct {
-	fs                    *wasiResourceTable
-	args                  []string
-	env                   map[string]string
-	monotonicClockStartNs int64
+	fs                  *wasiResourceTable
+	args                []string
+	env                 map[string]string
+	monotonicClockStart time.Time
 }
 
 // NewWasiModule creates a new WasiModule instance.
@@ -71,10 +69,10 @@ func NewWasiModule(config WasiConfig) (*WasiModule, error) {
 		return nil, err
 	}
 	return &WasiModule{
-		fs:                    fs,
-		args:                  config.Args,
-		env:                   config.Env,
-		monotonicClockStartNs: time.Now().UnixNano(),
+		fs:                  fs,
+		args:                config.Args,
+		env:                 config.Env,
+		monotonicClockStart: time.Now(),
 	}, nil
 }
 
@@ -181,7 +179,7 @@ func (w *WasiModule) clockTimeGet(
 	memory *epsilon.Memory,
 	clockId, resPtr int32,
 ) int32 {
-	res, errCode := getTimestamp(w.monotonicClockStartNs, uint32(clockId))
+	res, errCode := getTimestamp(w.monotonicClockStart, uint32(clockId))
 	if errCode != errnoSuccess {
 		return errCode
 	}
