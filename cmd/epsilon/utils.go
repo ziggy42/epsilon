@@ -42,10 +42,11 @@ func resolveModule(source string) (io.ReadCloser, error) {
 			return nil, fmt.Errorf("unexpected http status: %s", resp.Status)
 		}
 		return resp.Body, nil
-	case "file", "":
+	case "file":
 		return os.Open(u.Path)
 	default:
-		return nil, fmt.Errorf("unsupported url scheme: %s", u.Scheme)
+		// Fallback to os.Open if we don't have a scheme.
+		return os.Open(source)
 	}
 }
 
