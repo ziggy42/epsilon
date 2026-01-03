@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -36,8 +37,25 @@ const maxSymlinkDepth = 40
 const defaultFileMode = 0o600
 
 // utimeOmit is the special value for Timespec.Nsec that means "don't change".
-// This is the POSIX UTIME_OMIT value.
-const utimeOmit = (1 << 30) - 2
+var utimeOmit int64
+
+func init() {
+	switch runtime.GOOS {
+	case "linux":
+		// https://github.com/torvalds/linux/blob/master/include/linux/stat.h#L16
+		utimeOmit = (1 << 30) - 2
+	case "darwin":
+		// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/stat.h#L576
+		utimeOmit = -2
+	case "openbsd":
+		// https://github.com/openbsd/src/blob/master/sys/sys/stat.h#L189
+		utimeOmit = -1
+	default:
+		// Most (all?) other UNIXes use -2, e.g. FreeBSD:
+		// https://github.com/freebsd/freebsd-src/blob/main/sys/sys/stat.h#L360
+		utimeOmit = -2
+	}
+}
 
 // mkdirat creates a directory relative to a directory.
 // This is similar to mkdirat in POSIX.
