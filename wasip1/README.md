@@ -83,17 +83,8 @@ This implementation is tested against the official
 From the repository root:
 
 ```bash
-./wasip1/wasi_tests.sh
+uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py
 ```
-
-You can pass additional arguments to the test runner, e.g.:
-
-```bash
-# Run with verbose output
-./wasip1/wasi_tests.sh --verbose
-```
-
-See `./wasip1/wasi-testsuite/run-tests --help` for all available options.
 
 ## Limitations
 

@@ -15,11 +15,14 @@
 """Adapter for running WASI testsuite with Epsilon."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 # This is the path to the epsilon binary, assumed to be in the same directory as
 # this adapter.
-_EPSILON_BINARY = Path(__file__).parent.resolve() / "epsilon"
+_EPSILON_BINARY = Path(__file__).parent.resolve() / (
+    "epsilon.exe" if sys.platform == "win32" else "epsilon"
+)
 
 
 def get_name() -> str:
