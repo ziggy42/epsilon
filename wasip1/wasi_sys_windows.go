@@ -18,7 +18,6 @@ package wasip1
 
 import (
 	"errors"
-	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -535,11 +534,11 @@ func isRelativePath(path string) bool {
 
 func secureJoin(root, path string) (string, error) {
 	if !isRelativePath(path) {
-		return "", fmt.Errorf("not capable: %w", os.ErrPermission)
+		return "", os.ErrPermission
 	}
 	fullPath := filepath.Join(root, path)
 	if !strings.HasPrefix(fullPath, root) {
-		return "", fmt.Errorf("not capable: %w", os.ErrPermission)
+		return "", os.ErrPermission
 	}
 
 	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
