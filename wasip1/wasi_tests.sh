@@ -19,12 +19,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 TEST_SUITE_DIR="$SCRIPT_DIR/wasi-testsuite"
 
-# Ensure the submodule is initialized and updated
-if [ ! -f "$TEST_SUITE_DIR/run-tests" ]; then
-  echo "Initializing wasi-testsuite submodule..."
-  git submodule update --init --recursive "$SCRIPT_DIR/wasi-testsuite"
-fi
-
 # Build epsilon for the current host
 echo "Building epsilon..."
 cd "$REPO_ROOT"
