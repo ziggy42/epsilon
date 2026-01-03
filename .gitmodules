@@ -1,3 +1,7 @@
 [submodule "spec"]
 	path = internal/spec_tests/spec
 	url = https://github.com/WebAssembly/spec.git
+[submodule "wasip1/wasi-testsuite"]
+	path = wasip1/wasi-testsuite
+	url = https://github.com/WebAssembly/wasi-testsuite
+	branch = prod/testsuite-base

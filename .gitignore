@@ -23,3 +23,8 @@ cpu.prof
 
 # Antigravity
 .agent
+
+# Python
+__pycache__/
+.venv/
+*.pyc
