@@ -330,6 +330,14 @@ func renameat(
 }
 
 func symlinkat(target string, dir *os.File, path string) error {
+	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") || filepath.IsAbs(target) {
+		return syscall.EPERM
+	}
+
+	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+		return syscall.ENOENT
+	}
+
 	fullPath, err := secureJoin(dir.Name(), path)
 	if err != nil {
 		return err
@@ -492,6 +500,10 @@ func mapError(err error) int32 {
 	if err == nil {
 		return errnoSuccess
 	}
+
+	if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) || errors.Is(err, syscall.ENOTEMPTY) {
+		return errnoNotEmpty
+	}
 	if errors.Is(err, os.ErrNotExist) {
 		return errnoNoEnt
 	}
@@ -505,7 +517,8 @@ func mapError(err error) int32 {
 		return errnoInval
 	}
 
-	if errno, ok := err.(syscall.Errno); ok {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
 		// This is not a complete mapping
 		switch errno {
 		case syscall.EACCES:
@@ -534,8 +547,31 @@ func mapError(err error) int32 {
 			return errnoPipe
 		case windows.ERROR_SHARING_VIOLATION:
 			return errnoBus
+		case windows.ERROR_ALREADY_EXISTS:
+			return errnoExist
+		case windows.ERROR_FILE_EXISTS:
+			return errnoExist
 		}
 	}
+
+	var werr windows.Errno
+	if errors.As(err, &werr) {
+		switch werr {
+		case windows.ERROR_DIR_NOT_EMPTY:
+			return errnoNotEmpty
+		case windows.ERROR_ALREADY_EXISTS:
+			return errnoExist
+		case windows.ERROR_FILE_EXISTS:
+			return errnoExist
+		case windows.ERROR_ACCESS_DENIED:
+			return errnoAcces
+		case windows.ERROR_SHARING_VIOLATION:
+			return errnoBus
+		case windows.ERROR_PRIVILEGE_NOT_HELD:
+			return errnoPerm
+		}
+	}
+
 	return errnoNotCapable
 }
 
