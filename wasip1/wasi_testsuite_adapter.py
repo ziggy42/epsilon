@@ -15,11 +15,14 @@
 """Adapter for running WASI testsuite with Epsilon."""
 
 import subprocess
+import sys
 from pathlib import Path
 
 # This is the path to the epsilon binary, assumed to be in the same directory as
 # this adapter.
-_EPSILON_BINARY = Path(__file__).parent.resolve() / "epsilon"
+_EPSILON_BINARY = Path(__file__).parent.resolve() / (
+    "epsilon.exe" if sys.platform == "win32" else "epsilon"
+)
 
 
 def get_name() -> str:
@@ -52,6 +55,6 @@ def compute_argv(test_path: str,
   for key, value in env.items():
     argv.extend(["--env", f"{key}={value}"])
   for host_path, guest_path in dirs:
-    argv.extend(["--dir", f"{host_path}:{guest_path}"])
+    argv.extend(["--dir", f"{host_path}={guest_path}"])
   argv.extend([test_path, "_start"])
   return argv

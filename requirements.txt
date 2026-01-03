@@ -1,0 +1,1 @@
+-r wasip1/wasi-testsuite/test-runner/requirements.txt

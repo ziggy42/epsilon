@@ -46,4 +46,4 @@ jobs:
     - name: Test
       run: go test ./...
     - name: Run WASI Tests
-      run: ./wasip1/wasi_tests.sh
+      run: uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py
