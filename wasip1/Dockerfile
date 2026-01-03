@@ -14,46 +14,26 @@
 
 # This Dockerfile creates a test environment for running the WASI testsuite 
 # (https://github.com/WebAssembly/wasi-testsuite) against the epsilon runtime. 
-# It sets up a Linux amd64 environment with all necessary toolchains to build 
-# and run WASI conformance tests written in C, Rust, and AssemblyScript.
+# It sets up a Linux amd64 environment to run WASI conformance tests.
 
 FROM --platform=linux/amd64 debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install system packages, Rust toolchain, and WASI-SDK
+# Install system packages (only Python and Git are needed for the runner)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  build-essential \
-  curl \
   ca-certificates \
   git \
-  nodejs \
-  npm \
   python3 \
   python3-pip \
-  && rm -rf /var/lib/apt/lists/* \
-  # Install Rust and WASI targets
-  && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-  && /root/.cargo/bin/rustup target add wasm32-wasip1 \
-  && /root/.cargo/bin/rustup toolchain install nightly \
-  && /root/.cargo/bin/rustup target add wasm32-wasip2 --toolchain nightly \
-  && rm -rf /root/.cargo/registry /root/.cargo/git \
-  # Install WASI-SDK
-  && curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb \
-  && dpkg -i wasi-sdk-29.0-x86_64-linux.deb \
-  && rm wasi-sdk-29.0-x86_64-linux.deb
-
-ENV PATH="/opt/wasi-sdk/bin:/root/.cargo/bin:${PATH}"
+  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/wasi-testsuite
 
-RUN git clone --depth 1 https://github.com/WebAssembly/wasi-testsuite.git . \
-  && pip3 install -r test-runner/requirements.txt --break-system-packages \
-  && rm -rf /root/.cache/pip \
-  && ./tests/c/build.py \
-  && ./tests/rust/build.py \
-  && ./tests/assemblyscript/build.py \
-  && rm -rf tests/rust/*/target tests/assemblyscript/*/node_modules .git
+# Clone the testsuite with pre-compiled tests
+RUN git clone --depth 1 --branch prod/testsuite-base https://github.com/WebAssembly/wasi-testsuite.git . \
+  && python3 -m pip install -r test-runner/requirements.txt --break-system-packages \
+  && rm -rf /root/.cache/pip .git
 
 CMD ["./run-tests", "--verbose", "--runtime", "adapters/epsilon.py"]
  
