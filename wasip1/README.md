@@ -68,6 +68,33 @@ func main() {
 ```
 
 
+## Testing
+
+This implementation is tested against the official
+[WASI testsuite](https://github.com/WebAssembly/wasi-testsuite).
+
+### Prerequisites
+
+- **[uv](https://docs.astral.sh/uv/)**: Python package manager for running the 
+	test runner
+
+### Running WASI Spec Tests
+
+From the repository root:
+
+```bash
+./wasip1/wasi_tests.sh
+```
+
+You can pass additional arguments to the test runner, e.g.:
+
+```bash
+# Run with verbose output
+./wasip1/wasi_tests.sh --verbose
+```
+
+See `./wasip1/wasi-testsuite/run-tests --help` for all available options.
+
 ## Limitations
 
 All 45 WASI Preview 1 functions are implemented, but the following have
