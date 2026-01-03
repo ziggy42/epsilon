@@ -18,6 +18,7 @@ package wasip1
 
 import (
 	"errors"
+	"fmt"
 	"hash/fnv"
 	"io"
 	"os"
@@ -25,19 +26,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"log"
-	"fmt"
 
 	"golang.org/x/sys/windows"
-)
-
-const maxSymlinkDepth = 40
-
-const defaultFileMode = 0o600
-
-var (
-	utimeNow int64 = -1
-	utimeOmit int64 = -2
 )
 
 func mkdirat(dir *os.File, path string, mode uint32) error {
@@ -66,9 +56,9 @@ func statFromPath(path string, followSymlinks bool) (filestat, error) {
 		return filestat{}, err
 	}
 
-	flagsAndAttributes := uint32(windows.FILE_ATTRIBUTE_NORMAL | windows.FILE_FLAG_BACKUP_SEMANTICS)
+	attrs := windows.FILE_ATTRIBUTE_NORMAL | windows.FILE_FLAG_BACKUP_SEMANTICS
 	if !followSymlinks {
-		flagsAndAttributes |= windows.FILE_FLAG_OPEN_REPARSE_POINT
+		attrs |= windows.FILE_FLAG_OPEN_REPARSE_POINT
 	}
 
 	h, err := windows.CreateFile(
@@ -77,7 +67,7 @@ func statFromPath(path string, followSymlinks bool) (filestat, error) {
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil,
 		windows.OPEN_EXISTING,
-		flagsAndAttributes,
+		uint32(attrs),
 		0,
 	)
 
@@ -93,14 +83,14 @@ func statFromPath(path string, followSymlinks bool) (filestat, error) {
 	}
 
 	return filestat{
-		dev: uint64(info.VolumeSerialNumber),
-		ino: uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
+		dev:      uint64(info.VolumeSerialNumber),
+		ino:      uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
 		filetype: fileTypeFromWin32Attributes(info.FileAttributes),
-		nlink: uint64(info.NumberOfLinks),
-		size: uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow),
-		atim: uint64(info.LastAccessTime.Nanoseconds()),
-		mtim: uint64(info.LastWriteTime.Nanoseconds()),
-		ctim: uint64(info.CreationTime.Nanoseconds()),
+		nlink:    uint64(info.NumberOfLinks),
+		size:     uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow),
+		atim:     uint64(info.LastAccessTime.Nanoseconds()),
+		mtim:     uint64(info.LastWriteTime.Nanoseconds()),
+		ctim:     uint64(info.CreationTime.Nanoseconds()),
 	}, nil
 }
 
@@ -145,13 +135,15 @@ func fdstat(file *os.File) (filestat, error) {
 func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	parentInode := uint64(0)
 	var info windows.ByHandleFileInformation
-	if err := windows.GetFileInformationByHandle(windows.Handle(dir.Fd()), &info); err == nil {
+	err := windows.GetFileInformationByHandle(windows.Handle(dir.Fd()), &info)
+	if err == nil {
 		parentInode = uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow)
 	}
 
-	// For ".." use a placeholder inode that is distinct from the current directory's inode.
-	// This is a pragmatic choice given the difficulty of getting parent inode reliably cross-platform
-	// within sandbox, and to satisfy tests expecting non-zero different inodes for . and ..
+	// For ".." use a placeholder inode that is distinct from the current
+	// directory's inode. This is a pragmatic choice given the difficulty of
+	// getting parent inode reliably cross-platform within sandbox, and to
+	// satisfy tests expecting non-zero different inodes for . and ..
 	dotDotInode := uint64(1)
 	if parentInode == dotDotInode { // Ensure it's different
 		dotDotInode = uint64(2)
@@ -201,7 +193,13 @@ func setFdFlags(file *os.File, fdFlags int32) error {
 	return nil
 }
 
-func utimes(dir *os.File, path string, atim, mtim int64, fstFlags int32, followSymlinks bool) error {
+func utimes(
+	dir *os.File,
+	path string,
+	atim, mtim int64,
+	fstFlags int32,
+	followSymlinks bool,
+) error {
 	fullPath, err := secureJoin(dir.Name(), path)
 	if err != nil {
 		return err
@@ -271,11 +269,22 @@ func setFileTime(h windows.Handle, atim, mtim int64, fstFlags int32) error {
 	return windows.SetFileTime(h, nil, aptr, mptr)
 }
 
-func writeAt(file *os.File, data []byte, offset int64, hasAppendFlag bool) (int, error) {
+func writeAt(
+	file *os.File,
+	data []byte,
+	offset int64,
+	hasAppendFlag bool,
+) (int, error) {
 	return file.WriteAt(data, offset)
 }
 
-func linkat(oldDir *os.File, oldPath string, followSymlinks bool, newDir *os.File, newPath string) error {
+func linkat(
+	oldDir *os.File,
+	oldPath string,
+	followSymlinks bool,
+	newDir *os.File,
+	newPath string,
+) error {
 	oldFullPath, err := secureJoin(oldDir.Name(), oldPath)
 	if err != nil {
 		return err
@@ -304,7 +313,12 @@ func rmdirat(dir *os.File, path string) error {
 	return os.Remove(fullPath)
 }
 
-func renameat(oldDir *os.File, oldPath string, newDir *os.File, newPath string) error {
+func renameat(
+	oldDir *os.File,
+	oldPath string,
+	newDir *os.File,
+	newPath string,
+) error {
 	oldFullPath, err := secureJoin(oldDir.Name(), oldPath)
 	if err != nil {
 		return err
@@ -342,7 +356,13 @@ func unlinkat(dir *os.File, path string) error {
 	return os.Remove(fullPath)
 }
 
-func openat(dir *os.File, path string, followSymlinks bool, oflags, fdflags int32, fsRights uint64) (*os.File, error) {
+func openat(
+	dir *os.File,
+	path string,
+	followSymlinks bool,
+	oflags, fdflags int32,
+	fsRights uint64,
+) (*os.File, error) {
 	fullPath, err := secureJoin(dir.Name(), path)
 	if err != nil {
 		return nil, err
@@ -352,8 +372,6 @@ func openat(dir *os.File, path string, followSymlinks bool, oflags, fdflags int3
 	if fsRights&uint64(RightsFdWrite) != 0 {
 		access |= windows.GENERIC_WRITE
 	}
-
-	shareMode := uint32(windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE)
 
 	var creationDisposition uint32
 	if oflags&int32(oFlagsCreat) != 0 {
@@ -372,9 +390,9 @@ func openat(dir *os.File, path string, followSymlinks bool, oflags, fdflags int3
 		}
 	}
 
-	flagsAndAttributes := uint32(windows.FILE_ATTRIBUTE_NORMAL | windows.FILE_FLAG_BACKUP_SEMANTICS)
+	attrs := windows.FILE_ATTRIBUTE_NORMAL | windows.FILE_FLAG_BACKUP_SEMANTICS
 	if !followSymlinks {
-		flagsAndAttributes |= windows.FILE_FLAG_OPEN_REPARSE_POINT
+		attrs |= windows.FILE_FLAG_OPEN_REPARSE_POINT
 	}
 
 	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
@@ -382,7 +400,18 @@ func openat(dir *os.File, path string, followSymlinks bool, oflags, fdflags int3
 		return nil, err
 	}
 
-	h, err := windows.CreateFile(pathPtr, access, shareMode, nil, creationDisposition, flagsAndAttributes, 0)
+	mode := windows.FILE_SHARE_READ |
+		windows.FILE_SHARE_WRITE |
+		windows.FILE_SHARE_DELETE
+	h, err := windows.CreateFile(
+		pathPtr,
+		access,
+		uint32(mode),
+		nil,
+		creationDisposition,
+		uint32(attrs),
+		0,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -506,12 +535,10 @@ func isRelativePath(path string) bool {
 
 func secureJoin(root, path string) (string, error) {
 	if !isRelativePath(path) {
-		log.Printf("secureJoin: not relative path: %s", path)
-		return "", fmt.Errorf("not capable: %w", os.ErrPermission) // Use ErrPermission to map to PERM/NOTCAPABLE
+		return "", fmt.Errorf("not capable: %w", os.ErrPermission)
 	}
 	fullPath := filepath.Join(root, path)
 	if !strings.HasPrefix(fullPath, root) {
-		log.Printf("secureJoin: path escape: root=%s, path=%s, full=%s", root, path, fullPath)
 		return "", fmt.Errorf("not capable: %w", os.ErrPermission)
 	}
 
