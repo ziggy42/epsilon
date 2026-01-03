@@ -55,6 +55,6 @@ def compute_argv(test_path: str,
   for key, value in env.items():
     argv.extend(["--env", f"{key}={value}"])
   for host_path, guest_path in dirs:
-    argv.extend(["--dir", f"{host_path}:{guest_path}"])
+    argv.extend(["--dir", f"{host_path}={guest_path}"])
   argv.extend([test_path, "_start"])
   return argv

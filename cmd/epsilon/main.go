@@ -44,7 +44,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  epsilon -env KEY=value module.wasm          Pass env vars to WASI module\n")
 	fmt.Fprintf(os.Stderr, "  epsilon -arg foo -env KEY=val module.wasm   Pass both args and env\n")
 	fmt.Fprintf(os.Stderr, "  epsilon -dir /tmp module.wasm               Pre-open a directory\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -dir /host:/guest module.wasm       Pre-open with path mapping\n")
+	fmt.Fprintf(os.Stderr, "  epsilon -dir /host=/guest module.wasm       Pre-open with path mapping\n")
 }
 
 type arrayFlags []string
@@ -87,7 +87,7 @@ func main() {
 	wasiEnv := make(envFlags)
 	flag.Var(&wasiArgs, "arg", "argument to pass to WASI module")
 	flag.Var(&wasiEnv, "env", "env variable to pass to WASI module (KEY=VALUE)")
-	flag.Var(&wasiDirs, "dir", "dir or file to pre-open (format: host_path or host_path:guest_path)")
+	flag.Var(&wasiDirs, "dir", "dir or file to pre-open (format: host_path or host_path=guest_path)")
 	flag.Parse()
 
 	if *version {
@@ -177,7 +177,7 @@ func runCLI(
 }
 
 func extractHostGuestPaths(arg string) (string, string) {
-	parts := strings.SplitN(arg, ":", 2)
+	parts := strings.SplitN(arg, "=", 2)
 	hostPath := parts[0]
 	guestPath := hostPath
 	if len(parts) == 2 {
