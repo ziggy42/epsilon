@@ -22,9 +22,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
-	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -35,9 +35,33 @@ const maxSymlinkDepth = 40
 // defaultFileMode is the default permission mode for newly created files.
 const defaultFileMode = 0o600
 
-// utimeOmit is the special value for Timespec.Nsec that means "don't change".
-// This is the POSIX UTIME_OMIT value.
-const utimeOmit = (1 << 30) - 2
+// utimeNow and utimeOmit are special values for Timespec.Nsec.
+var (
+	utimeNow  int64 // Set to current time
+	utimeOmit int64 // Don't change
+)
+
+func init() {
+	switch runtime.GOOS {
+	case "linux":
+		// https://github.com/torvalds/linux/blob/master/include/linux/stat.h#L15-L16
+		utimeNow = (1 << 30) - 1
+		utimeOmit = (1 << 30) - 2
+	case "darwin":
+		// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/stat.h#L575-L576
+		utimeNow = -1
+		utimeOmit = -2
+	case "openbsd":
+		// https://github.com/openbsd/src/blob/master/sys/sys/stat.h#L188-L189
+		utimeNow = -1
+		utimeOmit = -1
+	default:
+		// Most (all?) other UNIXes use -1/-2, e.g. FreeBSD:
+		// https://github.com/freebsd/freebsd-src/blob/main/sys/sys/stat.h#L359-L360
+		utimeNow = -1
+		utimeOmit = -2
+	}
+}
 
 // mkdirat creates a directory relative to a directory.
 // This is similar to mkdirat in POSIX.
@@ -827,22 +851,24 @@ func buildTimespec(atim, mtim int64, fstFlags int32) ([]unix.Timespec, error) {
 		return nil, syscall.EINVAL
 	}
 
-	now := time.Now().UnixNano()
-
-	// Default to UTIME_OMIT (don't change the timestamp)
-	atimSpec := unix.Timespec{Nsec: utimeOmit}
-	mtimSpec := unix.Timespec{Nsec: utimeOmit}
-
-	if fstFlags&fstFlagsAtimNow != 0 {
-		atimSpec = unix.NsecToTimespec(now)
-	} else if fstFlags&fstFlagsAtim != 0 {
+	var atimSpec unix.Timespec
+	switch {
+	case fstFlags&fstFlagsAtimNow != 0:
+		atimSpec = unix.Timespec{Nsec: utimeNow}
+	case fstFlags&fstFlagsAtim != 0:
 		atimSpec = unix.NsecToTimespec(atim)
+	default:
+		atimSpec = unix.Timespec{Nsec: utimeOmit}
 	}
 
-	if fstFlags&fstFlagsMtimNow != 0 {
-		mtimSpec = unix.NsecToTimespec(now)
-	} else if fstFlags&fstFlagsMtim != 0 {
+	var mtimSpec unix.Timespec
+	switch {
+	case fstFlags&fstFlagsMtimNow != 0:
+		mtimSpec = unix.Timespec{Nsec: utimeNow}
+	case fstFlags&fstFlagsMtim != 0:
 		mtimSpec = unix.NsecToTimespec(mtim)
+	default:
+		mtimSpec = unix.Timespec{Nsec: utimeOmit}
 	}
 
 	return []unix.Timespec{atimSpec, mtimSpec}, nil

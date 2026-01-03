@@ -17,8 +17,9 @@
 import subprocess
 from pathlib import Path
 
-# This is the path to the epsilon binary inside the Docker container
-_EPSILON_BINARY = Path("/usr/local/bin/epsilon")
+# This is the path to the epsilon binary, assumed to be in the same directory as
+# this adapter.
+_EPSILON_BINARY = Path(__file__).parent.resolve() / "epsilon"
 
 
 def get_name() -> str:

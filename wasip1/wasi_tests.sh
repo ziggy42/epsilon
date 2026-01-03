@@ -17,18 +17,19 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-IMAGE_NAME="wasi-suite:latest"
+TEST_SUITE_DIR="$SCRIPT_DIR/wasi-testsuite"
 
-# Build epsilon targeting Linux amd64
+# Build epsilon for the current host
+echo "Building epsilon..."
 cd "$REPO_ROOT"
-env GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/epsilon" ./cmd/epsilon
+go build -o "$SCRIPT_DIR/epsilon" ./cmd/epsilon
 trap "rm '$SCRIPT_DIR/epsilon'" EXIT
 
-# Build and run Docker container
-cd "$SCRIPT_DIR"
-docker build -q --platform linux/amd64 -t "$IMAGE_NAME" .
-docker run \
-  --platform linux/amd64 \
-  --rm -it \
-  -v "$SCRIPT_DIR/adapter.py:/opt/wasi-testsuite/adapters/epsilon.py" \
-  -v "$SCRIPT_DIR/epsilon:/usr/local/bin/epsilon" "$IMAGE_NAME"
+# Run the tests using uv
+echo "Running WASI testsuite..."
+cd "$TEST_SUITE_DIR"
+uv run \
+  --with-requirements test-runner/requirements/common.txt \
+  ./run-tests \
+  --runtime "$SCRIPT_DIR/adapter.py" \
+  "$@"

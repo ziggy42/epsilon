@@ -31,6 +31,8 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version-file: 'go.mod'
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
     - name: Install WABT
       run: |
         wget https://github.com/WebAssembly/wabt/releases/download/1.0.39/wabt-1.0.39-linux-x64.tar.gz 
@@ -43,3 +45,5 @@ jobs:
         GOOS=windows go build -o epsilon.exe ./cmd/epsilon
     - name: Test
       run: go test ./...
+    - name: Run WASI Tests
+      run: ./wasip1/wasi_tests.sh
