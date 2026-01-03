@@ -284,6 +284,14 @@ func linkat(
 	newDir *os.File,
 	newPath string,
 ) error {
+	if followSymlinks {
+		return syscall.EINVAL
+	}
+
+	if strings.HasSuffix(newPath, "/") || strings.HasSuffix(newPath, "\\") {
+		return syscall.ENOENT
+	}
+
 	oldFullPath, err := secureJoin(oldDir.Name(), oldPath)
 	if err != nil {
 		return err
@@ -309,7 +317,13 @@ func rmdirat(dir *os.File, path string) error {
 	if err != nil {
 		return err
 	}
-	return os.Remove(fullPath)
+
+	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
+	if err != nil {
+		return err
+	}
+
+	return windows.RemoveDirectory(pathPtr)
 }
 
 func renameat(
@@ -326,14 +340,47 @@ func renameat(
 	if err != nil {
 		return err
 	}
-	return os.Rename(oldFullPath, newFullPath)
+
+	oldFi, err := os.Stat(oldFullPath)
+	if err != nil {
+		return err
+	}
+
+	if oldFi.IsDir() {
+		if newFi, err := os.Stat(newFullPath); err == nil {
+			if !newFi.IsDir() {
+				return syscall.ENOTDIR
+			}
+		}
+	}
+
+	oldPtr, err := syscall.UTF16PtrFromString(oldFullPath)
+	if err != nil {
+		return err
+	}
+	newPtr, err := syscall.UTF16PtrFromString(newFullPath)
+	if err != nil {
+		return err
+	}
+
+	err = windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING)
+	if err == nil {
+		return nil
+	}
+
+	if err == windows.ERROR_ACCESS_DENIED {
+		fi, statErr := os.Stat(newFullPath)
+		if statErr == nil && fi.IsDir() {
+			if rerr := os.Remove(newFullPath); rerr == nil {
+				return windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING)
+			}
+		}
+	}
+
+	return err
 }
 
 func symlinkat(target string, dir *os.File, path string) error {
-	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") || filepath.IsAbs(target) {
-		return syscall.EPERM
-	}
-
 	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
 		return syscall.ENOENT
 	}
@@ -352,15 +399,33 @@ func unlinkat(dir *os.File, path string) error {
 	}
 
 	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
-		return syscall.EACCES
+		fi, err := os.Stat(fullPath)
+		if err != nil {
+			return err
+		}
+		if !fi.IsDir() {
+			return syscall.ENOTDIR
+		}
+		return syscall.EISDIR
 	}
 
-	fi, err := os.Lstat(fullPath)
-	if err == nil && fi.IsDir() {
-		return syscall.EACCES
+	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
+	if err != nil {
+		return err
 	}
 
-	return os.Remove(fullPath)
+	err = windows.DeleteFile(pathPtr)
+	if err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			fi, lerr := os.Lstat(fullPath)
+			if lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+				// Reparse point (likely directory symlink)
+				return windows.RemoveDirectory(pathPtr)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func openat(
@@ -373,6 +438,16 @@ func openat(
 	fullPath, err := secureJoin(dir.Name(), path)
 	if err != nil {
 		return nil, err
+	}
+
+	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+		fi, err := os.Stat(fullPath)
+		if err != nil {
+			return nil, err
+		}
+		if !fi.IsDir() {
+			return nil, syscall.ENOTDIR
+		}
 	}
 
 	var access uint32 = windows.GENERIC_READ
@@ -443,6 +518,17 @@ func openat(
 	if oflags&int32(oFlagsDirectory) != 0 {
 		info, err := f.Stat()
 		if err != nil {
+			isPathNotFound := false
+			if errno, ok := err.(syscall.Errno); ok && int(errno) == 3 {
+				isPathNotFound = true
+			} else if errno, ok := err.(windows.Errno); ok && int(errno) == 3 {
+				isPathNotFound = true
+			}
+
+			if isPathNotFound {
+				f.Close()
+				return nil, syscall.ENOTDIR
+			}
 			f.Close()
 			return nil, err
 		}
@@ -511,7 +597,7 @@ func mapError(err error) int32 {
 		return errnoExist
 	}
 	if errors.Is(err, os.ErrPermission) {
-		return errnoPerm
+		return errnoAcces
 	}
 	if errors.Is(err, os.ErrInvalid) {
 		return errnoInval
@@ -569,6 +655,10 @@ func mapError(err error) int32 {
 			return errnoBus
 		case windows.ERROR_PRIVILEGE_NOT_HELD:
 			return errnoPerm
+		case windows.ERROR_INVALID_NAME:
+			return errnoNoEnt
+		case windows.ERROR_DIRECTORY:
+			return errnoNotDir
 		}
 	}
 
@@ -589,16 +679,6 @@ func secureJoin(root, path string) (string, error) {
 	fullPath := filepath.Join(root, path)
 	if !strings.HasPrefix(fullPath, root) {
 		return "", os.ErrPermission
-	}
-
-	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
-		fi, err := os.Stat(fullPath)
-		if err != nil {
-			return "", err
-		}
-		if !fi.IsDir() {
-			return "", syscall.ENOENT
-		}
 	}
 
 	return fullPath, nil
