@@ -21,6 +21,7 @@ FROM --platform=linux/amd64 debian:trixie-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Install system packages, Rust toolchain, and WASI-SDK
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   curl \
@@ -30,32 +31,29 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   npm \
   python3 \
   python3-pip \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install Rust and WASI targets
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup target add wasm32-wasip1 \
-  && rustup toolchain install nightly \
-  && rustup target add wasm32-wasip2 --toolchain nightly \
-  && rm -rf /root/.cargo/registry /root/.cargo/git
-
-# Install WASI-SDK
-RUN curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb \
-  && dpkg -i wasi-sdk-29.0-x86_64-linux.deb || apt-get install -f -y \
+  && rm -rf /var/lib/apt/lists/* \
+  # Install Rust and WASI targets
+  && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+  && /root/.cargo/bin/rustup target add wasm32-wasip1 \
+  && /root/.cargo/bin/rustup toolchain install nightly \
+  && /root/.cargo/bin/rustup target add wasm32-wasip2 --toolchain nightly \
+  && rm -rf /root/.cargo/registry /root/.cargo/git \
+  # Install WASI-SDK
+  && curl -LO https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.deb \
+  && dpkg -i wasi-sdk-29.0-x86_64-linux.deb \
   && rm wasi-sdk-29.0-x86_64-linux.deb
-ENV PATH="/opt/wasi-sdk/bin:${PATH}"
 
-RUN git clone --depth 1 https://github.com/WebAssembly/wasi-testsuite.git /opt/wasi-testsuite
+ENV PATH="/opt/wasi-sdk/bin:/root/.cargo/bin:${PATH}"
 
 WORKDIR /opt/wasi-testsuite
 
-RUN pip3 install -r test-runner/requirements.txt --break-system-packages \
-  && rm -rf /root/.cache/pip
-
-RUN ./tests/c/build.py && \
-  ./tests/rust/build.py && \
-  ./tests/assemblyscript/build.py
+RUN git clone --depth 1 https://github.com/WebAssembly/wasi-testsuite.git . \
+  && pip3 install -r test-runner/requirements.txt --break-system-packages \
+  && rm -rf /root/.cache/pip \
+  && ./tests/c/build.py \
+  && ./tests/rust/build.py \
+  && ./tests/assemblyscript/build.py \
+  && rm -rf tests/rust/*/target tests/assemblyscript/*/node_modules .git
 
 CMD ["./run-tests", "--verbose", "--runtime", "adapters/epsilon.py"]
  
