@@ -415,6 +415,18 @@ func openat(
 		return nil, err
 	}
 
+	// WASI requires ELOOP if we encounter a symlink when O_NOFOLLOW is set.
+	// CreateFile with OPEN_REPARSE_POINT opens the symlink itself.
+	if !followSymlinks {
+		var info windows.ByHandleFileInformation
+		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
+			if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+				windows.Close(h)
+				return nil, syscall.ELOOP
+			}
+		}
+	}
+
 	f := os.NewFile(uintptr(h), fullPath)
 	if fdflags&int32(fdFlagsAppend) != 0 {
 		f.Seek(0, io.SeekEnd)
@@ -514,6 +526,8 @@ func mapError(err error) int32 {
 			return errnoIO
 		case syscall.ENOTEMPTY:
 			return errnoNotEmpty
+		case syscall.ELOOP:
+			return errnoLoop
 		case syscall.EBADF:
 			return errnoBadF
 		case syscall.EPIPE:
