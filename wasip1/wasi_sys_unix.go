@@ -53,7 +53,7 @@ func init() {
 		utimeOmit = -2
 	case "openbsd":
 		// https://github.com/openbsd/src/blob/master/sys/sys/stat.h#L188-L189
-		utimeNow = -1
+		utimeNow = -2
 		utimeOmit = -1
 	default:
 		// Most (all?) other UNIXes use -1/-2, e.g. FreeBSD:
@@ -758,7 +758,7 @@ func resolvePath(
 	}
 
 	if !isRelativePath(path) {
-		return 0, "", os.ErrInvalid
+		return 0, "", syscall.EPERM
 	}
 
 	comps, err := getComponents(path)

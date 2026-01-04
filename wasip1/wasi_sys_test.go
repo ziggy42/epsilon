@@ -335,8 +335,8 @@ func TestOpenat_DotDotRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := openat(dirFd, "../etc/passwd", false, 0, 0, uint64(RightsFdRead))
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != syscall.EPERM {
+		t.Errorf("expected syscall.EPERM, got %v", err)
 	}
 }
 
@@ -345,8 +345,8 @@ func TestOpenat_AbsolutePathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := openat(dirFd, "/etc/passwd", false, 0, 0, uint64(RightsFdRead))
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != syscall.EPERM {
+		t.Errorf("expected syscall.EPERM, got %v", err)
 	}
 }
 
@@ -355,8 +355,8 @@ func TestOpenat_EmptyPathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := openat(dirFd, "", false, 0, 0, uint64(RightsFdRead))
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != syscall.EPERM {
+		t.Errorf("expected syscall.EPERM, got %v", err)
 	}
 }
 
@@ -639,8 +639,8 @@ func TestStat_DotDotRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := stat(dirFd, "../etc/passwd", false)
-	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
-		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
+	if err != syscall.EPERM {
+		t.Errorf("expected syscall.EPERM, got %v", err)
 	}
 }
 
@@ -649,8 +649,8 @@ func TestStat_AbsolutePathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := stat(dirFd, "/etc/passwd", false)
-	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
-		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
+	if err != syscall.EPERM {
+		t.Errorf("expected syscall.EPERM, got %v", err)
 	}
 }
 
