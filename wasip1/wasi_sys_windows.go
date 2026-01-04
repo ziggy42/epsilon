@@ -398,6 +398,11 @@ func symlinkat(target string, dir *os.File, path string) error {
 		return syscall.ENOENT
 	}
 
+	// WASI tests expect failure when creating symlinks to absolute paths
+	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") || filepath.IsAbs(target) {
+		return syscall.EPERM
+	}
+
 	fullPath, err := secureJoin(dir.Name(), path)
 	if err != nil {
 		return err
@@ -453,6 +458,7 @@ func openat(
 		return nil, err
 	}
 
+	// WASI expects trailing slash to imply directory required
 	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
 		fi, err := os.Stat(fullPath)
 		if err != nil {
@@ -465,6 +471,10 @@ func openat(
 
 	var access uint32 = windows.GENERIC_READ
 	if fsRights&uint64(RightsFdWrite) != 0 {
+		access |= windows.GENERIC_WRITE
+	}
+	// O_TRUNC on Windows requires GENERIC_WRITE access
+	if oflags&int32(oFlagsTrunc) != 0 {
 		access |= windows.GENERIC_WRITE
 	}
 
@@ -529,25 +539,29 @@ func openat(
 	}
 
 	if oflags&int32(oFlagsDirectory) != 0 {
-		info, err := f.Stat()
-		if err != nil {
-			isPathNotFound := false
-			if errno, ok := err.(syscall.Errno); ok && int(errno) == 3 {
-				isPathNotFound = true
-			} else if errno, ok := err.(windows.Errno); ok && int(errno) == 3 {
-				isPathNotFound = true
-			}
-
-			if isPathNotFound {
+		// Use file handle info if possible to avoid race/extra stat
+		var info windows.ByHandleFileInformation
+		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
+			// On Windows, reparse points (symlinks) also have FILE_ATTRIBUTE_DIRECTORY if they point to a dir,
+			// or if they are directory junctions.
+			// But if we opened it with OPEN_REPARSE_POINT (because !followSymlinks), we see the reparse point logic above returned ELOOP.
+			// If we are here, we followed symlinks OR it's not a reparse point.
+			// So checking FILE_ATTRIBUTE_DIRECTORY is correct.
+			if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
 				f.Close()
 				return nil, syscall.ENOTDIR
 			}
-			f.Close()
-			return nil, err
-		}
-		if !info.IsDir() {
-			f.Close()
-			return nil, syscall.ENOTDIR
+		} else {
+			// Fallback
+			stat, err := f.Stat()
+			if err != nil {
+				f.Close()
+				return nil, err
+			}
+			if !stat.IsDir() {
+				f.Close()
+				return nil, syscall.ENOTDIR
+			}
 		}
 	}
 
