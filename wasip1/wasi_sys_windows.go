@@ -938,7 +938,7 @@ func resolveSymlink(rootPath, parentPath, name string) (string, error) {
 	}
 
 	var resolved string
-	if !isRelativePath(target) {
+	if filepath.IsAbs(target) || strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") {
 		// Absolute targets are resolved relative to the sandbox root.
 		cleanTarget := filepath.Clean(target)
 
