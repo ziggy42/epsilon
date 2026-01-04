@@ -29,6 +29,11 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// symlinkFlagAllowUnprivileged is the SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE flag.
+// This enables creating symlinks without admin privileges on Windows 10 1703+
+// when Developer Mode is enabled. The value is 0x2.
+const symlinkFlagAllowUnprivileged uint32 = 0x2
+
 func mkdirat(dir *os.File, path string, mode uint32) error {
 	if !isRelativePath(path) {
 		return os.ErrInvalid
@@ -365,6 +370,14 @@ func renameat(
 				return syscall.ENOTDIR
 			}
 		}
+	} else {
+		// Source is a file; target must not be a directory
+		// On Windows, we return ACCESS_DENIED to match expected WASI behavior
+		if newFi, err := os.Stat(newFullPath); err == nil {
+			if newFi.IsDir() {
+				return windows.ERROR_ACCESS_DENIED
+			}
+		}
 	}
 
 	oldPtr, err := syscall.UTF16PtrFromString(oldFullPath)
@@ -407,7 +420,43 @@ func symlinkat(target string, dir *os.File, path string) error {
 	if err != nil {
 		return err
 	}
-	return os.Symlink(target, fullPath)
+
+	// On Windows, WASI expects ENOENT when the symlink path already exists
+	if _, err := os.Lstat(fullPath); err == nil {
+		return syscall.ENOENT
+	}
+
+	// Use CreateSymbolicLink directly to support dangling symlinks.
+	// os.Symlink fails on Windows when target doesn't exist because it can't
+	// determine whether to create a file or directory symlink.
+	targetPath := target
+	if !filepath.IsAbs(target) {
+		// Resolve relative target against the directory containing the symlink
+		targetPath = filepath.Join(filepath.Dir(fullPath), target)
+	}
+
+	var flags uint32 = symlinkFlagAllowUnprivileged
+	// Check if target exists and is a directory
+	if fi, err := os.Stat(targetPath); err == nil && fi.IsDir() {
+		flags |= windows.SYMBOLIC_LINK_FLAG_DIRECTORY
+	}
+
+	// Convert forward slashes to backslashes for Windows
+	windowsTarget := filepath.FromSlash(target)
+	targetPtr, err := syscall.UTF16PtrFromString(windowsTarget)
+	if err != nil {
+		return err
+	}
+	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
+	if err != nil {
+		return err
+	}
+
+	err = windows.CreateSymbolicLink(pathPtr, targetPtr, flags)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func unlinkat(dir *os.File, path string) error {
@@ -634,25 +683,34 @@ func mapError(err error) int32 {
 		return errnoSuccess
 	}
 
-	if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) || errors.Is(err, syscall.ENOTEMPTY) {
-		return errnoNotEmpty
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return errnoNoEnt
-	}
-	if errors.Is(err, os.ErrExist) {
-		return errnoExist
-	}
-	if errors.Is(err, os.ErrPermission) {
-		return errnoPerm
-	}
-	if errors.Is(err, os.ErrInvalid) {
-		return errnoInval
+	// Check specific Windows errors first
+	var werr windows.Errno
+	if errors.As(err, &werr) {
+		switch werr {
+		case windows.ERROR_DIR_NOT_EMPTY:
+			return errnoNotEmpty
+		case windows.ERROR_ALREADY_EXISTS:
+			return errnoExist
+		case windows.ERROR_FILE_EXISTS:
+			return errnoExist
+		case windows.ERROR_ACCESS_DENIED:
+			return errnoAcces
+		case windows.ERROR_SHARING_VIOLATION:
+			return errnoBus
+		case windows.ERROR_PRIVILEGE_NOT_HELD:
+			return errnoPerm
+		case windows.ERROR_INVALID_NAME:
+			return errnoNoEnt
+		case windows.ERROR_DIRECTORY:
+			return errnoNotDir
+		case windows.ERROR_NEGATIVE_SEEK:
+			return errnoInval
+		}
 	}
 
+	// Check syscall errors (these include Go's abstracted errno values)
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
-		// This is not a complete mapping
 		switch errno {
 		case syscall.EACCES:
 			return errnoAcces
@@ -687,28 +745,21 @@ func mapError(err error) int32 {
 		}
 	}
 
-	var werr windows.Errno
-	if errors.As(err, &werr) {
-		switch werr {
-		case windows.ERROR_DIR_NOT_EMPTY:
-			return errnoNotEmpty
-		case windows.ERROR_ALREADY_EXISTS:
-			return errnoExist
-		case windows.ERROR_FILE_EXISTS:
-			return errnoExist
-		case windows.ERROR_ACCESS_DENIED:
-			return errnoAcces
-		case windows.ERROR_SHARING_VIOLATION:
-			return errnoBus
-		case windows.ERROR_PRIVILEGE_NOT_HELD:
-			return errnoPerm
-		case windows.ERROR_INVALID_NAME:
-			return errnoNoEnt
-		case windows.ERROR_DIRECTORY:
-			return errnoNotDir
-		case windows.ERROR_NEGATIVE_SEEK:
-			return errnoInval
-		}
+	// Check generic os errors as fallback
+	if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) || errors.Is(err, syscall.ENOTEMPTY) {
+		return errnoNotEmpty
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return errnoNoEnt
+	}
+	if errors.Is(err, os.ErrExist) {
+		return errnoExist
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return errnoAcces
+	}
+	if errors.Is(err, os.ErrInvalid) {
+		return errnoInval
 	}
 
 	return errnoNotCapable
@@ -723,11 +774,11 @@ func isRelativePath(path string) bool {
 
 func secureJoin(root, path string) (string, error) {
 	if !isRelativePath(path) {
-		return "", os.ErrPermission
+		return "", syscall.EPERM
 	}
 	fullPath := filepath.Join(root, path)
 	if !strings.HasPrefix(fullPath, root) {
-		return "", os.ErrPermission
+		return "", syscall.EPERM
 	}
 
 	return fullPath, nil
