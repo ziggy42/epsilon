@@ -452,7 +452,13 @@ func openat(
 
 	var access uint32 = windows.GENERIC_READ
 	if fsRights&uint64(RightsFdWrite) != 0 {
-		access |= windows.GENERIC_WRITE
+		// Use FILE_APPEND_DATA for O_APPEND to get native Windows append behavior,
+		// which automatically seeks to end before each write.
+		if fdflags&int32(fdFlagsAppend) != 0 {
+			access |= windows.FILE_APPEND_DATA
+		} else {
+			access |= windows.GENERIC_WRITE
+		}
 	}
 
 	var creationDisposition uint32

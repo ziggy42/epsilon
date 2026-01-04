@@ -37,6 +37,7 @@ type WasiModule struct {
 	args                []string
 	env                 map[string]string
 	monotonicClockStart time.Time
+	lastMonotonicValue  int64 // Ensures monotonic clock always increases
 }
 
 // NewWasiModule creates a new WasiModule instance.
@@ -182,6 +183,16 @@ func (w *WasiModule) clockTimeGet(
 	res, errCode := getTimestamp(w.monotonicClockStart, uint32(clockId))
 	if errCode != errnoSuccess {
 		return errCode
+	}
+
+	// Ensure monotonic clock always returns an increasing value.
+	// On some systems (e.g., Windows), the timer resolution may be too low to
+	// distinguish rapid consecutive calls.
+	if uint32(clockId) == clockMonotonic {
+		if res <= w.lastMonotonicValue {
+			res = w.lastMonotonicValue + 1
+		}
+		w.lastMonotonicValue = res
 	}
 
 	if err := memory.StoreUint64(0, uint32(resPtr), uint64(res)); err != nil {
