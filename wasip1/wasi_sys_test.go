@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -468,8 +466,8 @@ func TestMkdirat_DotDotRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	err := mkdirat(dirFd, "../escape", 0o755)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
 	}
 }
 
@@ -478,8 +476,8 @@ func TestMkdirat_AbsolutePathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	err := mkdirat(dirFd, "/tmp/escape", 0o755)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
 	}
 }
 
@@ -488,8 +486,8 @@ func TestMkdirat_EmptyPathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	err := mkdirat(dirFd, "", 0o755)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
 	}
 }
 
@@ -498,8 +496,8 @@ func TestMkdirat_DotPathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	err := mkdirat(dirFd, ".", 0o755)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid for '.', got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM for '.', got %v", err)
 	}
 }
 
@@ -640,8 +638,8 @@ func TestStat_DotDotRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := stat(dirFd, "../etc/passwd", false)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
 	}
 }
 
@@ -650,8 +648,8 @@ func TestStat_AbsolutePathRejected(t *testing.T) {
 	defer dirFd.Close()
 
 	_, err := stat(dirFd, "/etc/passwd", false)
-	if err != os.ErrInvalid {
-		t.Errorf("expected os.ErrInvalid, got %v", err)
+	if err != os.ErrInvalid && !errors.Is(err, syscall.EPERM) {
+		t.Errorf("expected os.ErrInvalid or EPERM, got %v", err)
 	}
 }
 
@@ -1035,10 +1033,8 @@ func TestLinkat_Basic(t *testing.T) {
 	// Verify they share the same inode
 	origInfo, _ := os.Stat(filepath.Join(root, "original.txt"))
 	linkInfo, _ := os.Stat(filepath.Join(root, "hardlink.txt"))
-	origStat := origInfo.Sys().(*syscall.Stat_t)
-	linkStat := linkInfo.Sys().(*syscall.Stat_t)
-	if origStat.Ino != linkStat.Ino {
-		t.Errorf("inodes differ: %d vs %d", origStat.Ino, linkStat.Ino)
+	if !os.SameFile(origInfo, linkInfo) {
+		t.Error("os.SameFile returned false for hard links")
 	}
 }
 

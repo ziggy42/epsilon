@@ -33,23 +33,29 @@ import (
 // when Developer Mode is enabled. The value is 0x2.
 const symlinkFlagAllowUnprivileged uint32 = 0x2
 
-func mkdirat(dir *os.File, path string, mode uint32) error {
-	if !isRelativePath(path) {
-		return os.ErrInvalid
-	}
+// maxSymlinkDepth is the maximum number of symlink resolutions allowed.
+const maxSymlinkDepth = 40
 
-	fullPath, err := secureJoin(dir.Name(), path)
+func mkdirat(dir *os.File, path string, mode uint32) error {
+	parentPath, name, err := resolvePath(dir, path, false)
 	if err != nil {
 		return err
 	}
+
+	if name == "." {
+		return os.ErrInvalid
+	}
+
+	fullPath := filepath.Join(parentPath, name)
 	return os.Mkdir(fullPath, os.FileMode(mode))
 }
 
 func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, followSymlinks)
 	if err != nil {
 		return filestat{}, err
 	}
+	fullPath := filepath.Join(parentPath, name)
 	return statFromPath(fullPath, followSymlinks)
 }
 
@@ -144,10 +150,7 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	)
 
 	for _, entry := range entries {
-		fullpath, err := secureJoin(dir.Name(), entry.Name())
-		if err != nil {
-			return nil, err
-		}
+		fullpath := filepath.Join(dir.Name(), entry.Name())
 
 		fs, err := statFromPath(fullpath, false)
 		if err != nil {
@@ -176,10 +179,11 @@ func utimes(
 	fstFlags int32,
 	followSymlinks bool,
 ) error {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, followSymlinks)
 	if err != nil {
 		return err
 	}
+	fullPath := filepath.Join(parentPath, name)
 
 	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
 	if err != nil {
@@ -282,31 +286,41 @@ func linkat(
 		return syscall.ENOENT
 	}
 
-	oldFullPath, err := secureJoin(oldDir.Name(), oldPath)
+	oldParent, oldName, err := resolvePath(oldDir, oldPath, false)
 	if err != nil {
 		return err
 	}
-	newFullPath, err := secureJoin(newDir.Name(), newPath)
+	oldFullPath := filepath.Join(oldParent, oldName)
+
+	newParent, newName, err := resolvePath(newDir, newPath, false)
 	if err != nil {
 		return err
 	}
+	newFullPath := filepath.Join(newParent, newName)
 
 	return os.Link(oldFullPath, newFullPath)
 }
 
 func readlink(dir *os.File, path string) (string, error) {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, false)
 	if err != nil {
 		return "", err
 	}
+	fullPath := filepath.Join(parentPath, name)
 	return os.Readlink(fullPath)
 }
 
 func rmdirat(dir *os.File, path string) error {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, false)
 	if err != nil {
 		return err
 	}
+
+	if name == "." {
+		return os.ErrInvalid // Cannot remove "."
+	}
+
+	fullPath := filepath.Join(parentPath, name)
 
 	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
 	if err != nil {
@@ -322,14 +336,17 @@ func renameat(
 	newDir *os.File,
 	newPath string,
 ) error {
-	oldFullPath, err := secureJoin(oldDir.Name(), oldPath)
+	oldParent, oldName, err := resolvePath(oldDir, oldPath, false)
 	if err != nil {
 		return err
 	}
-	newFullPath, err := secureJoin(newDir.Name(), newPath)
+	oldFullPath := filepath.Join(oldParent, oldName)
+
+	newParent, newName, err := resolvePath(newDir, newPath, false)
 	if err != nil {
 		return err
 	}
+	newFullPath := filepath.Join(newParent, newName)
 
 	oldFi, err := os.Stat(oldFullPath)
 	if err != nil {
@@ -388,10 +405,11 @@ func symlinkat(target string, dir *os.File, path string) error {
 		return syscall.EPERM
 	}
 
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, false)
 	if err != nil {
 		return err
 	}
+	fullPath := filepath.Join(parentPath, name)
 
 	// On Windows, WASI expects ENOENT when the symlink path already exists
 	if _, err := os.Lstat(fullPath); err == nil {
@@ -427,10 +445,11 @@ func symlinkat(target string, dir *os.File, path string) error {
 }
 
 func unlinkat(dir *os.File, path string) error {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, false)
 	if err != nil {
 		return err
 	}
+	fullPath := filepath.Join(parentPath, name)
 
 	if hasTrailingSlash(path) {
 		fi, err := os.Stat(fullPath)
@@ -469,10 +488,11 @@ func openat(
 	oflags, fdflags int32,
 	fsRights uint64,
 ) (*os.File, error) {
-	fullPath, err := secureJoin(dir.Name(), path)
+	parentPath, name, err := resolvePath(dir, path, followSymlinks)
 	if err != nil {
 		return nil, err
 	}
+	fullPath := filepath.Join(parentPath, name)
 
 	// WASI expects trailing slash to imply directory required
 	if hasTrailingSlash(path) {
@@ -729,22 +749,13 @@ func mapError(err error) int32 {
 }
 
 func isRelativePath(path string) bool {
+	if path == "" {
+		return false
+	}
 	if strings.HasPrefix(path, "/") || strings.HasPrefix(path, "\\") {
 		return false
 	}
 	return !filepath.IsAbs(path) && !strings.HasPrefix(path, "..")
-}
-
-func secureJoin(root, path string) (string, error) {
-	if !isRelativePath(path) {
-		return "", syscall.EPERM
-	}
-	fullPath := filepath.Join(root, path)
-	if !strings.HasPrefix(fullPath, root) {
-		return "", syscall.EPERM
-	}
-
-	return fullPath, nil
 }
 
 func hasTrailingSlash(path string) bool {
@@ -760,6 +771,214 @@ func statFromHandleFileInformation(info *windows.ByHandleFileInformation) filest
 		size:     uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow),
 		atim:     uint64(info.LastAccessTime.Nanoseconds()),
 		mtim:     uint64(info.LastWriteTime.Nanoseconds()),
-		ctim:     uint64(info.CreationTime.Nanoseconds()),
 	}
+}
+
+// resolvePath resolves a path relative to a directory os.File.
+// It returns the absolute path of the parent directory and the final name.
+func resolvePath(
+	dir *os.File,
+	path string,
+	followSymlinks bool,
+) (string, string, error) {
+	return resolvePathInternal(dir.Name(), path, followSymlinks, 0)
+}
+
+func resolvePathInternal(
+	rootPath string,
+	path string,
+	followSymlinks bool,
+	depth int,
+) (string, string, error) {
+	if depth >= maxSymlinkDepth {
+		return "", "", syscall.ELOOP
+	}
+
+	if !isRelativePath(path) {
+		return "", "", syscall.EPERM
+	}
+
+	comps, err := getComponents(path)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Handle special case of "."
+	if len(comps) == 1 && comps[0] == "." {
+		return rootPath, ".", nil
+	}
+
+	parentPath, newDepth, err := walkToParent(rootPath, comps, depth)
+	if err != nil {
+		return "", "", err
+	}
+
+	finalName := comps[len(comps)-1]
+
+	// Check final component symlink if needed
+	if followSymlinks {
+		fullPath := filepath.Join(parentPath, finalName)
+		fi, err := os.Lstat(fullPath)
+		if err == nil && fi.Mode()&os.ModeSymlink != 0 {
+			resolved, err := resolveSymlink(rootPath, parentPath, finalName)
+			if err != nil {
+				return "", "", err
+			}
+			// Restart resolution with the resolved path relative to root?
+			// resolved is absolute. We need relative to root to pass to resolvePathInternal?
+			// Or we can just use the absolute path if we had a function for it.
+			// But resolvePathInternal expects relative path.
+
+			// If resolved is absolute and inside root, we can make it relative.
+			rel, err := filepath.Rel(rootPath, resolved)
+			if err != nil {
+				return "", "", err
+			}
+			return resolvePathInternal(rootPath, rel, true, newDepth+1)
+		}
+	}
+
+	return parentPath, finalName, nil
+}
+
+func walkToParent(
+	rootPath string,
+	components []string,
+	depth int,
+) (string, int, error) {
+	if depth >= maxSymlinkDepth {
+		return "", depth, syscall.ELOOP
+	}
+
+	currentPath := rootPath
+
+	// Restart helper
+	restart := func(newBaseAbs string, remain []string) (string, int, error) {
+		// Calculate new relative path from root to newBaseAbs
+		rel, err := filepath.Rel(rootPath, newBaseAbs)
+		if err != nil {
+			return "", depth, err
+		}
+
+		newComponents := append(splitPath(rel), remain...)
+		if len(newComponents) == 0 {
+			newComponents = []string{"."}
+		}
+
+		return walkToParent(rootPath, newComponents, depth+1)
+	}
+
+	for i, component := range components[:len(components)-1] {
+		if component == "." {
+			continue
+		}
+
+		if component == ".." {
+			// Check if we're at the root
+			if currentPath == rootPath {
+				return "", depth, syscall.EPERM
+			}
+			currentPath = filepath.Dir(currentPath)
+			// Verify we didn't escape (should be redundant if we check currentPath == rootPath)
+			if !strings.HasPrefix(currentPath, rootPath) {
+				return "", depth, syscall.EPERM
+			}
+			continue
+		}
+
+		nextPath := filepath.Join(currentPath, component)
+
+		// Check for symlink
+		fi, err := os.Lstat(nextPath)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Component doesn't exist, cannot traverse
+				return "", depth, syscall.ENOENT
+			}
+			return "", depth, err
+		}
+
+		if fi.Mode()&os.ModeSymlink != 0 {
+			resolved, err := resolveSymlink(rootPath, currentPath, component)
+			if err != nil {
+				return "", depth, err
+			}
+			return restart(resolved, components[i+1:])
+		}
+
+		if !fi.IsDir() {
+			return "", depth, syscall.ENOTDIR
+		}
+
+		currentPath = nextPath
+	}
+
+	return currentPath, depth, nil
+}
+
+func getComponents(path string) ([]string, error) {
+	components := splitPath(path)
+	if len(components) == 0 {
+		return nil, os.ErrInvalid
+	}
+
+	// If the final component is "..", append "." to ensure it's processed as an
+	// intermediate component through safe logical resolution, and we use "." as
+	// the final name for the syscall.
+	if components[len(components)-1] == ".." {
+		components = append(components, ".")
+	}
+
+	return components, nil
+}
+
+// splitPath splits a path into its components without lexically resolving "..".
+// This is critical for security: ".." must be traversed at runtime to enforce
+// permission and existence checks on intermediate directories.
+// It handles both forward slashes and the OS-specific separator.
+func splitPath(path string) []string {
+	parts := strings.FieldsFunc(path, func(r rune) bool {
+		return r == filepath.Separator || r == '/'
+	})
+	if len(parts) == 0 {
+		return []string{"."}
+	}
+	return parts
+}
+
+// resolveSymlink reads a symlink and returns a sandbox-safe resolved path.
+//
+// Parameters:
+//   - rootPath: absolute path of the sandbox root
+//   - parentPath: absolute path of the directory containing the symlink
+//   - name: name of the symlink within the parent directory
+//
+// Returns the resolved absolute path.
+func resolveSymlink(rootPath, parentPath, name string) (string, error) {
+	fullPath := filepath.Join(parentPath, name)
+	target, err := os.Readlink(fullPath)
+	if err != nil {
+		return "", err
+	}
+
+	var resolved string
+	if filepath.IsAbs(target) || strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") {
+		// Absolute targets are resolved relative to the sandbox root.
+		cleanTarget := filepath.Clean(target)
+
+		// Remove volume/drive if present
+		vol := filepath.VolumeName(cleanTarget)
+		rel := cleanTarget[len(vol):]
+		rel = strings.TrimLeft(rel, "\\/")
+		resolved = filepath.Join(rootPath, rel)
+	} else {
+		resolved = filepath.Clean(filepath.Join(parentPath, target))
+	}
+
+	// Check if escapes root
+	if !strings.HasPrefix(resolved, rootPath) {
+		return "", syscall.EPERM
+	}
+
+	return resolved, nil
 }
