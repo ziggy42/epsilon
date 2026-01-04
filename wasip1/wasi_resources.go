@@ -277,6 +277,10 @@ func (w *wasiResourceTable) setFileStatSize(fdIndex int32, size int64) int32 {
 		return errCode
 	}
 
+	if fd.fileType == fileTypeDirectory {
+		return errnoIsDir
+	}
+
 	if err := fd.file.Truncate(size); err != nil {
 		return mapError(err)
 	}
