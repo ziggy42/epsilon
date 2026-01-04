@@ -94,15 +94,14 @@ func statFromPath(path string, followSymlinks bool) (filestat, error) {
 }
 
 func fileTypeFromWin32Attributes(attrs uint32) int8 {
-	if attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+	switch {
+	case attrs&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0:
 		return int8(fileTypeSymbolicLink)
-	}
-
-	if attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+	case attrs&windows.FILE_ATTRIBUTE_DIRECTORY != 0:
 		return int8(fileTypeDirectory)
+	default:
+		return int8(fileTypeRegularFile)
 	}
-
-	return int8(fileTypeRegularFile)
 }
 
 func fdstat(file *os.File) (filestat, error) {
@@ -204,28 +203,29 @@ func utimesNanoAt(file *os.File, atim, mtim int64, fstFlags int32) error {
 }
 
 func setFileTime(h windows.Handle, atim, mtim int64, fstFlags int32) error {
-	if (fstFlags&fstFlagsAtim != 0) && (fstFlags&fstFlagsAtimNow != 0) {
-		return os.ErrInvalid
-	}
-	if (fstFlags&fstFlagsMtim != 0) && (fstFlags&fstFlagsMtimNow != 0) {
+	// ATIM and ATIM_NOW are mutually exclusive, as are MTIM and MTIM_NOW
+	if (fstFlags&fstFlagsAtim != 0 && fstFlags&fstFlagsAtimNow != 0) ||
+		(fstFlags&fstFlagsMtim != 0 && fstFlags&fstFlagsMtimNow != 0) {
 		return os.ErrInvalid
 	}
 
 	var aptr, mptr *windows.Filetime
 
-	if fstFlags&fstFlagsAtim != 0 {
-		ft := windows.NsecToFiletime(atim)
-		aptr = &ft
-	} else if fstFlags&fstFlagsAtimNow != 0 {
+	switch {
+	case fstFlags&fstFlagsAtimNow != 0:
 		ft := windows.NsecToFiletime(time.Now().UnixNano())
+		aptr = &ft
+	case fstFlags&fstFlagsAtim != 0:
+		ft := windows.NsecToFiletime(atim)
 		aptr = &ft
 	}
 
-	if fstFlags&fstFlagsMtim != 0 {
-		ft := windows.NsecToFiletime(mtim)
-		mptr = &ft
-	} else if fstFlags&fstFlagsMtimNow != 0 {
+	switch {
+	case fstFlags&fstFlagsMtimNow != 0:
 		ft := windows.NsecToFiletime(time.Now().UnixNano())
+		mptr = &ft
+	case fstFlags&fstFlagsMtim != 0:
+		ft := windows.NsecToFiletime(mtim)
 		mptr = &ft
 	}
 
@@ -602,9 +602,7 @@ func fileTypeFromMode(mode os.FileMode) int8 {
 		return int8(fileTypeSymbolicLink)
 	case mode&os.ModeSocket != 0:
 		return int8(fileTypeSocketStream)
-	case mode&os.ModeNamedPipe != 0:
-		return int8(fileTypeCharacterDevice)
-	case mode&os.ModeCharDevice != 0:
+	case mode&os.ModeNamedPipe != 0, mode&os.ModeCharDevice != 0:
 		return int8(fileTypeCharacterDevice)
 	case mode&os.ModeDevice != 0:
 		return int8(fileTypeBlockDevice)
@@ -620,9 +618,7 @@ func mapError(err error) int32 {
 		switch werr {
 		case windows.ERROR_DIR_NOT_EMPTY:
 			return errnoNotEmpty
-		case windows.ERROR_ALREADY_EXISTS:
-			return errnoExist
-		case windows.ERROR_FILE_EXISTS:
+		case windows.ERROR_ALREADY_EXISTS, windows.ERROR_FILE_EXISTS:
 			return errnoExist
 		case windows.ERROR_ACCESS_DENIED:
 			return errnoAcces
@@ -670,17 +666,15 @@ func mapError(err error) int32 {
 		}
 	}
 
-	// Check generic os errors as fallback
-	if errors.Is(err, os.ErrNotExist) {
+	// Check generic os errors as fallback (for wrapped errors)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
 		return errnoNoEnt
-	}
-	if errors.Is(err, os.ErrExist) {
+	case errors.Is(err, os.ErrExist):
 		return errnoExist
-	}
-	if errors.Is(err, os.ErrPermission) {
+	case errors.Is(err, os.ErrPermission):
 		return errnoAcces
-	}
-	if errors.Is(err, os.ErrInvalid) {
+	case errors.Is(err, os.ErrInvalid):
 		return errnoInval
 	}
 
