@@ -610,7 +610,7 @@ func mapError(err error) int32 {
 		return errnoExist
 	}
 	if errors.Is(err, os.ErrPermission) {
-		return errnoAcces
+		return errnoPerm
 	}
 	if errors.Is(err, os.ErrInvalid) {
 		return errnoInval
