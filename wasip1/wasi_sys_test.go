@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -792,6 +793,10 @@ func TestOpenat_ChainedIntermediateSymlinks(t *testing.T) {
 }
 
 func TestOpenat_PermissionBypass_DotDot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+
 	root, dirFd := testFS(t,
 		dir("locked"),
 		file("target.txt", "secret"),

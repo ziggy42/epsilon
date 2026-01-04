@@ -74,5 +74,5 @@ if __name__ == "__main__":
           runtimes=[runtime_adapter.RuntimeAdapter(
               SCRIPT_DIR / "wasi_testsuite_adapter.py")],
           test_suite_paths=_find_test_dirs(),
-          color=True, json_log_file=None, verbose=False,
+          color=True, json_log_file=None, verbose=True,
           exclude_filters=[],))
