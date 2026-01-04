@@ -470,7 +470,7 @@ func openat(
 	}
 
 	var access uint32 = windows.GENERIC_READ
-	if fsRights&uint64(RightsFdWrite) != 0 {
+	if fsRights&uint64(RightsFdWrite) != 0 || fsRights&uint64(RightsFdFilestatSetSize) != 0 {
 		access |= windows.GENERIC_WRITE
 	}
 	// O_TRUNC on Windows requires GENERIC_WRITE access
@@ -529,6 +529,26 @@ func openat(
 			if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
 				windows.Close(h)
 				return nil, syscall.ELOOP
+			}
+		}
+	}
+
+	// Verify we didn't open a directory with write access, which WASI forbids.
+	// On Windows, FILE_FLAG_BACKUP_SEMANTICS allows opening directories, and
+	// GENERIC_WRITE doesn't necessarily fail immediately.
+	if access&windows.GENERIC_WRITE != 0 {
+		var info windows.ByHandleFileInformation
+		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
+			if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+				// If we opened a directory with GENERIC_WRITE, check if we actually requested
+				// rights that are incompatible with directories (like writing data).
+				// We allow RightsFdFilestatSetSize (which adds GENERIC_WRITE) on directories
+				// because it's part of DefaultDirRights, even though SetSize fails on dirs.
+				// But we must reject RightsFdWrite or O_TRUNC.
+				if fsRights&uint64(RightsFdWrite) != 0 || oflags&int32(oFlagsTrunc) != 0 {
+					windows.Close(h)
+					return nil, syscall.EISDIR
+				}
 			}
 		}
 	}
