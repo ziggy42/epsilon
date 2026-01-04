@@ -100,6 +100,7 @@ const (
 	errnoAcces       int32 = 2  // Permission denied.
 	errnoAgain       int32 = 6  // Try again.
 	errnoBadF        int32 = 8  // Bad file descriptor.
+	errnoBus         int32 = 10 // Device or resource busy.
 	errnoExist       int32 = 20 // File exists.
 	errnoFault       int32 = 21 // Bad address.
 	errnoInval       int32 = 28 // Invalid argument.

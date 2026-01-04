@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -115,7 +113,7 @@ func (w *WasiModule) handleClockSubscription(
 
 	var timeout int64
 	if isAbsoluteTime {
-		now, errCode := getTimestamp(w.monotonicClockStartNs, clockSub.clockId)
+	now, errCode := getTimestamp(w.monotonicClockStart, clockMonotonic)
 		if errCode != errnoSuccess {
 			return 0, event{
 				userData:  sub.userData,
