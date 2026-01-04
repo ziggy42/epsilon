@@ -18,7 +18,6 @@ package wasip1
 
 import (
 	"errors"
-	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -86,16 +85,7 @@ func statFromPath(path string, followSymlinks bool) (filestat, error) {
 		return filestat{}, err
 	}
 
-	return filestat{
-		dev:      uint64(info.VolumeSerialNumber),
-		ino:      uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
-		filetype: fileTypeFromWin32Attributes(info.FileAttributes),
-		nlink:    uint64(info.NumberOfLinks),
-		size:     uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow),
-		atim:     uint64(info.LastAccessTime.Nanoseconds()),
-		mtim:     uint64(info.LastWriteTime.Nanoseconds()),
-		ctim:     uint64(info.CreationTime.Nanoseconds()),
-	}, nil
+	return statFromHandleFileInformation(&info), nil
 }
 
 func fileTypeFromWin32Attributes(attrs uint32) int8 {
@@ -117,23 +107,7 @@ func fdstat(file *os.File) (filestat, error) {
 		return filestat{}, err
 	}
 
-	fi, err := file.Stat()
-	if err != nil {
-		return filestat{}, err
-	}
-
-	fs := filestat{
-		dev:      uint64(info.VolumeSerialNumber),
-		ino:      uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
-		filetype: fileTypeFromMode(fi.Mode()),
-		nlink:    uint64(info.NumberOfLinks),
-		size:     uint64(fi.Size()),
-		atim:     uint64(info.LastAccessTime.Nanoseconds()),
-		mtim:     uint64(info.LastWriteTime.Nanoseconds()),
-		ctim:     uint64(info.CreationTime.Nanoseconds()),
-	}
-
-	return fs, nil
+	return statFromHandleFileInformation(&info), nil
 }
 
 func readDirEntries(dir *os.File) ([]dirEntry, error) {
@@ -170,22 +144,20 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	)
 
 	for _, entry := range entries {
-		var ino uint64
-		if fullPath, err := secureJoin(dir.Name(), entry.Name()); err == nil {
-			if fs, err := statFromPath(fullPath, false); err == nil {
-				ino = fs.ino
-			} else {
-				// Fallback to hashing the path if we can't stat (e.g. locked file)
-				h := fnv.New64a()
-				h.Write([]byte(fullPath))
-				ino = h.Sum64()
-			}
+		fullpath, err := secureJoin(dir.Name(), entry.Name())
+		if err != nil {
+			return nil, err
+		}
+
+		fs, err := statFromPath(fullpath, false)
+		if err != nil {
+			return nil, err
 		}
 
 		result = append(result, dirEntry{
 			name:     entry.Name(),
 			fileType: fileTypeFromMode(entry.Type()),
-			ino:      ino,
+			ino:      fs.ino,
 		})
 	}
 
@@ -782,4 +754,17 @@ func secureJoin(root, path string) (string, error) {
 	}
 
 	return fullPath, nil
+}
+
+func statFromHandleFileInformation(info *windows.ByHandleFileInformation) filestat {
+	return filestat{
+		dev:      uint64(info.VolumeSerialNumber),
+		ino:      uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
+		filetype: fileTypeFromWin32Attributes(info.FileAttributes),
+		nlink:    uint64(info.NumberOfLinks),
+		size:     uint64(info.FileSizeHigh)<<32 | uint64(info.FileSizeLow),
+		atim:     uint64(info.LastAccessTime.Nanoseconds()),
+		mtim:     uint64(info.LastWriteTime.Nanoseconds()),
+		ctim:     uint64(info.CreationTime.Nanoseconds()),
+	}
 }
