@@ -337,19 +337,12 @@ func renameat(
 		return err
 	}
 
-	if oldFi.IsDir() {
-		if newFi, err := os.Stat(newFullPath); err == nil {
-			if !newFi.IsDir() {
-				return syscall.ENOTDIR
-			}
+	if newFi, err := os.Stat(newFullPath); err == nil {
+		if oldFi.IsDir() && !newFi.IsDir() {
+			return syscall.ENOTDIR
 		}
-	} else {
-		// Source is a file; target must not be a directory
-		// On Windows, we return ACCESS_DENIED to match expected WASI behavior
-		if newFi, err := os.Stat(newFullPath); err == nil {
-			if newFi.IsDir() {
-				return windows.ERROR_ACCESS_DENIED
-			}
+		if !oldFi.IsDir() && newFi.IsDir() {
+			return windows.ERROR_ACCESS_DENIED
 		}
 	}
 
@@ -537,35 +530,32 @@ func openat(
 		return nil, err
 	}
 
+	// Get file info once for all checks below
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil {
+		windows.Close(h)
+		return nil, err
+	}
+
 	// WASI requires ELOOP if we encounter a symlink when O_NOFOLLOW is set.
 	// CreateFile with OPEN_REPARSE_POINT opens the symlink itself.
-	if !followSymlinks {
-		var info windows.ByHandleFileInformation
-		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
-			if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-				windows.Close(h)
-				return nil, syscall.ELOOP
-			}
-		}
+	if !followSymlinks && info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		windows.Close(h)
+		return nil, syscall.ELOOP
 	}
 
 	// Verify we didn't open a directory with write access, which WASI forbids.
 	// On Windows, FILE_FLAG_BACKUP_SEMANTICS allows opening directories, and
 	// GENERIC_WRITE doesn't necessarily fail immediately.
-	if access&windows.GENERIC_WRITE != 0 {
-		var info windows.ByHandleFileInformation
-		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
-			if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
-				// If we opened a directory with GENERIC_WRITE, check if we actually requested
-				// rights that are incompatible with directories (like writing data).
-				// We allow RightsFdFilestatSetSize (which adds GENERIC_WRITE) on directories
-				// because it's part of DefaultDirRights, even though SetSize fails on dirs.
-				// But we must reject RightsFdWrite or O_TRUNC.
-				if fsRights&uint64(RightsFdWrite) != 0 || oflags&int32(oFlagsTrunc) != 0 {
-					windows.Close(h)
-					return nil, syscall.EISDIR
-				}
-			}
+	if access&windows.GENERIC_WRITE != 0 && info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		// If we opened a directory with GENERIC_WRITE, check if we actually requested
+		// rights that are incompatible with directories (like writing data).
+		// We allow RightsFdFilestatSetSize (which adds GENERIC_WRITE) on directories
+		// because it's part of DefaultDirRights, even though SetSize fails on dirs.
+		// But we must reject RightsFdWrite or O_TRUNC.
+		if fsRights&uint64(RightsFdWrite) != 0 || oflags&int32(oFlagsTrunc) != 0 {
+			windows.Close(h)
+			return nil, syscall.EISDIR
 		}
 	}
 
@@ -574,31 +564,9 @@ func openat(
 		f.Seek(0, io.SeekEnd)
 	}
 
-	if oflags&int32(oFlagsDirectory) != 0 {
-		// Use file handle info if possible to avoid race/extra stat
-		var info windows.ByHandleFileInformation
-		if err := windows.GetFileInformationByHandle(h, &info); err == nil {
-			// On Windows, reparse points (symlinks) also have FILE_ATTRIBUTE_DIRECTORY if they point to a dir,
-			// or if they are directory junctions.
-			// But if we opened it with OPEN_REPARSE_POINT (because !followSymlinks), we see the reparse point logic above returned ELOOP.
-			// If we are here, we followed symlinks OR it's not a reparse point.
-			// So checking FILE_ATTRIBUTE_DIRECTORY is correct.
-			if info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
-				f.Close()
-				return nil, syscall.ENOTDIR
-			}
-		} else {
-			// Fallback
-			stat, err := f.Stat()
-			if err != nil {
-				f.Close()
-				return nil, err
-			}
-			if !stat.IsDir() {
-				f.Close()
-				return nil, syscall.ENOTDIR
-			}
-		}
+	if oflags&int32(oFlagsDirectory) != 0 && info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		f.Close()
+		return nil, syscall.ENOTDIR
 	}
 
 	return f, nil
@@ -699,19 +667,10 @@ func mapError(err error) int32 {
 			return errnoBadF
 		case syscall.EPIPE:
 			return errnoPipe
-		case windows.ERROR_SHARING_VIOLATION:
-			return errnoBus
-		case windows.ERROR_ALREADY_EXISTS:
-			return errnoExist
-		case windows.ERROR_FILE_EXISTS:
-			return errnoExist
 		}
 	}
 
 	// Check generic os errors as fallback
-	if errors.Is(err, windows.ERROR_DIR_NOT_EMPTY) || errors.Is(err, syscall.ENOTEMPTY) {
-		return errnoNotEmpty
-	}
 	if errors.Is(err, os.ErrNotExist) {
 		return errnoNoEnt
 	}
