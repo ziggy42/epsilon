@@ -277,6 +277,19 @@ func writeAt(
 	return file.WriteAt(data, offset)
 }
 
+// fdWrite writes data to a file descriptor, respecting the current fd flags.
+// On Windows, we must manually handle O_APPEND because Windows cannot change
+// file access modes after opening, so we check the tracked flags and seek to
+// end before writing if append mode is set.
+func fdWrite(file *os.File, data []byte, fdFlags uint16) (int, error) {
+	if fdFlags&fdFlagsAppend != 0 {
+		if _, err := file.Seek(0, io.SeekEnd); err != nil {
+			return 0, err
+		}
+	}
+	return file.Write(data)
+}
+
 func linkat(
 	oldDir *os.File,
 	oldPath string,
@@ -452,13 +465,7 @@ func openat(
 
 	var access uint32 = windows.GENERIC_READ
 	if fsRights&uint64(RightsFdWrite) != 0 {
-		// Use FILE_APPEND_DATA for O_APPEND to get native Windows append behavior,
-		// which automatically seeks to end before each write.
-		if fdflags&int32(fdFlagsAppend) != 0 {
-			access |= windows.FILE_APPEND_DATA
-		} else {
-			access |= windows.GENERIC_WRITE
-		}
+		access |= windows.GENERIC_WRITE
 	}
 
 	var creationDisposition uint32
@@ -665,6 +672,8 @@ func mapError(err error) int32 {
 			return errnoNoEnt
 		case windows.ERROR_DIRECTORY:
 			return errnoNotDir
+		case windows.ERROR_NEGATIVE_SEEK:
+			return errnoInval
 		}
 	}
 

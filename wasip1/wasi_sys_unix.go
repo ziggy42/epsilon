@@ -256,6 +256,13 @@ func writeAt(
 	return file.WriteAt(data, offset)
 }
 
+// fdWrite writes data to a file descriptor, respecting the current fd flags.
+// On Unix, we ignore fdFlags because O_APPEND is handled at the OS level when
+// the file is opened or when flags are changed via fcntl.
+func fdWrite(file *os.File, data []byte, _ uint16) (int, error) {
+	return file.Write(data)
+}
+
 // linkat creates a hard link to an existing file.
 // This is similar to linkat in POSIX.
 //

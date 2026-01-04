@@ -550,7 +550,11 @@ func (w *wasiResourceTable) write(
 		return errCode
 	}
 
-	return iterCiovec(memory, ciovecPtr, ciovecLength, nPtr, fd.file.Write)
+	writeBytes := func(data []byte) (int, error) {
+		return fdWrite(fd.file, data, fd.flags)
+	}
+
+	return iterCiovec(memory, ciovecPtr, ciovecLength, nPtr, writeBytes)
 }
 
 func (w *wasiResourceTable) pathCreateDirectory(
