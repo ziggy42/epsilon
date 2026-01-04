@@ -28,9 +28,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// symlinkFlagAllowUnprivileged is the SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE flag.
-// This enables creating symlinks without admin privileges on Windows 10 1703+
-// when Developer Mode is enabled. The value is 0x2.
+// symlinkFlagAllowUnprivileged is the
+// SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE flag. This enables creating
+// symlinks without admin privileges on Windows 10 1703+ when Developer Mode is
+// enabled. The value is 0x2.
 const symlinkFlagAllowUnprivileged uint32 = 0x2
 
 // maxSymlinkDepth is the maximum number of symlink resolutions allowed.
@@ -46,8 +47,7 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 		return os.ErrInvalid
 	}
 
-	fullPath := filepath.Join(parentPath, name)
-	return os.Mkdir(fullPath, os.FileMode(mode))
+	return os.Mkdir(filepath.Join(parentPath, name), os.FileMode(mode))
 }
 
 func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
@@ -55,8 +55,7 @@ func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
 	if err != nil {
 		return filestat{}, err
 	}
-	fullPath := filepath.Join(parentPath, name)
-	return statFromPath(fullPath, followSymlinks)
+	return statFromPath(filepath.Join(parentPath, name), followSymlinks)
 }
 
 func statFromPath(path string, followSymlinks bool) (filestat, error) {
@@ -117,21 +116,12 @@ func fdstat(file *os.File) (filestat, error) {
 }
 
 func readDirEntries(dir *os.File) ([]dirEntry, error) {
-	parentInode := uint64(0)
 	var info windows.ByHandleFileInformation
 	err := windows.GetFileInformationByHandle(windows.Handle(dir.Fd()), &info)
-	if err == nil {
-		parentInode = uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow)
+	if err != nil {
+		return nil, err
 	}
-
-	// For ".." use a placeholder inode that is distinct from the current
-	// directory's inode. This is a pragmatic choice given the difficulty of
-	// getting parent inode reliably cross-platform within sandbox, and to
-	// satisfy tests expecting non-zero different inodes for . and ..
-	dotDotInode := uint64(1)
-	if parentInode == dotDotInode { // Ensure it's different
-		dotDotInode = uint64(2)
-	}
+	dirInode := uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow)
 
 	if _, err := dir.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -145,14 +135,12 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	result := make([]dirEntry, 0, len(entries)+2)
 	result = append(
 		result,
-		dirEntry{name: ".", fileType: int8(fileTypeDirectory), ino: parentInode},
-		dirEntry{name: "..", fileType: int8(fileTypeDirectory), ino: dotDotInode},
+		dirEntry{name: ".", fileType: int8(fileTypeDirectory), ino: dirInode},
+		dirEntry{name: "..", fileType: int8(fileTypeDirectory), ino: 0},
 	)
 
 	for _, entry := range entries {
-		fullpath := filepath.Join(dir.Name(), entry.Name())
-
-		fs, err := statFromPath(fullpath, false)
+		fs, err := statFromPath(filepath.Join(dir.Name(), entry.Name()), false)
 		if err != nil {
 			return nil, err
 		}
@@ -183,9 +171,8 @@ func utimes(
 	if err != nil {
 		return err
 	}
-	fullPath := filepath.Join(parentPath, name)
 
-	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
+	pathPtr, err := syscall.UTF16PtrFromString(filepath.Join(parentPath, name))
 	if err != nil {
 		return err
 	}
@@ -306,8 +293,7 @@ func readlink(dir *os.File, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	fullPath := filepath.Join(parentPath, name)
-	return os.Readlink(fullPath)
+	return os.Readlink(filepath.Join(parentPath, name))
 }
 
 func rmdirat(dir *os.File, path string) error {
@@ -320,9 +306,7 @@ func rmdirat(dir *os.File, path string) error {
 		return os.ErrInvalid // Cannot remove "."
 	}
 
-	fullPath := filepath.Join(parentPath, name)
-
-	pathPtr, err := syscall.UTF16PtrFromString(fullPath)
+	pathPtr, err := syscall.UTF16PtrFromString(filepath.Join(parentPath, name))
 	if err != nil {
 		return err
 	}
@@ -385,11 +369,15 @@ func renameat(
 
 	if err == windows.ERROR_ACCESS_DENIED {
 		fi, statErr := os.Stat(newFullPath)
-		if statErr == nil && fi.IsDir() {
-			if rerr := os.Remove(newFullPath); rerr == nil {
-				return windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING)
-			}
+		if statErr != nil || !fi.IsDir() {
+			return err // We return the original error.
 		}
+
+		if rerr := os.Remove(newFullPath); rerr != nil {
+			return err // We return the original error.
+		}
+
+		return windows.MoveFileEx(oldPtr, newPtr, windows.MOVEFILE_REPLACE_EXISTING)
 	}
 
 	return err
@@ -400,8 +388,7 @@ func symlinkat(target string, dir *os.File, path string) error {
 		return syscall.ENOENT
 	}
 
-	// WASI tests expect failure when creating symlinks to absolute paths
-	if strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") || filepath.IsAbs(target) {
+	if !isRelativePath(target) {
 		return syscall.EPERM
 	}
 
@@ -416,14 +403,7 @@ func symlinkat(target string, dir *os.File, path string) error {
 		return syscall.ENOENT
 	}
 
-	// Use CreateSymbolicLink directly to support dangling symlinks.
-	// os.Symlink fails on Windows when target doesn't exist because it can't
-	// determine whether to create a file or directory symlink.
-	targetPath := target
-	if !filepath.IsAbs(target) {
-		// Resolve relative target against the directory containing the symlink
-		targetPath = filepath.Join(filepath.Dir(fullPath), target)
-	}
+	targetPath := filepath.Join(filepath.Dir(fullPath), target)
 
 	var flags uint32 = symlinkFlagAllowUnprivileged
 	// Check if target exists and is a directory
@@ -824,10 +804,6 @@ func resolvePathInternal(
 			if err != nil {
 				return "", "", err
 			}
-			// Restart resolution with the resolved path relative to root?
-			// resolved is absolute. We need relative to root to pass to resolvePathInternal?
-			// Or we can just use the absolute path if we had a function for it.
-			// But resolvePathInternal expects relative path.
 
 			// If resolved is absolute and inside root, we can make it relative.
 			rel, err := filepath.Rel(rootPath, resolved)
@@ -962,7 +938,7 @@ func resolveSymlink(rootPath, parentPath, name string) (string, error) {
 	}
 
 	var resolved string
-	if filepath.IsAbs(target) || strings.HasPrefix(target, "/") || strings.HasPrefix(target, "\\") {
+	if !isRelativePath(target) {
 		// Absolute targets are resolved relative to the sandbox root.
 		cleanTarget := filepath.Clean(target)
 
