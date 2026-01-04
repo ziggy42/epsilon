@@ -278,7 +278,7 @@ func linkat(
 		return syscall.EINVAL
 	}
 
-	if strings.HasSuffix(newPath, "/") || strings.HasSuffix(newPath, "\\") {
+	if hasTrailingSlash(newPath) {
 		return syscall.ENOENT
 	}
 
@@ -379,7 +379,7 @@ func renameat(
 }
 
 func symlinkat(target string, dir *os.File, path string) error {
-	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+	if hasTrailingSlash(path) {
 		return syscall.ENOENT
 	}
 
@@ -414,8 +414,7 @@ func symlinkat(target string, dir *os.File, path string) error {
 	}
 
 	// Convert forward slashes to backslashes for Windows
-	windowsTarget := filepath.FromSlash(target)
-	targetPtr, err := syscall.UTF16PtrFromString(windowsTarget)
+	targetPtr, err := syscall.UTF16PtrFromString(filepath.FromSlash(target))
 	if err != nil {
 		return err
 	}
@@ -424,11 +423,7 @@ func symlinkat(target string, dir *os.File, path string) error {
 		return err
 	}
 
-	err = windows.CreateSymbolicLink(pathPtr, targetPtr, flags)
-	if err != nil {
-		return err
-	}
-	return nil
+	return windows.CreateSymbolicLink(pathPtr, targetPtr, flags)
 }
 
 func unlinkat(dir *os.File, path string) error {
@@ -437,7 +432,7 @@ func unlinkat(dir *os.File, path string) error {
 		return err
 	}
 
-	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+	if hasTrailingSlash(path) {
 		fi, err := os.Stat(fullPath)
 		if err != nil {
 			return err
@@ -480,7 +475,7 @@ func openat(
 	}
 
 	// WASI expects trailing slash to imply directory required
-	if strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\") {
+	if hasTrailingSlash(path) {
 		fi, err := os.Stat(fullPath)
 		if err != nil {
 			return nil, err
@@ -651,10 +646,6 @@ func fileTypeFromMode(mode os.FileMode) int8 {
 }
 
 func mapError(err error) int32 {
-	if err == nil {
-		return errnoSuccess
-	}
-
 	// Check specific Windows errors first
 	var werr windows.Errno
 	if errors.As(err, &werr) {
@@ -754,6 +745,10 @@ func secureJoin(root, path string) (string, error) {
 	}
 
 	return fullPath, nil
+}
+
+func hasTrailingSlash(path string) bool {
+	return strings.HasSuffix(path, "/") || strings.HasSuffix(path, "\\")
 }
 
 func statFromHandleFileInformation(info *windows.ByHandleFileInformation) filestat {
