@@ -123,17 +123,15 @@ func runCLI(
 	// Create WASI module
 	builder := wasip1.NewWasiModuleBuilder().
 		// WASI expects argv[0] to be the program name
-		WithArgs(append([]string{modulePath}, wasiArgs...)...)
-
-	for key, value := range wasiEnv {
-		builder = builder.WithEnv(key, value)
-	}
+		WithArgs(append([]string{modulePath}, wasiArgs...)...).
+		WithEnvMap(wasiEnv)
 
 	// Parse pre-opened directories with host:guest path mapping
 	for _, dir := range wasiDirs {
 		hostPath, guestPath := extractHostGuestPaths(dir)
 		file, err := os.Open(hostPath)
 		if err != nil {
+			builder.Close()
 			return fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
 		}
 		builder = builder.WithDir(guestPath, file)

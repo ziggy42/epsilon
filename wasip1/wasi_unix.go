@@ -18,6 +18,7 @@ package wasip1
 
 import (
 	"crypto/rand"
+	"maps"
 	"os"
 	"time"
 
@@ -59,6 +60,14 @@ func (b *WasiModuleBuilder) WithArgs(args ...string) *WasiModuleBuilder {
 // WithEnv adds an environment variable to the WASI module.
 func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
 	b.env[key] = value
+	return b
+}
+
+// WithEnvMap adds multiple environment variables to the WASI module.
+func (b *WasiModuleBuilder) WithEnvMap(
+	env map[string]string,
+) *WasiModuleBuilder {
+	maps.Copy(b.env, env)
 	return b
 }
 
@@ -156,6 +165,13 @@ func (b *WasiModuleBuilder) closeAllFiles() {
 	if b.stderr != nil {
 		b.stderr.Close()
 	}
+}
+
+// Close releases all resources accumulated by the builder without constructing
+// a WasiModule. Use this if you need to abort builder usage before calling
+// Build(), for example if an error occurs while setting up directories.
+func (b *WasiModuleBuilder) Close() {
+	b.closeAllFiles()
 }
 
 func (w *WasiModule) argsGet(

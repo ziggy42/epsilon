@@ -43,6 +43,12 @@ func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
 	return b
 }
 
+func (b *WasiModuleBuilder) WithEnvMap(
+	env map[string]string,
+) *WasiModuleBuilder {
+	return b
+}
+
 func (b *WasiModuleBuilder) WithDir(
 	guestPath string,
 	hostDir *os.File,
@@ -75,12 +81,18 @@ func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 	return b
 }
 
-// Build constructs a WasiModule from the builder configuration.
-// On non-Unix platforms, this always returns an error.
-func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
+// Close releases all resources accumulated by the builder without constructing
+// a WasiModule.
+func (b *WasiModuleBuilder) Close() {
 	for _, f := range b.files {
 		f.Close()
 	}
+}
+
+// Build constructs a WasiModule from the builder configuration.
+// On non-Unix platforms, this always returns an error.
+func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
+	b.Close()
 	return nil, errors.New("WASI is not supported on this platform")
 }
 
