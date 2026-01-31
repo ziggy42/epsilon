@@ -279,14 +279,6 @@ func (w *WasiModule) randomGet(
 	return errnoSuccess
 }
 
-func (w *WasiModule) procRaise(sig int32) int32 {
-	return errnoNotSup
-}
-
-func (w *WasiModule) schedYield() int32 {
-	return errnoSuccess
-}
-
 func bind(fn func([]any) int32) func(*epsilon.ModuleInstance, ...any) []any {
 	return func(_ *epsilon.ModuleInstance, args ...any) []any {
 		return []any{fn(args)}
@@ -637,10 +629,10 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			)
 		})).
 		AddHostFunc("proc_raise", bind(func(args []any) int32 {
-			return w.procRaise(args[0].(int32))
+			return errnoNotSup
 		})).
 		AddHostFunc("sched_yield", bind(func(args []any) int32 {
-			return w.schedYield()
+			return errnoSuccess
 		})).
 		AddHostFunc("sock_accept", bindMem(func(
 			m *epsilon.Memory,
