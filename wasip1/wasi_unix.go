@@ -110,14 +110,10 @@ func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 
 // Build constructs a WasiModule from the builder configuration.
 //
-// Ownership Contract:
-// On success (err == nil), the returned WasiModule takes ownership of the
-// *os.Files provided. The caller must call Close() on the WasiModule to
-// release these resources when done.
-//
-// On failure (err != nil), the WasiModule is not created, and the ownership of
-// the files remains with the caller. The caller is responsible for closing the
-// files in this case.
+// Build takes ownership of all *os.Files provided via WithDir, WithStdin,
+// WithStdout, and WithStderr, regardless of whether Build succeeds or fails.
+// On success, call Close() on the WasiModule to release resources.
+// On failure, Build closes all provided files before returning.
 func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 	stdin := b.stdin
 	if stdin == nil {
@@ -134,6 +130,7 @@ func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 
 	fs, err := newWasiResourceTable(b.preopens, stdin, stdout, stderr)
 	if err != nil {
+		b.closeAllFiles()
 		return nil, err
 	}
 	return &WasiModule{
@@ -142,6 +139,23 @@ func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 		env:                   b.env,
 		monotonicClockStartNs: time.Now().UnixNano(),
 	}, nil
+}
+
+// closeAllFiles closes all files that were passed to the builder.
+// It only closes files that are not the standard os.Stdin/Stdout/Stderr.
+func (b *WasiModuleBuilder) closeAllFiles() {
+	for _, preopen := range b.preopens {
+		preopen.File.Close()
+	}
+	if b.stdin != nil {
+		b.stdin.Close()
+	}
+	if b.stdout != nil {
+		b.stdout.Close()
+	}
+	if b.stderr != nil {
+		b.stderr.Close()
+	}
 }
 
 func (w *WasiModule) argsGet(
