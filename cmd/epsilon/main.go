@@ -114,41 +114,37 @@ func runCLI(
 	wasiDirs []string,
 ) error {
 	modulePath := args[0]
-	moduleReader, err := resolveModule(modulePath)
-	if err != nil {
-		return err
-	}
-	defer moduleReader.Close()
 
-	// WASI expects argv[0] to be the program name (module path)
-	fullArgs := append([]string{modulePath}, wasiArgs...)
+	// Create WASI module
+	builder := wasip1.NewWasiModuleBuilder().
+		// WASI expects argv[0] to be the program name
+		WithArgs(append([]string{modulePath}, wasiArgs...)...)
+
+	for key, value := range wasiEnv {
+		builder = builder.WithEnv(key, value)
+	}
 
 	// Parse pre-opened directories with host:guest path mapping
-	preopens := make([]wasip1.WasiPreopen, 0, len(wasiDirs))
 	for _, dir := range wasiDirs {
 		hostPath, guestPath := extractHostGuestPaths(dir)
 		file, err := os.Open(hostPath)
 		if err != nil {
 			return fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
 		}
-
-		preopens = append(preopens, wasip1.WasiPreopen{
-			File:             file,
-			GuestPath:        guestPath,
-			Rights:           wasip1.DefaultDirRights,
-			RightsInheriting: wasip1.DefaultDirInheritingRights,
-		})
+		builder = builder.WithDir(guestPath, file)
 	}
 
-	wasiModule, err := wasip1.NewWasiModule(wasip1.WasiConfig{
-		Args:     fullArgs,
-		Env:      wasiEnv,
-		Preopens: preopens,
-	})
+	wasiModule, err := builder.Build()
 	if err != nil {
 		return err
 	}
 	defer wasiModule.Close()
+
+	moduleReader, err := resolveModule(modulePath)
+	if err != nil {
+		return err
+	}
+	defer moduleReader.Close()
 
 	instance, err := epsilon.NewRuntime().
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())

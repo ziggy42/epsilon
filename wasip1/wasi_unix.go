@@ -24,14 +24,14 @@ import (
 	"github.com/ziggy42/epsilon/epsilon"
 )
 
-// WasiConfig contains configuration for creating a new WasiModule.
-type WasiConfig struct {
-	Args     []string
-	Env      map[string]string
-	Preopens []WasiPreopen
-	Stdin    *os.File // If nil, os.Stdin is used.
-	Stdout   *os.File // If nil, os.Stdout is used.
-	Stderr   *os.File // If nil, os.Stderr is used.
+// WasiModuleBuilder is a builder for creating WasiModule instances.
+type WasiModuleBuilder struct {
+	args     []string
+	env      map[string]string
+	preopens []WasiPreopen
+	stdin    *os.File
+	stdout   *os.File
+	stderr   *os.File
 }
 
 type WasiModule struct {
@@ -41,39 +41,109 @@ type WasiModule struct {
 	monotonicClockStartNs int64
 }
 
-// NewWasiModule creates a new WasiModule instance.
+// NewWasiModuleBuilder creates a new WasiModuleBuilder with default values.
+func NewWasiModuleBuilder() *WasiModuleBuilder {
+	return &WasiModuleBuilder{
+		args:     []string{},
+		env:      make(map[string]string),
+		preopens: []WasiPreopen{},
+		stdin:    nil, // will default to os.Stdin in Build()
+		stdout:   nil, // will default to os.Stdout in Build()
+		stderr:   nil, // will default to os.Stderr in Build()
+	}
+}
+
+// WithArgs sets the command-line arguments for the WASI module.
+func (b *WasiModuleBuilder) WithArgs(args ...string) *WasiModuleBuilder {
+	b.args = args
+	return b
+}
+
+// WithEnv adds an environment variable to the WASI module.
+func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
+	b.env[key] = value
+	return b
+}
+
+// WithDir mounts a directory with default rights.
+func (b *WasiModuleBuilder) WithDir(
+	guestPath string,
+	hostDir *os.File,
+) *WasiModuleBuilder {
+	return b.WithDirRights(
+		guestPath,
+		hostDir,
+		DefaultDirRights,
+		DefaultDirInheritingRights,
+	)
+}
+
+// WithDirRights mounts a directory with explicit rights.
+func (b *WasiModuleBuilder) WithDirRights(
+	guestPath string,
+	hostDir *os.File,
+	rights, rightsInheriting int64,
+) *WasiModuleBuilder {
+	b.preopens = append(b.preopens, WasiPreopen{
+		File:             hostDir,
+		GuestPath:        guestPath,
+		Rights:           rights,
+		RightsInheriting: rightsInheriting,
+	})
+	return b
+}
+
+// WithStdin sets the stdin file for the WASI module.
+func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
+	b.stdin = f
+	return b
+}
+
+// WithStdout sets the stdout file for the WASI module.
+func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
+	b.stdout = f
+	return b
+}
+
+// WithStderr sets the stderr file for the WASI module.
+func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
+	b.stderr = f
+	return b
+}
+
+// Build constructs a WasiModule from the builder configuration.
 //
 // Ownership Contract:
 // On success (err == nil), the returned WasiModule takes ownership of the
-// *os.Files provided in 'preopens'. The module will close these files when its
-// resources are released (e.g. via an explicit Close method, if one existed, or
-// relying on GC/Finalizers isn't safe, so the runtime typically handles this).
+// *os.Files provided. The module will close these files when its resources are
+// released (e.g. via an explicit Close method, if one existed, or relying on
+// GC/Finalizers isn't safe, so the runtime typically handles this).
 //
 // On failure (err != nil), the WasiModule is not created, and the ownership of
 // the files remains with the caller. The caller is responsible for closing the
 // files in this case.
-func NewWasiModule(config WasiConfig) (*WasiModule, error) {
-	stdin := config.Stdin
+func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
+	stdin := b.stdin
 	if stdin == nil {
 		stdin = os.Stdin
 	}
-	stdout := config.Stdout
+	stdout := b.stdout
 	if stdout == nil {
 		stdout = os.Stdout
 	}
-	stderr := config.Stderr
+	stderr := b.stderr
 	if stderr == nil {
 		stderr = os.Stderr
 	}
 
-	fs, err := newWasiResourceTable(config.Preopens, stdin, stdout, stderr)
+	fs, err := newWasiResourceTable(b.preopens, stdin, stdout, stderr)
 	if err != nil {
 		return nil, err
 	}
 	return &WasiModule{
 		fs:                    fs,
-		args:                  config.Args,
-		env:                   config.Env,
+		args:                  b.args,
+		env:                   b.env,
 		monotonicClockStartNs: time.Now().UnixNano(),
 	}, nil
 }
