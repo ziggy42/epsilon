@@ -23,7 +23,9 @@ import (
 
 // WasiModuleBuilder is a builder for creating WasiModule instances.
 // On non-Unix platforms, WASI is not supported.
-type WasiModuleBuilder struct{}
+type WasiModuleBuilder struct {
+	files []*os.File
+}
 
 // WasiModule provides WASI functionality to WebAssembly modules.
 // On non-Unix platforms, WASI is not supported.
@@ -45,6 +47,7 @@ func (b *WasiModuleBuilder) WithDir(
 	guestPath string,
 	hostDir *os.File,
 ) *WasiModuleBuilder {
+	b.files = append(b.files, hostDir)
 	return b
 }
 
@@ -53,24 +56,31 @@ func (b *WasiModuleBuilder) WithDirRights(
 	hostDir *os.File,
 	rights, rightsInheriting int64,
 ) *WasiModuleBuilder {
+	b.files = append(b.files, hostDir)
 	return b
 }
 
 func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
+	b.files = append(b.files, f)
 	return b
 }
 
 func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
+	b.files = append(b.files, f)
 	return b
 }
 
 func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
+	b.files = append(b.files, f)
 	return b
 }
 
 // Build constructs a WasiModule from the builder configuration.
 // On non-Unix platforms, this always returns an error.
 func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
+	for _, f := range b.files {
+		f.Close()
+	}
 	return nil, errors.New("WASI is not supported on this platform")
 }
 
