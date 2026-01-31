@@ -29,22 +29,18 @@ type WasiModuleBuilder struct{}
 // On non-Unix platforms, WASI is not supported.
 type WasiModule struct{}
 
-// NewWasiModuleBuilder creates a new WasiModuleBuilder.
 func NewWasiModuleBuilder() *WasiModuleBuilder {
 	return &WasiModuleBuilder{}
 }
 
-// WithArgs sets the command-line arguments for the WASI module.
 func (b *WasiModuleBuilder) WithArgs(args ...string) *WasiModuleBuilder {
 	return b
 }
 
-// WithEnv adds an environment variable to the WASI module.
 func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
 	return b
 }
 
-// WithDir mounts a directory with default rights.
 func (b *WasiModuleBuilder) WithDir(
 	guestPath string,
 	hostDir *os.File,
@@ -52,7 +48,6 @@ func (b *WasiModuleBuilder) WithDir(
 	return b
 }
 
-// WithDirRights mounts a directory with explicit rights.
 func (b *WasiModuleBuilder) WithDirRights(
 	guestPath string,
 	hostDir *os.File,
@@ -61,17 +56,14 @@ func (b *WasiModuleBuilder) WithDirRights(
 	return b
 }
 
-// WithStdin sets the stdin file for the WASI module.
 func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
 	return b
 }
 
-// WithStdout sets the stdout file for the WASI module.
 func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
 	return b
 }
 
-// WithStderr sets the stderr file for the WASI module.
 func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 	return b
 }
