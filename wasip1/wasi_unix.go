@@ -47,9 +47,6 @@ func NewWasiModuleBuilder() *WasiModuleBuilder {
 		args:     []string{},
 		env:      make(map[string]string),
 		preopens: []WasiPreopen{},
-		stdin:    nil, // will default to os.Stdin in Build()
-		stdout:   nil, // will default to os.Stdout in Build()
-		stderr:   nil, // will default to os.Stderr in Build()
 	}
 }
 
@@ -93,19 +90,19 @@ func (b *WasiModuleBuilder) WithDirRights(
 	return b
 }
 
-// WithStdin sets the stdin file for the WASI module.
+// WithStdin overrides the default stdin (os.Stdin) for the WASI module.
 func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
 	b.stdin = f
 	return b
 }
 
-// WithStdout sets the stdout file for the WASI module.
+// WithStdout overrides the default stdout (os.Stdout) for the WASI module.
 func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
 	b.stdout = f
 	return b
 }
 
-// WithStderr sets the stderr file for the WASI module.
+// WithStderr overrides the default stderr (os.Stderr) for the WASI module.
 func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 	b.stderr = f
 	return b
