@@ -17,6 +17,7 @@
 package wasip1
 
 import (
+	"cmp"
 	"crypto/rand"
 	"maps"
 	"os"
@@ -124,22 +125,14 @@ func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 // On success, call Close() on the WasiModule to release resources.
 // On failure, Build closes all provided files before returning.
 func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
-	stdin := b.stdin
-	if stdin == nil {
-		stdin = os.Stdin
-	}
-	stdout := b.stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stderr := b.stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
-
-	fs, err := newWasiResourceTable(b.preopens, stdin, stdout, stderr)
+	fs, err := newWasiResourceTable(
+		b.preopens,
+		cmp.Or(b.stdin, os.Stdin),
+		cmp.Or(b.stdout, os.Stdout),
+		cmp.Or(b.stderr, os.Stderr),
+	)
 	if err != nil {
-		b.closeAllFiles()
+		b.Close()
 		return nil, err
 	}
 	return &WasiModule{
@@ -150,9 +143,10 @@ func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 	}, nil
 }
 
-// closeAllFiles closes all files that were passed to the builder.
-// It only closes files that are not the standard os.Stdin/Stdout/Stderr.
-func (b *WasiModuleBuilder) closeAllFiles() {
+// Close releases all resources accumulated by the builder without constructing
+// a WasiModule. Use this if you need to abort builder usage before calling
+// Build(), for example if an error occurs while setting up directories.
+func (b *WasiModuleBuilder) Close() {
 	for _, preopen := range b.preopens {
 		preopen.File.Close()
 	}
@@ -165,13 +159,6 @@ func (b *WasiModuleBuilder) closeAllFiles() {
 	if b.stderr != nil {
 		b.stderr.Close()
 	}
-}
-
-// Close releases all resources accumulated by the builder without constructing
-// a WasiModule. Use this if you need to abort builder usage before calling
-// Build(), for example if an error occurs while setting up directories.
-func (b *WasiModuleBuilder) Close() {
-	b.closeAllFiles()
 }
 
 func (w *WasiModule) argsGet(
