@@ -115,6 +115,12 @@ func runCLI(
 ) error {
 	modulePath := args[0]
 
+	moduleReader, err := resolveModule(modulePath)
+	if err != nil {
+		return err
+	}
+	defer moduleReader.Close()
+
 	// Create WASI module
 	builder := wasip1.NewWasiModuleBuilder().
 		// WASI expects argv[0] to be the program name
@@ -139,12 +145,6 @@ func runCLI(
 		return err
 	}
 	defer wasiModule.Close()
-
-	moduleReader, err := resolveModule(modulePath)
-	if err != nil {
-		return err
-	}
-	defer moduleReader.Close()
 
 	instance, err := epsilon.NewRuntime().
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())
