@@ -112,9 +112,8 @@ func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
 //
 // Ownership Contract:
 // On success (err == nil), the returned WasiModule takes ownership of the
-// *os.Files provided. The module will close these files when its resources are
-// released (e.g. via an explicit Close method, if one existed, or relying on
-// GC/Finalizers isn't safe, so the runtime typically handles this).
+// *os.Files provided. The caller must call Close() on the WasiModule to
+// release these resources when done.
 //
 // On failure (err != nil), the WasiModule is not created, and the ownership of
 // the files remains with the caller. The caller is responsible for closing the
