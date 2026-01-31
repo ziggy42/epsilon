@@ -17,21 +17,23 @@
 package wasip1
 
 import (
+	"cmp"
 	"crypto/rand"
+	"maps"
 	"os"
 	"time"
 
 	"github.com/ziggy42/epsilon/epsilon"
 )
 
-// WasiConfig contains configuration for creating a new WasiModule.
-type WasiConfig struct {
-	Args     []string
-	Env      map[string]string
-	Preopens []WasiPreopen
-	Stdin    *os.File // If nil, os.Stdin is used.
-	Stdout   *os.File // If nil, os.Stdout is used.
-	Stderr   *os.File // If nil, os.Stderr is used.
+// WasiModuleBuilder is a builder for creating WasiModule instances.
+type WasiModuleBuilder struct {
+	args     []string
+	env      map[string]string
+	preopens []WasiPreopen
+	stdin    *os.File
+	stdout   *os.File
+	stderr   *os.File
 }
 
 type WasiModule struct {
@@ -41,41 +43,122 @@ type WasiModule struct {
 	monotonicClockStartNs int64
 }
 
-// NewWasiModule creates a new WasiModule instance.
-//
-// Ownership Contract:
-// On success (err == nil), the returned WasiModule takes ownership of the
-// *os.Files provided in 'preopens'. The module will close these files when its
-// resources are released (e.g. via an explicit Close method, if one existed, or
-// relying on GC/Finalizers isn't safe, so the runtime typically handles this).
-//
-// On failure (err != nil), the WasiModule is not created, and the ownership of
-// the files remains with the caller. The caller is responsible for closing the
-// files in this case.
-func NewWasiModule(config WasiConfig) (*WasiModule, error) {
-	stdin := config.Stdin
-	if stdin == nil {
-		stdin = os.Stdin
+// NewWasiModuleBuilder creates a new WasiModuleBuilder with default values.
+func NewWasiModuleBuilder() *WasiModuleBuilder {
+	return &WasiModuleBuilder{
+		args:     []string{},
+		env:      make(map[string]string),
+		preopens: []WasiPreopen{},
 	}
-	stdout := config.Stdout
-	if stdout == nil {
-		stdout = os.Stdout
-	}
-	stderr := config.Stderr
-	if stderr == nil {
-		stderr = os.Stderr
-	}
+}
 
-	fs, err := newWasiResourceTable(config.Preopens, stdin, stdout, stderr)
+// WithArgs sets the command-line arguments for the WASI module.
+func (b *WasiModuleBuilder) WithArgs(args ...string) *WasiModuleBuilder {
+	b.args = args
+	return b
+}
+
+// WithEnv adds an environment variable to the WASI module.
+func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
+	b.env[key] = value
+	return b
+}
+
+// WithEnvMap adds multiple environment variables to the WASI module.
+func (b *WasiModuleBuilder) WithEnvMap(
+	env map[string]string,
+) *WasiModuleBuilder {
+	maps.Copy(b.env, env)
+	return b
+}
+
+// WithDir mounts a directory with default rights.
+func (b *WasiModuleBuilder) WithDir(
+	guestPath string,
+	hostDir *os.File,
+) *WasiModuleBuilder {
+	return b.WithDirRights(
+		guestPath,
+		hostDir,
+		DefaultDirRights,
+		DefaultDirInheritingRights,
+	)
+}
+
+// WithDirRights mounts a directory with explicit rights.
+func (b *WasiModuleBuilder) WithDirRights(
+	guestPath string,
+	hostDir *os.File,
+	rights, rightsInheriting int64,
+) *WasiModuleBuilder {
+	b.preopens = append(b.preopens, WasiPreopen{
+		File:             hostDir,
+		GuestPath:        guestPath,
+		Rights:           rights,
+		RightsInheriting: rightsInheriting,
+	})
+	return b
+}
+
+// WithStdin overrides the default stdin (os.Stdin) for the WASI module.
+func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
+	b.stdin = f
+	return b
+}
+
+// WithStdout overrides the default stdout (os.Stdout) for the WASI module.
+func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
+	b.stdout = f
+	return b
+}
+
+// WithStderr overrides the default stderr (os.Stderr) for the WASI module.
+func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
+	b.stderr = f
+	return b
+}
+
+// Build constructs a WasiModule from the builder configuration.
+//
+// Build takes ownership of all *os.Files provided via WithDir, WithStdin,
+// WithStdout, and WithStderr, regardless of whether Build succeeds or fails.
+// On success, call Close() on the WasiModule to release resources.
+// On failure, Build closes all provided files before returning.
+func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
+	fs, err := newWasiResourceTable(
+		b.preopens,
+		cmp.Or(b.stdin, os.Stdin),
+		cmp.Or(b.stdout, os.Stdout),
+		cmp.Or(b.stderr, os.Stderr),
+	)
 	if err != nil {
+		b.Close()
 		return nil, err
 	}
 	return &WasiModule{
 		fs:                    fs,
-		args:                  config.Args,
-		env:                   config.Env,
+		args:                  b.args,
+		env:                   b.env,
 		monotonicClockStartNs: time.Now().UnixNano(),
 	}, nil
+}
+
+// Close releases all resources accumulated by the builder without constructing
+// a WasiModule. Use this if you need to abort builder usage before calling
+// Build(), for example if an error occurs while setting up directories.
+func (b *WasiModuleBuilder) Close() {
+	for _, preopen := range b.preopens {
+		preopen.File.Close()
+	}
+	if b.stdin != nil {
+		b.stdin.Close()
+	}
+	if b.stdout != nil {
+		b.stdout.Close()
+	}
+	if b.stderr != nil {
+		b.stderr.Close()
+	}
 }
 
 func (w *WasiModule) argsGet(
@@ -206,14 +289,6 @@ func (w *WasiModule) randomGet(
 		return errnoFault
 	}
 
-	return errnoSuccess
-}
-
-func (w *WasiModule) procRaise(sig int32) int32 {
-	return errnoNotSup
-}
-
-func (w *WasiModule) schedYield() int32 {
 	return errnoSuccess
 }
 
@@ -567,10 +642,10 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			)
 		})).
 		AddHostFunc("proc_raise", bind(func(args []any) int32 {
-			return w.procRaise(args[0].(int32))
+			return errnoNotSup
 		})).
 		AddHostFunc("sched_yield", bind(func(args []any) int32 {
-			return w.schedYield()
+			return errnoSuccess
 		})).
 		AddHostFunc("sock_accept", bindMem(func(
 			m *epsilon.Memory,

@@ -13,7 +13,7 @@ This package provides a [WASI Preview 1](https://github.com/WebAssembly/WASI/blo
 | macOS | ✅ Supported |
 | Windows | ❌ Not Supported |
 
-On non-Unix platforms, `NewWasiModule()` returns an error.
+On non-Unix platforms, `NewWasiModuleBuilder().Build()` returns an error.
 
 ## Usage
 
@@ -34,20 +34,13 @@ func main() {
 	// Open a directory to pre-open for the WASM module
 	dir, _ := os.Open("/path/to/sandbox")
 
-	// Create a WASI module with args, env, and pre-opened directory
-	wasiModule, _ := wasip1.NewWasiModule(wasip1.WasiConfig{
-		Args: []string{"guest.wasm", "--verbose", "--count=42"},
-		Env: map[string]string{
-			"GREETING": "Hello from WASI!",
-			"USER":     "wasm_user",
-		},
-		Preopens: []wasip1.WasiPreopen{{
-			File:             dir,
-			GuestPath:        "/sandbox",
-			Rights:           wasip1.DefaultDirRights,
-			RightsInheriting: wasip1.DefaultDirInheritingRights,
-		}},
-	})
+	// Create a WASI module with args, env, and a pre-opened directory
+	wasiModule, _ := wasip1.NewWasiModuleBuilder().
+		WithArgs("guest.wasm", "--verbose", "--count=42").
+		WithEnv("GREETING", "Hello from WASI!").
+		WithEnv("USER", "wasm_user").
+		WithDir("/sandbox", dir).
+		Build()
 	defer wasiModule.Close()
 
 	// Instantiate the module with WASI imports

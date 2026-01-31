@@ -83,15 +83,10 @@ func newWasiResourceTable(
 	for _, dir := range preopens {
 		fd, err := newPreopenFileDescriptor(dir)
 		if err != nil {
-			// If we fail halfway through loop, we must close the preopened files we
-			// already accepted.
-			resourceTable.closeAll()
 			return nil, err
 		}
 		newFdIndex, err := resourceTable.allocateFdIndex()
 		if err != nil {
-			resourceTable.closeAll()
-			dir.File.Close()
 			return nil, err
 		}
 		resourceTable.fds[newFdIndex] = fd
