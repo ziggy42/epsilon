@@ -114,7 +114,6 @@ func runCLI(
 	wasiDirs []string,
 ) error {
 	modulePath := args[0]
-
 	moduleReader, err := resolveModule(modulePath)
 	if err != nil {
 		return err
