@@ -188,7 +188,10 @@ func newWASIModule(opts options) (*wasip1.WasiModule, error) {
 	}
 
 	for _, dir := range opts.wasiDirs {
-		hostPath, guestPath := extractHostGuestPaths(dir)
+		hostPath, guestPath, ok := strings.Cut(dir, "=")
+		if !ok {
+			guestPath = hostPath
+		}
 		file, err := os.Open(hostPath)
 		if err != nil {
 			builder.Close()
@@ -198,14 +201,6 @@ func newWASIModule(opts options) (*wasip1.WasiModule, error) {
 	}
 
 	return builder.Build()
-}
-
-func extractHostGuestPaths(arg string) (string, string) {
-	hostPath, guestPath, ok := strings.Cut(arg, "=")
-	if !ok {
-		return hostPath, hostPath
-	}
-	return hostPath, guestPath
 }
 
 func invokeFunction(
