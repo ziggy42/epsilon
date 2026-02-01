@@ -39,15 +39,6 @@ type options struct {
 	wasiDirs     []string
 }
 
-type repeatedFlag []string
-
-func (f *repeatedFlag) String() string { return strings.Join(*f, ",") }
-
-func (f *repeatedFlag) Set(v string) error {
-	*f = append(*f, v)
-	return nil
-}
-
 func main() {
 	opts, err := parseOptions()
 	if err != nil {
@@ -73,10 +64,23 @@ func main() {
 func parseOptions() (*options, error) {
 	flag.Usage = printUsage
 	version := flag.Bool("version", false, "print version and exit")
-	var wasiArgs, wasiEnv, wasiDirs repeatedFlag
-	flag.Var(&wasiArgs, "arg", "command-line argument")
-	flag.Var(&wasiEnv, "env", "environment variable (KEY=VALUE)")
-	flag.Var(&wasiDirs, "dir", "directory to mount (use /from=/to to mount at a different path)")
+	var wasiArgs, wasiEnv, wasiDirs []string
+	flag.Func("arg", "command-line argument", func(s string) error {
+		wasiArgs = append(wasiArgs, s)
+		return nil
+	})
+	flag.Func("env", "environment variable (KEY=VALUE)", func(s string) error {
+		wasiEnv = append(wasiEnv, s)
+		return nil
+	})
+	flag.Func(
+		"dir",
+		"directory to mount (use /from=/to to mount at a different path)",
+		func(s string) error {
+			wasiDirs = append(wasiDirs, s)
+			return nil
+		},
+	)
 	flag.Parse()
 
 	if *version {
