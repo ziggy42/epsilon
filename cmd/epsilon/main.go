@@ -74,9 +74,9 @@ func parseOptions() (*options, error) {
 	flag.Usage = printUsage
 	version := flag.Bool("version", false, "print version and exit")
 	var wasiArgs, wasiEnv, wasiDirs repeatedFlag
-	flag.Var(&wasiArgs, "arg", "argument to pass to WASI module")
-	flag.Var(&wasiEnv, "env", "env variable to pass to WASI module (KEY=VALUE)")
-	flag.Var(&wasiDirs, "dir", "dir or file to pre-open (format: host_path or host_path=guest_path)")
+	flag.Var(&wasiArgs, "arg", "command-line argument")
+	flag.Var(&wasiEnv, "env", "environment variable (KEY=VALUE)")
+	flag.Var(&wasiDirs, "dir", "directory to mount (use /from=/to to mount at a different path)")
 	flag.Parse()
 
 	if *version {
@@ -103,23 +103,18 @@ func parseOptions() (*options, error) {
 }
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  epsilon [options] <module>\n")
-	fmt.Fprintf(os.Stderr, "  epsilon [options] <module> <function> [function-args...]\n\n")
-	fmt.Fprintf(os.Stderr, "Arguments:\n")
-	fmt.Fprintf(os.Stderr, "  <module>           Path or URL to a WebAssembly module\n")
-	fmt.Fprintf(os.Stderr, "  <function>         Name of the exported function to invoke\n")
-	fmt.Fprintf(os.Stderr, "  [function-args...] Arguments to pass to the exported function\n\n")
-	fmt.Fprintf(os.Stderr, "Options:\n")
+	fmt.Fprint(os.Stderr, `Usage:
+  epsilon [options] <module> [function] [args...]
+
+Options:
+`)
 	flag.PrintDefaults()
-	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  epsilon module.wasm                         Run a WASI module\n")
-	fmt.Fprintf(os.Stderr, "  epsilon module.wasm add 5 10                Invoke a function\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -arg foo -arg bar module.wasm       Pass args to WASI module\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -env KEY=value module.wasm          Pass env vars to WASI module\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -arg foo -env KEY=val module.wasm   Pass both args and env\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -dir /tmp module.wasm               Pre-open a directory\n")
-	fmt.Fprintf(os.Stderr, "  epsilon -dir /host=/guest module.wasm       Pre-open with path mapping\n")
+	fmt.Fprint(os.Stderr, `
+Examples:
+  epsilon module.wasm                    Run module.wasm
+  epsilon module.wasm add 5 10           Call add(5, 10)
+  epsilon -dir /host=/guest module.wasm  Mount /host as /guest
+`)
 }
 
 func run(opts *options) error {
