@@ -18,7 +18,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/ziggy42/epsilon/epsilon"
@@ -27,7 +31,6 @@ import (
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n")
-	fmt.Fprintf(os.Stderr, "  epsilon [options]\n")
 	fmt.Fprintf(os.Stderr, "  epsilon [options] <module>\n")
 	fmt.Fprintf(os.Stderr, "  epsilon [options] <module> <function> [function-args...]\n\n")
 	fmt.Fprintf(os.Stderr, "Arguments:\n")
@@ -37,7 +40,6 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "Options:\n")
 	flag.PrintDefaults()
 	fmt.Fprintf(os.Stderr, "\nExamples:\n")
-	fmt.Fprintf(os.Stderr, "  epsilon                                     Start interactive REPL\n")
 	fmt.Fprintf(os.Stderr, "  epsilon module.wasm                         Run a WASI module\n")
 	fmt.Fprintf(os.Stderr, "  epsilon module.wasm add 5 10                Invoke a function\n")
 	fmt.Fprintf(os.Stderr, "  epsilon -arg foo -arg bar module.wasm       Pass args to WASI module\n")
@@ -97,8 +99,8 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		startREPL()
-		return
+		printUsage()
+		os.Exit(1)
 	}
 
 	if err := runCLI(args, wasiArgs, wasiEnv, wasiDirs); err != nil {
@@ -172,10 +174,81 @@ func runCLI(
 
 func extractHostGuestPaths(arg string) (string, string) {
 	parts := strings.SplitN(arg, "=", 2)
-	hostPath := parts[0]
-	guestPath := hostPath
 	if len(parts) == 2 {
-		guestPath = parts[1]
+		return parts[0], parts[1]
 	}
-	return hostPath, guestPath
+	return parts[0], parts[0]
+}
+
+func resolveModule(source string) (io.ReadCloser, error) {
+	u, err := url.Parse(source)
+	if err != nil {
+		return nil, err
+	}
+
+	switch u.Scheme {
+	case "http", "https":
+		resp, err := http.Get(u.String())
+		if err != nil {
+			return nil, fmt.Errorf("http request failed: %w", err)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			resp.Body.Close()
+			return nil, fmt.Errorf("unexpected http status: %s", resp.Status)
+		}
+		return resp.Body, nil
+	case "file":
+		return os.Open(u.Path)
+	default:
+		// Fallback to os.Open if we don't have a scheme.
+		return os.Open(source)
+	}
+}
+
+// parseAndInvokeFunction invokes the given function parsing the provided args
+// to their correct types.
+func parseAndInvokeFunction(
+	instance *epsilon.ModuleInstance,
+	functionName string,
+	args []string,
+) ([]any, error) {
+	function, err := instance.GetFunction(functionName)
+	if err != nil {
+		return nil, err
+	}
+
+	paramTypes := function.GetType().ParamTypes
+	if len(args) != len(paramTypes) {
+		return nil, fmt.Errorf(
+			"args mismatch: expected %d, got %d", len(paramTypes), len(args),
+		)
+	}
+
+	parsedArgs := make([]any, len(paramTypes))
+	for i, paramType := range paramTypes {
+		arg, err := parseArg(args[i], paramType)
+		if err != nil {
+			return nil, err
+		}
+		parsedArgs[i] = arg
+	}
+
+	return instance.Invoke(functionName, parsedArgs...)
+}
+
+func parseArg(raw string, t epsilon.ValueType) (any, error) {
+	switch t {
+	case epsilon.I32:
+		v, err := strconv.ParseInt(raw, 10, 32)
+		return int32(v), err
+	case epsilon.I64:
+		return strconv.ParseInt(raw, 10, 64)
+	case epsilon.F32:
+		v, err := strconv.ParseFloat(raw, 32)
+		return float32(v), err
+	case epsilon.F64:
+		return strconv.ParseFloat(raw, 64)
+	default:
+		return nil, fmt.Errorf("unsupported type: %v", t)
+	}
 }
