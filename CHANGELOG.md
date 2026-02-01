@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2026-02-01
+
+- Added experimental support for [WASI Preview 1](wasip1/README.md) on Linux and macOS.
+- **API Changes**: Host functions now receive `ModuleInstance` as their first argument, enabling context-aware implementations (#32).
+- CLI now invokes `_start` by default if no entry point is specified.
+
 ## [0.0.3] - 2025-12-20
 
 - **API Changes**: `ExperimentalFeatures` has been replaced by `Config`, and `Runtime.WithFeatures` has been renamed to `WithConfig` (#28).
