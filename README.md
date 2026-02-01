@@ -12,7 +12,7 @@
 * Runs on any architecture supported by Go (amd64, arm64, etc.) without requiring CGo
 * Allows embedding WebAssembly modules in Go applications
 * Includes experimental [WASI Preview 1](wasip1/README.md) support
-* Includes a command-line interface and interactive REPL
+* Includes a command-line interface
 
 ## Installation
 
@@ -87,9 +87,8 @@ instance, _ := epsilon.NewRuntime().
 
 ```text
 Usage:
-  epsilon [options]
-  epsilon <module>
-  epsilon <module> <function> [args...]
+  epsilon [options] <module>
+  epsilon [options] <module> <function> [args...]
 
 Arguments:
   <module>      Path or URL to a WebAssembly module
@@ -101,8 +100,7 @@ Options:
         print version and exit
 
 Examples:
-  epsilon                          Start interactive REPL
-  epsilon module.wasm              Instantiate a module
+  epsilon module.wasm              Run a WASI module
   epsilon module.wasm add 5 10     Invoke a function
 ```
 
