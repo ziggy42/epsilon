@@ -29,6 +29,79 @@ import (
 	"github.com/ziggy42/epsilon/wasip1"
 )
 
+type options struct {
+	showVersion  bool
+	modulePath   string
+	functionName string
+	functionArgs []string
+	wasiArgs     []string
+	wasiEnv      []string
+	wasiDirs     []string
+}
+
+type repeatedFlag []string
+
+func (f *repeatedFlag) String() string { return strings.Join(*f, ",") }
+
+func (f *repeatedFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
+}
+
+func main() {
+	opts, err := parseOptions()
+	if err != nil {
+		printUsage()
+		os.Exit(1)
+	}
+
+	if opts.showVersion {
+		fmt.Println(epsilon.Version)
+		return
+	}
+
+	if err := run(opts); err != nil {
+		var procExitErr *wasip1.ProcExitError
+		if errors.As(err, &procExitErr) {
+			os.Exit(int(procExitErr.Code))
+		}
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func parseOptions() (*options, error) {
+	flag.Usage = printUsage
+	version := flag.Bool("version", false, "print version and exit")
+	var wasiArgs, wasiEnv, wasiDirs repeatedFlag
+	flag.Var(&wasiArgs, "arg", "argument to pass to WASI module")
+	flag.Var(&wasiEnv, "env", "env variable to pass to WASI module (KEY=VALUE)")
+	flag.Var(&wasiDirs, "dir", "dir or file to pre-open (format: host_path or host_path=guest_path)")
+	flag.Parse()
+
+	if *version {
+		return &options{showVersion: true}, nil
+	}
+
+	args := flag.Args()
+	if len(args) == 0 {
+		return nil, errors.New("no module specified")
+	}
+
+	opts := &options{
+		modulePath:   args[0],
+		functionName: wasip1.StartFunctionName,
+		wasiArgs:     wasiArgs,
+		wasiEnv:      wasiEnv,
+		wasiDirs:     wasiDirs,
+	}
+	if len(args) > 1 {
+		opts.functionName = args[1]
+		opts.functionArgs = args[2:]
+	}
+	return opts, nil
+}
+
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage:\n")
 	fmt.Fprintf(os.Stderr, "  epsilon [options] <module>\n")
@@ -49,97 +122,14 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  epsilon -dir /host=/guest module.wasm       Pre-open with path mapping\n")
 }
 
-type arrayFlags []string
-
-// String is required to satisfy flag.Value interface.
-func (a *arrayFlags) String() string {
-	return strings.Join(*a, ",")
-}
-
-func (a *arrayFlags) Set(value string) error {
-	*a = append(*a, value)
-	return nil
-}
-
-type envFlags map[string]string
-
-// String is required to satisfy flag.Value interface.
-func (e *envFlags) String() string {
-	pairs := make([]string, 0, len(*e))
-	for k, v := range *e {
-		pairs = append(pairs, k+"="+v)
-	}
-	return strings.Join(pairs, ",")
-}
-
-func (e *envFlags) Set(value string) error {
-	parts := strings.SplitN(value, "=", 2)
-	if len(parts) != 2 {
-		return fmt.Errorf("invalid env format, expected KEY=VALUE")
-	}
-	(*e)[parts[0]] = parts[1]
-	return nil
-}
-
-func main() {
-	flag.Usage = printUsage
-	version := flag.Bool("version", false, "print version and exit")
-	var wasiArgs arrayFlags
-	var wasiDirs arrayFlags
-	wasiEnv := make(envFlags)
-	flag.Var(&wasiArgs, "arg", "argument to pass to WASI module")
-	flag.Var(&wasiEnv, "env", "env variable to pass to WASI module (KEY=VALUE)")
-	flag.Var(&wasiDirs, "dir", "dir or file to pre-open (format: host_path or host_path=guest_path)")
-	flag.Parse()
-
-	if *version {
-		fmt.Println(epsilon.Version)
-		return
-	}
-
-	args := flag.Args()
-	if len(args) == 0 {
-		printUsage()
-		os.Exit(1)
-	}
-
-	if err := runCLI(args, wasiArgs, wasiEnv, wasiDirs); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-func runCLI(
-	args []string,
-	wasiArgs []string,
-	wasiEnv map[string]string,
-	wasiDirs []string,
-) error {
-	modulePath := args[0]
-	moduleReader, err := resolveModule(modulePath)
+func run(opts *options) error {
+	moduleReader, err := resolveModule(opts.modulePath)
 	if err != nil {
 		return err
 	}
 	defer moduleReader.Close()
 
-	// Create WASI module
-	builder := wasip1.NewWasiModuleBuilder().
-		// WASI expects argv[0] to be the program name
-		WithArgs(append([]string{modulePath}, wasiArgs...)...).
-		WithEnvMap(wasiEnv)
-
-	// Parse pre-opened directories with host:guest path mapping
-	for _, dir := range wasiDirs {
-		hostPath, guestPath := extractHostGuestPaths(dir)
-		file, err := os.Open(hostPath)
-		if err != nil {
-			builder.Close()
-			return fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
-		}
-		builder = builder.WithDir(guestPath, file)
-	}
-
-	wasiModule, err := builder.Build()
+	wasiModule, err := newWASIModule(*opts)
 	if err != nil {
 		return err
 	}
@@ -151,18 +141,8 @@ func runCLI(
 		return err
 	}
 
-	funcName := wasip1.StartFunctionName
-	var funcArgs []string
-	if len(args) > 1 {
-		funcName = args[1]
-		funcArgs = args[2:]
-	}
-	results, err := parseAndInvokeFunction(instance, funcName, funcArgs)
+	results, err := invokeFunction(instance, opts.functionName, opts.functionArgs)
 	if err != nil {
-		var procExitErr *wasip1.ProcExitError
-		if errors.As(err, &procExitErr) {
-			os.Exit(int(procExitErr.Code))
-		}
 		return err
 	}
 
@@ -170,14 +150,6 @@ func runCLI(
 		fmt.Println(r)
 	}
 	return nil
-}
-
-func extractHostGuestPaths(arg string) (string, string) {
-	parts := strings.SplitN(arg, "=", 2)
-	if len(parts) == 2 {
-		return parts[0], parts[1]
-	}
-	return parts[0], parts[0]
 }
 
 func resolveModule(source string) (io.ReadCloser, error) {
@@ -200,17 +172,47 @@ func resolveModule(source string) (io.ReadCloser, error) {
 	case "file":
 		return os.Open(u.Path)
 	default:
-		// Fallback to os.Open if we don't have a scheme.
 		return os.Open(source)
 	}
 }
 
-// parseAndInvokeFunction invokes the given function parsing the provided args
-// to their correct types.
-func parseAndInvokeFunction(
+func newWASIModule(opts options) (*wasip1.WasiModule, error) {
+	builder := wasip1.NewWasiModuleBuilder().
+		WithArgs(append([]string{opts.modulePath}, opts.wasiArgs...)...)
+
+	for _, env := range opts.wasiEnv {
+		key, value, ok := strings.Cut(env, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid env format %q, expected KEY=VALUE", env)
+		}
+		builder = builder.WithEnv(key, value)
+	}
+
+	for _, dir := range opts.wasiDirs {
+		hostPath, guestPath := extractHostGuestPaths(dir)
+		file, err := os.Open(hostPath)
+		if err != nil {
+			builder.Close()
+			return nil, fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
+		}
+		builder = builder.WithDir(guestPath, file)
+	}
+
+	return builder.Build()
+}
+
+func extractHostGuestPaths(arg string) (string, string) {
+	hostPath, guestPath, ok := strings.Cut(arg, "=")
+	if !ok {
+		return hostPath, hostPath
+	}
+	return hostPath, guestPath
+}
+
+func invokeFunction(
 	instance *epsilon.ModuleInstance,
 	functionName string,
-	args []string,
+	rawArgs []string,
 ) ([]any, error) {
 	function, err := instance.GetFunction(functionName)
 	if err != nil {
@@ -218,15 +220,15 @@ func parseAndInvokeFunction(
 	}
 
 	paramTypes := function.GetType().ParamTypes
-	if len(args) != len(paramTypes) {
+	if len(rawArgs) != len(paramTypes) {
 		return nil, fmt.Errorf(
-			"args mismatch: expected %d, got %d", len(paramTypes), len(args),
+			"args mismatch: expected %d, got %d", len(paramTypes), len(rawArgs),
 		)
 	}
 
 	parsedArgs := make([]any, len(paramTypes))
 	for i, paramType := range paramTypes {
-		arg, err := parseArg(args[i], paramType)
+		arg, err := parseArg(rawArgs[i], paramType)
 		if err != nil {
 			return nil, err
 		}
