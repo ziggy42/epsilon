@@ -37,6 +37,7 @@ type options struct {
 	wasiArgs     []string
 	wasiEnv      []string
 	wasiDirs     []string
+	fuel         uint64
 }
 
 func main() {
@@ -81,6 +82,7 @@ func parseOptions() (*options, error) {
 			return nil
 		},
 	)
+	fuel := flag.Uint64("fuel", 0, "enable instruction fuel (e.g. 1000000000 for ~1s of execution)")
 	flag.Parse()
 
 	if *version {
@@ -98,6 +100,7 @@ func parseOptions() (*options, error) {
 		wasiArgs:     wasiArgs,
 		wasiEnv:      wasiEnv,
 		wasiDirs:     wasiDirs,
+		fuel:         *fuel,
 	}
 	if len(args) > 1 {
 		opts.functionName = args[1]
@@ -115,9 +118,10 @@ Options:
 	flag.PrintDefaults()
 	fmt.Fprint(os.Stderr, `
 Examples:
-  epsilon module.wasm                    Run module.wasm
-  epsilon module.wasm add 5 10           Call add(5, 10)
-  epsilon -dir /host=/guest module.wasm  Mount /host as /guest
+  epsilon module.wasm                     Run module.wasm
+  epsilon module.wasm add 5 10            Call add(5, 10)
+  epsilon -fuel 1000000 module.wasm       Run with 1M instruction fuel
+  epsilon -dir /host=/guest module.wasm   Mount /host as /guest
 `)
 }
 
@@ -134,7 +138,14 @@ func run(opts *options) error {
 	}
 	defer wasiModule.Close()
 
+	config := epsilon.DefaultConfig()
+	if opts.fuel > 0 {
+		config.EnableFuel = true
+		config.Fuel = opts.fuel
+	}
+
 	instance, err := epsilon.NewRuntime().
+		WithConfig(config).
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())
 	if err != nil {
 		return err

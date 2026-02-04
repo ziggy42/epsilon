@@ -123,7 +123,10 @@ adherence to project standards.
     - Overly complex code that could be simplified.
     - Duplicate code that could be refactored.
     - Poor variable naming (names should be self-explanatory).
-    - Unnecessary comments (code should be self-explanatory).
+    - Unnecessary comments (code should be self-explanatory). Verify no "TODO", "FIXME", or placeholder comments were left behind.
+
+    **Documentation**:
+    - Ensure `README.md` and other documentation is updated if new features, flags, or configuration options were added.
 
     **Modern Go Features**:
     - Opportunities to use newer Go features (e.g., generics, improved slices

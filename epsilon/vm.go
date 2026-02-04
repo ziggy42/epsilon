@@ -23,6 +23,7 @@ import (
 var (
 	errUnreachable        = errors.New("unreachable")
 	errCallStackExhausted = errors.New("call stack exhausted")
+	errFuelExhausted      = errors.New("fuel exhausted")
 	// Special error to signal a return instruction was hit.
 	errReturn = errors.New("return instruction")
 )
@@ -282,6 +283,16 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		module:       function.module,
 	})
 
+	// To avoid the performance penalty of checking the fuel limit on every
+	// instruction when fuel is disabled, we provide two separate loop
+	// implementations.
+	if vm.config.EnableFuel {
+		return vm.runLoopWithFuel()
+	}
+	return vm.runLoop()
+}
+
+func (vm *vm) runLoop() error {
 	for {
 		// We must re-fetch the frame pointer on each iteration because nested calls
 		// may append to vm.callStack, causing the slice to reallocate and
@@ -294,14 +305,36 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		}
 		if err := vm.executeInstruction(frame); err != nil {
 			if errors.Is(err, errReturn) {
-				break // A 'return' instruction was executed.
+				break
 			}
-			// Ensure we pop the stack frame even if executeInstruction fails.
 			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return err
 		}
 	}
+	vm.callStack = vm.callStack[:len(vm.callStack)-1]
+	return nil
+}
 
+func (vm *vm) runLoopWithFuel() error {
+	for {
+		// See runLoop for why we must re-fetch the frame pointer on each iteration.
+		frame := &vm.callStack[len(vm.callStack)-1]
+		if frame.pc >= uint32(len(frame.function.body)) {
+			break
+		}
+		if vm.config.Fuel == 0 {
+			vm.callStack = vm.callStack[:len(vm.callStack)-1]
+			return errFuelExhausted
+		}
+		vm.config.Fuel--
+		if err := vm.executeInstruction(frame); err != nil {
+			if errors.Is(err, errReturn) {
+				break
+			}
+			vm.callStack = vm.callStack[:len(vm.callStack)-1]
+			return err
+		}
+	}
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return nil
 }
