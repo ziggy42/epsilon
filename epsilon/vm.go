@@ -76,6 +76,7 @@ type vm struct {
 	controlStackCache []controlFrame
 	localsCache       []value
 	config            Config
+	fuel              uint64
 }
 
 func newVm(config Config) *vm {
@@ -88,6 +89,7 @@ func newVm(config Config) *vm {
 		controlStackCache: make([]controlFrame, ctrlCacheSize),
 		localsCache:       make([]value, localsCacheSize),
 		config:            config,
+		fuel:              config.Fuel,
 	}
 }
 
@@ -322,11 +324,11 @@ func (vm *vm) runLoopWithFuel() error {
 		if frame.pc >= uint32(len(frame.function.body)) {
 			break
 		}
-		if vm.config.Fuel == 0 {
+		if vm.fuel == 0 {
 			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return errFuelExhausted
 		}
-		vm.config.Fuel--
+		vm.fuel--
 		if err := vm.executeInstruction(frame); err != nil {
 			if errors.Is(err, errReturn) {
 				break
