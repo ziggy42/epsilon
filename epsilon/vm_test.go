@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/ziggy42/epsilon/internal/wabt"
@@ -1003,5 +1004,73 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 
 	if got := result[0]; got != int32(0x2a) {
 		t.Fatalf("expected %d, got %d", 0x2a, got)
+	}
+}
+
+func TestFuelExhaustion(t *testing.T) {
+	wat := `(module
+		(func (export "test") (param i32 i32) (result i32)
+			local.get 0
+			local.get 1
+			i32.add)
+	)`
+
+	config := DefaultConfig()
+	config.EnableFuel = true
+	config.Fuel = 2 // Not enough fuel
+
+	moduleInstance, err := instantiate(wat, nil, &config)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("test", int32(1), int32(1))
+	if !errors.Is(err, errFuelExhausted) {
+		t.Fatalf("expected fuel exhausted error, got %v", err)
+	}
+}
+
+func TestFuelInfiniteLoop(t *testing.T) {
+	wat := `(module
+		(func (export "loop")
+			loop
+				br 0
+			end)
+	)`
+	config := DefaultConfig()
+	config.EnableFuel = true
+	config.Fuel = 100
+
+	moduleInstance, err := instantiate(wat, nil, &config)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("loop")
+	if !errors.Is(err, errFuelExhausted) {
+		t.Fatalf("expected fuel exhausted error, got %v", err)
+	}
+}
+
+func TestFuelDisabled(t *testing.T) {
+	wat := `(module
+		(func (export "test") (result i32)
+			i32.const 42)
+	)`
+	config := DefaultConfig()
+	config.EnableFuel = false
+	config.Fuel = 1 // Should be ignored
+
+	moduleInstance, err := instantiate(wat, nil, &config)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := moduleInstance.Invoke("test")
+	if err != nil {
+		t.Fatalf("failed to execute: %v", err)
+	}
+	if result[0] != int32(42) {
+		t.Fatalf("expected 42, got %v", result[0])
 	}
 }

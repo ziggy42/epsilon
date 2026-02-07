@@ -27,8 +27,20 @@ type Config struct {
 
 	// ExperimentalMultipleMemories enables WASM 3.0 multiple memories.
 	// This feature has not yet been fully validated with spec tests.
-	// See https://github.com/WebAssembly/wabt/issues/2648
+	// See https://github.com/WebAssembly/wabt/issues/2648. Default: false.
 	ExperimentalMultipleMemories bool
+
+	// EnableFuel enables instruction fuel (gas) mechanism to prevent infinite
+	// loops and control execution time. When enabled, the VM will decrement
+	// the available fuel by 1 for every WASM instruction executed.
+	// NOTE: Enabling fuel has a non-trivial performance impact on the VM.
+	// Default: false.
+	EnableFuel bool
+
+	// Fuel is the initial amount of fuel available to the VM.
+	// One unit of fuel equals one WASM instruction.
+	// Only used if EnableFuel is true.
+	Fuel uint64
 }
 
 // DefaultConfig returns a Config with sensible defaults.

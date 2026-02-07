@@ -102,12 +102,16 @@ Options:
         directory to mount (use /from=/to to mount at a different path)
   -env value
         environment variable (KEY=VALUE)
+  -fuel value
+        enable instruction fuel (e.g. 1000000000 for ~1s of execution)
   -version
         print version and exit
 
 Examples:
-  epsilon module.wasm              Run a WASI module
-  epsilon module.wasm add 5 10     Invoke a function
+  epsilon module.wasm                     Run a WASI module
+  epsilon module.wasm add 5 10            Invoke a function
+  epsilon -fuel 1000000 module.wasm       Run with 1M instruction fuel
+  epsilon -dir /host=/guest module.wasm   Mount /host as /guest
 ```
 
 ### Example
