@@ -16,7 +16,6 @@
 """Compares benchmark results between two git references using benchstat."""
 
 import argparse
-import os
 import subprocess
 import sys
 import tempfile
@@ -55,7 +54,7 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
   return _worktree(tmpdir, ref)
 
 
-def _run_benchmarks(cwd: str, output_file: Path, count: int) -> None:
+def _run_benchmarks(cwd: str, output_file: Path) -> None:
   """Run benchmarks and append results to file."""
   with open(output_file, "a") as f:
     # Use taskset to pin to a single core and -cpu=1 for stability.
@@ -63,9 +62,7 @@ def _run_benchmarks(cwd: str, output_file: Path, count: int) -> None:
     cmd = [
         "taskset", "-c", "0",
         "go", "test", "-bench=.", "-benchmem",
-        f"-count={count}",
         f"-benchtime={_BENCHTIME}",
-        "-cpu=1",
         "./internal/benchmarks"
     ]
     result = subprocess.run(
@@ -75,7 +72,6 @@ def _run_benchmarks(cwd: str, output_file: Path, count: int) -> None:
         stderr=subprocess.PIPE,
         text=True,
         check=False,
-        env={**os.environ, "GOMAXPROCS": "1"}
     )
   if result.returncode != 0:
     print(result.stderr, file=sys.stderr)
@@ -85,7 +81,7 @@ def _run_benchmarks(cwd: str, output_file: Path, count: int) -> None:
 def _run_benchstat(base_file: Path, target_file: Path) -> None:
   """Run benchstat to compare benchmark results."""
   result = subprocess.run(
-      ["go", "tool", "benchstat", str(base_file), str(target_file)],
+      ["go", "tool", "benchstat", base_file, target_file],
       capture_output=True,
       text=True,
       check=False,
@@ -119,23 +115,18 @@ def _main():
     base_file = tmpdir / "base.txt"
     target_file = tmpdir / "target.txt"
 
-    # Initialize files
-    base_file.touch()
-    target_file.touch()
-
     try:
       base_path = _resolve_path(args.base, root, tmpdir)
       target_path = _resolve_path(args.target, root, tmpdir)
 
-      print(f"Running benchmarks interleaved ({_BENCHMARK_COUNT} iterations)...")
       print(f"Base:   {args.base}")
       print(f"Target: {args.target}")
 
       for i in range(_BENCHMARK_COUNT):
         print(f"Iteration {i+1}/{_BENCHMARK_COUNT}...", end="\r")
         sys.stdout.flush()
-        _run_benchmarks(base_path, base_file, count=1)
-        _run_benchmarks(target_path, target_file, count=1)
+        _run_benchmarks(base_path, base_file)
+        _run_benchmarks(target_path, target_file)
 
       print(f"\nFinished {_BENCHMARK_COUNT} iterations.")
       print("\nBenchstat comparison:\n")
