@@ -794,6 +794,9 @@ func TestOpenat_ChainedIntermediateSymlinks(t *testing.T) {
 }
 
 func TestOpenat_PermissionBypass_DotDot(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("skipping permission bypass test as root")
+	}
 	root, dirFd := testFS(t,
 		dir("locked"),
 		file("target.txt", "secret"),
@@ -813,6 +816,19 @@ func TestOpenat_PermissionBypass_DotDot(t *testing.T) {
 	if err == nil {
 		f.Close()
 		t.Fatal("openat bypassed permission check on 'locked' directory")
+	}
+}
+
+func TestOpenat_IntermediateFileBlocked(t *testing.T) {
+	_, dirFd := testFS(t, file("notadir", "content"))
+	defer dirFd.Close()
+
+	_, err := openat(dirFd, "notadir/file.txt", false, 0, 0, uint64(RightsFdRead))
+	if err == nil {
+		t.Fatal("traversing through regular file succeeded")
+	}
+	if !errors.Is(err, syscall.ENOTDIR) {
+		t.Errorf("expected syscall.ENOTDIR, got %v", err)
 	}
 }
 
