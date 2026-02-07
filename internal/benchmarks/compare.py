@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 
-_BENCHMARK_COUNT = 20
+_DEFAULT_ITERATIONS_COUNT = 20
 _BENCHTIME = "2s"
 
 
@@ -121,6 +121,12 @@ def _main():
       required=True,
       help="Target reference (branch, commit, or '.').",
   )
+  parser.add_argument(
+      "--count",
+      type=int,
+      default=_DEFAULT_ITERATIONS_COUNT,
+      help=f"Number of iterations. Defaults to {_DEFAULT_ITERATIONS_COUNT}.",
+  )
   args = parser.parse_args()
 
   root = _git_root()
@@ -137,13 +143,13 @@ def _main():
       print(f"Base:   {args.base}")
       print(f"Target: {args.target}")
 
-      for i in range(_BENCHMARK_COUNT):
-        print(f"Iteration {i+1}/{_BENCHMARK_COUNT}...", end="\r")
+      for i in range(args.count):
+        print(f"Iteration {i+1}/{args.count}...", end="\r")
         sys.stdout.flush()
         _run_benchmarks(base_path, base_file)
         _run_benchmarks(target_path, target_file)
 
-      print(f"\nFinished {_BENCHMARK_COUNT} iterations.")
+      print(f"\nFinished {args.count} iterations.")
       print("\nBenchstat comparison:\n")
       _run_benchstat(base_file, target_file)
     finally:
