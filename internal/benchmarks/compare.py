@@ -60,10 +60,8 @@ def _run_benchmarks(cwd: str, output_file: Path) -> None:
     # Use taskset to pin to a single core and -cpu=1 for stability.
     # We also increase benchtime to 2s to reduce variance.
     cmd = [
-        "taskset", "-c", "0",
-        "go", "test", "-bench=.", "-benchmem",
-        f"-benchtime={_BENCHTIME}",
-        "./internal/benchmarks"
+        "taskset", "-c", "0", "go", "test", "-bench=.", "-benchmem",
+        f"-benchtime={_BENCHTIME}", "./internal/benchmarks"
     ]
     result = subprocess.run(
         cmd,
