@@ -313,11 +313,9 @@ func (p *parser) parseFunction() (function, error) {
 		return function{}, fmt.Errorf("function body must end with End opcode")
 	}
 
-	trimmedBody := body[:len(body)-1]
 	return function{
 		locals:        locals,
-		body:          trimmedBody,
-		bodyLen:       uint32(len(trimmedBody)),
+		body:          body[:len(body)-1],
 		jumpCache:     result.jumpCache,
 		jumpElseCache: result.jumpElseCache,
 	}, nil
