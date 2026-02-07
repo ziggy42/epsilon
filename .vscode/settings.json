@@ -3,5 +3,9 @@
   "editor.wordWrapColumn": 80,
   "editor.rulers": [
     80
-  ]
+  ],
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.autopep8",
+    "editor.formatOnSave": true
+  }
 }

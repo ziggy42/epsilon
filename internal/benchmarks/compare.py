@@ -13,27 +13,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Compares benchmark results between main branch and another branch."""
+"""Compares benchmark results between two git references using benchstat."""
 
 import argparse
+import platform
 import subprocess
 import sys
-import re
 import tempfile
 from pathlib import Path
-from dataclasses import dataclass
 
 
-_BENCHMARK_LINE_PATTERN = (
-    r"Benchmark(\w+)-\d+\s+\d+\s+([\d.]+)\s+ns/op\s+([\d.]+)\s+B/op\s+([\d.]+)\s+allocs/op"
-)
+_DEFAULT_ITERATIONS_COUNT = 20
+_BENCHTIME = "2s"
 
 
-@dataclass
-class _BenchmarkResult:
-  ns_per_op: float
-  bytes_per_op: int
-  allocs_per_op: int
+def _get_benchmark_cmd() -> list[str]:
+  """Build the benchmark command, with CPU pinning where available.
+
+  On Linux, we use taskset to pin the process to a single CPU core. This
+  prevents the OS scheduler from migrating the process between cores, which
+  would cause cache invalidation and increase variance.
+
+  On macOS, there's no equivalent user-space API for CPU pinning, so we accept
+  that benchmarks will be slightly noisier.
+
+  We also use -cpu=1 to limit Go to a single OS thread, reducing internal
+  scheduling noise within the Go runtime.
+  """
+  base = [
+      "go", "test", "-bench=.", "-benchmem", "-cpu=1",
+      f"-benchtime={_BENCHTIME}", "./internal/benchmarks"
+  ]
+  if platform.system() == "Linux":
+    return ["taskset", "-c", "0"] + base
+  return base
 
 
 def _git_root() -> str:
@@ -58,17 +71,32 @@ def _worktree(tmp: Path, ref: str) -> str:
 
 
 def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
-  """Resolve path for a ref (either Worktree or CWD)."""
+  """Resolve path for a ref (either worktree or current directory)."""
   if ref == ".":
     return root
   return _worktree(tmpdir, ref)
 
 
-def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
-  """Run benchmarks and parse results."""
+def _run_benchmarks(cwd: str, output_file: Path) -> None:
+  """Run benchmarks and append results to file."""
+  with open(output_file, "a") as f:
+    result = subprocess.run(
+        _get_benchmark_cmd(),
+        cwd=cwd,
+        stdout=f,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+  if result.returncode != 0:
+    print(result.stderr, file=sys.stderr)
+    sys.exit(1)
+
+
+def _run_benchstat(base_file: Path, target_file: Path) -> None:
+  """Run benchstat to compare benchmark results."""
   result = subprocess.run(
-      ["go", "test", "-bench=.", "-benchmem", "./internal/benchmarks"],
-      cwd=cwd,
+      ["go", "tool", "benchstat", base_file, target_file],
       capture_output=True,
       text=True,
       check=False,
@@ -76,75 +104,12 @@ def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
   if result.returncode != 0:
     print(result.stderr, file=sys.stderr)
     sys.exit(1)
-
-  results = {}
-  for line in result.stdout.split('\n'):
-    if match := re.search(_BENCHMARK_LINE_PATTERN, line):
-      results[match.group(1)] = _BenchmarkResult(
-          ns_per_op=float(match.group(2)),
-          bytes_per_op=int(float(match.group(3))),
-          allocs_per_op=int(float(match.group(4)))
-      )
-  return results
-
-
-def _format_change(old: float, new: float) -> str:
-  """Format percentage change for display."""
-  percentage = ((new - old) / old * 100) if old != 0 else 0.0
-  if abs(percentage) < 0.5:
-    return f"⚪ {percentage:+.2f}%"
-  elif percentage < 0:
-    return f"🟢 {percentage:+.2f}%"
-  else:
-    return f"🔴 {percentage:+.2f}%"
-
-
-def _format_table(headers: list[str], rows: list[list[str]]) -> str:
-  """Format data as a markdown table."""
-  widths = [len(h) for h in headers]
-  for row in rows:
-    for i, cell in enumerate(row):
-      widths[i] = max(widths[i], len(cell))
-
-  # Format header
-  header_row = "| " + " | ".join(h.ljust(widths[i])
-                                 for i, h in enumerate(headers)) + " |"
-  separator = "|" + "|".join("-" * (w + 2) for w in widths) + "|"
-
-  # Format data rows
-  data_rows = []
-  for row in rows:
-    data_rows.append(
-        "| " + " | ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)) +
-        " |")
-
-  return "\n".join([header_row, separator] + data_rows)
-
-
-def _compare_benchmarks(
-    base: dict[str, _BenchmarkResult], target: dict[str, _BenchmarkResult],
-) -> str:
-  """Generate comparison table."""
-  headers = ['Benchmark', 'Time (ns/op)', 'Δ',
-             'Memory (B/op)', 'Δ', 'Allocs', 'Δ']
-  rows = []
-  for name in sorted(set(base.keys()) & set(target.keys())):
-    b, t = base[name], target[name]
-    rows.append([
-        name,
-        f"{b.ns_per_op:,.0f} → {t.ns_per_op:,.0f}",
-        _format_change(b.ns_per_op, t.ns_per_op),
-        f"{b.bytes_per_op:,} → {t.bytes_per_op:,}",
-        _format_change(b.bytes_per_op, t.bytes_per_op),
-        f"{b.allocs_per_op:,} → {t.allocs_per_op:,}",
-        _format_change(b.allocs_per_op, t.allocs_per_op),
-    ])
-  return _format_table(headers, rows)
+  print(result.stdout)
 
 
 def _main():
   parser = argparse.ArgumentParser(
-      description="Compare benchmarks between two git references."
+      description="Compare benchmarks between two git references using benchstat."
   )
   parser.add_argument(
       "--base",
@@ -156,21 +121,37 @@ def _main():
       required=True,
       help="Target reference (branch, commit, or '.').",
   )
+  parser.add_argument(
+      "--count",
+      type=int,
+      default=_DEFAULT_ITERATIONS_COUNT,
+      help=f"Number of iterations. Defaults to {_DEFAULT_ITERATIONS_COUNT}.",
+  )
   args = parser.parse_args()
 
   root = _git_root()
 
   with tempfile.TemporaryDirectory() as tmp:
     tmpdir = Path(tmp)
+    base_file = tmpdir / "base.txt"
+    target_file = tmpdir / "target.txt"
 
     try:
       base_path = _resolve_path(args.base, root, tmpdir)
       target_path = _resolve_path(args.target, root, tmpdir)
 
-      base_results = _run_benchmarks(base_path)
-      target_results = _run_benchmarks(target_path)
+      print(f"Base:   {args.base}")
+      print(f"Target: {args.target}")
 
-      print("\n" + _compare_benchmarks(base_results, target_results))
+      for i in range(args.count):
+        print(f"Iteration {i+1}/{args.count}...", end="\r")
+        sys.stdout.flush()
+        _run_benchmarks(base_path, base_file)
+        _run_benchmarks(target_path, target_file)
+
+      print(f"\nFinished {args.count} iterations.")
+      print("\nBenchstat comparison:\n")
+      _run_benchstat(base_file, target_file)
     finally:
       subprocess.run(["git", "worktree", "prune"], check=False)
 
