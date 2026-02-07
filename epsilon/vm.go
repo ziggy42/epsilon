@@ -273,7 +273,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	controlStack = append(controlStack, controlFrame{
 		isLoop:         false,
 		blockType:      int32(function.code.typeIndex),
-		continuationPc: uint32(len(function.code.body)),
+		continuationPc: function.code.bodyLen,
 		stackHeight:    vm.stack.size(),
 	})
 
@@ -287,41 +287,35 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 
 	// To avoid the performance penalty of checking the fuel limit on every
 	// instruction when fuel is disabled, we provide two separate loop
-	// implementations.
-	if vm.config.EnableFuel {
-		return vm.runLoopWithFuel()
-	}
-	return vm.runLoop()
-}
-
-func (vm *vm) runLoop() error {
-	for {
-		// We must re-fetch the frame pointer on each iteration because nested calls
-		// may append to vm.callStack, causing the slice to reallocate and
-		// invalidate any previously held pointers. This pointer is safe to use
-		// within a single instruction execution since no handler uses it after
-		// invoking a nested call.
-		frame := &vm.callStack[len(vm.callStack)-1]
-		if frame.pc >= uint32(len(frame.function.body)) {
-			break
-		}
-		if err := vm.executeInstruction(frame); err != nil {
-			if errors.Is(err, errReturn) {
+	// implementations. The loops are inlined here rather than extracted into
+	// separate methods to avoid function call overhead in this hot path.
+	if !vm.config.EnableFuel {
+		for {
+			// We must re-fetch the frame pointer on each iteration because nested
+			// calls may append to vm.callStack, causing the slice to reallocate and
+			// invalidate any previously held pointers. This pointer is safe to use
+			// within a single instruction execution since no handler uses it after
+			// invoking a nested call.
+			frame := &vm.callStack[len(vm.callStack)-1]
+			if frame.pc >= frame.function.bodyLen {
 				break
 			}
-			vm.callStack = vm.callStack[:len(vm.callStack)-1]
-			return err
+			if err := vm.executeInstruction(frame); err != nil {
+				if errors.Is(err, errReturn) {
+					break
+				}
+				vm.callStack = vm.callStack[:len(vm.callStack)-1]
+				return err
+			}
 		}
+		vm.callStack = vm.callStack[:len(vm.callStack)-1]
+		return nil
 	}
-	vm.callStack = vm.callStack[:len(vm.callStack)-1]
-	return nil
-}
 
-func (vm *vm) runLoopWithFuel() error {
 	for {
-		// See runLoop for why we must re-fetch the frame pointer on each iteration.
+		// See above for why we must re-fetch the frame pointer on each iteration.
 		frame := &vm.callStack[len(vm.callStack)-1]
-		if frame.pc >= uint32(len(frame.function.body)) {
+		if frame.pc >= frame.function.bodyLen {
 			break
 		}
 		if vm.fuel == 0 {
@@ -1939,7 +1933,7 @@ func (vm *vm) invokeInitExpression(
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},
 		},
-		code:   function{body: expression},
+		code:   function{body: expression, bodyLen: uint32(len(expression))},
 		module: moduleInstance,
 	}
 	if err := vm.invokeWasmFunction(&function); err != nil {

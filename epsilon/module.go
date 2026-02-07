@@ -18,6 +18,7 @@ type function struct {
 	typeIndex uint32
 	locals    []ValueType
 	body      []uint64
+	bodyLen   uint32
 	// jumpCache maps the position of the first instruction inside a block/if to
 	// the position of the instruction after the matching 'end'.
 	jumpCache map[uint32]uint32
