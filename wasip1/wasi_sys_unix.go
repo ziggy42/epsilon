@@ -610,11 +610,15 @@ func walkToParent(
 		mode := unix.O_RDONLY | unix.O_NOFOLLOW | unix.O_DIRECTORY | unix.O_CLOEXEC
 		newFd, err := unix.Openat(parentFd, component, mode, 0)
 
-		// Check if this is a symlink we need to follow
+		// If Openat fails, check if the component is a symlink we need to resolve.
+		// O_NOFOLLOW typically returns ELOOP for symlinks. However, when combined
+		// with O_DIRECTORY, some systems may return ENOTDIR if the symlink points
+		// to a non-directory file.
 		if errors.Is(err, syscall.ELOOP) || errors.Is(err, syscall.ENOTDIR) {
-			resolvedPath, err := resolveSymlink(parentFd, parentPath, component)
-			if err != nil {
+			resolvedPath, symErr := resolveSymlink(parentFd, parentPath, component)
+			if symErr != nil {
 				closeParent()
+				// If it's not a symlink, return the original error
 				return 0, "", depth, err
 			}
 			return restart(resolvedPath, components[i+1:])
