@@ -90,7 +90,10 @@ def _run_benchmarks(cwd: str) -> dict[str, _BenchmarkResult]:
 
 def _format_change(old: float, new: float) -> str:
   """Format percentage change for display."""
-  percentage = ((new - old) / old * 100) if old != 0 else 0.0
+  if old == 0:
+    return "⚪ 0.00%" if new == 0 else "🔴 +Inf%"
+
+  percentage = (new - old) / old * 100
   if abs(percentage) < 0.5:
     return f"⚪ {percentage:+.2f}%"
   elif percentage < 0:
