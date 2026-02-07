@@ -16,6 +16,7 @@
 """Compares benchmark results between two git references using benchstat."""
 
 import argparse
+import platform
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,28 @@ from pathlib import Path
 
 _BENCHMARK_COUNT = 20
 _BENCHTIME = "2s"
+
+
+def _get_benchmark_cmd() -> list[str]:
+  """Build the benchmark command, with CPU pinning where available.
+
+  On Linux, we use taskset to pin the process to a single CPU core. This
+  prevents the OS scheduler from migrating the process between cores, which
+  would cause cache invalidation and increase variance.
+
+  On macOS, there's no equivalent user-space API for CPU pinning, so we accept
+  that benchmarks will be slightly noisier.
+
+  We also use -cpu=1 to limit Go to a single OS thread, reducing internal
+  scheduling noise within the Go runtime.
+  """
+  base = [
+      "go", "test", "-bench=.", "-benchmem", "-cpu=1",
+      f"-benchtime={_BENCHTIME}", "./internal/benchmarks"
+  ]
+  if platform.system() == "Linux":
+    return ["taskset", "-c", "0"] + base
+  return base
 
 
 def _git_root() -> str:
@@ -57,14 +80,8 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
 def _run_benchmarks(cwd: str, output_file: Path) -> None:
   """Run benchmarks and append results to file."""
   with open(output_file, "a") as f:
-    # Use taskset to pin to a single core and -cpu=1 for stability.
-    # We also increase benchtime to 2s to reduce variance.
-    cmd = [
-        "taskset", "-c", "0", "go", "test", "-bench=.", "-benchmem",
-        f"-benchtime={_BENCHTIME}", "./internal/benchmarks"
-    ]
     result = subprocess.run(
-        cmd,
+        _get_benchmark_cmd(),
         cwd=cwd,
         stdout=f,
         stderr=subprocess.PIPE,
