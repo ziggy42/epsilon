@@ -48,7 +48,7 @@ func (s *valueStack) push(v value) {
 
 func (s *valueStack) pushAll(values []any) {
 	for _, v := range values {
-		s.push(newValue(v))
+		s.data = append(s.data, newValue(v))
 	}
 }
 
