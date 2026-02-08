@@ -1074,3 +1074,29 @@ func TestFuelDisabled(t *testing.T) {
 		t.Fatalf("expected 42, got %v", result[0])
 	}
 }
+
+func TestExecuteSelectTV128(t *testing.T) {
+	wat := `(module
+		(func (export "test") (param v128 v128 i32) (result v128)
+			local.get 0
+			local.get 1
+			local.get 2
+			select (result v128)
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to instantiate: %v", err)
+	}
+
+	v1 := V128Value{Low: 1, High: 2}
+	v2 := V128Value{Low: 3, High: 4}
+
+	result, err := moduleInstance.Invoke("test", v1, v2, int32(1))
+	if err != nil {
+		t.Fatalf("failed to execute: %v", err)
+	}
+	if result[0] != v1 {
+		t.Fatalf("expected %v, got %v", v1, result[0])
+	}
+}

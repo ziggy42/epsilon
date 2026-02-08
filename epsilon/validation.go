@@ -420,7 +420,7 @@ func (v *validator) validate(op opcode) error {
 		return v.validateCallIndirect()
 	case drop:
 		return v.validateDrop()
-	case selectOp:
+	case selectOp, internalSelectV128:
 		return v.validateSelect(bottom, v.pc-1)
 	case selectT:
 		return v.validateSelectT()
@@ -895,7 +895,9 @@ func (v *validator) validateSelect(t ValueType, opcodePos uint) error {
 	}
 
 	// If the resolved type is V128, rewrite opcode to internalSelectV128.
-	if resolvedType == V128 {
+	// We only do this for selectOp because selectT already includes explicit type
+	// information and handles slots correctly in the VM.
+	if resolvedType == V128 && opcode(v.code[opcodePos]) == selectOp {
 		v.code[opcodePos] = uint64(internalSelectV128)
 	}
 
