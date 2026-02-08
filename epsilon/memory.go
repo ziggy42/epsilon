@@ -66,7 +66,7 @@ func (m *Memory) Size() int32 {
 
 // Set writes the given byte slice into memory.
 func (m *Memory) Set(offset, index uint32, values []byte) error {
-	dst, err := m.getRange(offset, index, uint32(len(values)))
+	dst, err := m.Get(offset, index, uint32(len(values)))
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,12 @@ func (m *Memory) Set(offset, index uint32, values []byte) error {
 
 // Get reads data from memory.
 func (m *Memory) Get(offset, index, length uint32) ([]byte, error) {
-	return m.getRange(offset, index, length)
+	start := uint64(index) + uint64(offset)
+	end := start + uint64(length)
+	if end > uint64(len(m.data)) {
+		return nil, errMemoryOutOfBounds
+	}
+	return m.data[start:end], nil
 }
 
 // Init copies n bytes from a data segment to the memory.
@@ -84,7 +89,7 @@ func (m *Memory) Init(n, srcOffset, destOffset uint32, content []byte) error {
 	if uint64(srcOffset)+uint64(n) > uint64(len(content)) {
 		return errMemoryOutOfBounds
 	}
-	dst, err := m.getRange(destOffset, 0, n)
+	dst, err := m.Get(destOffset, 0, n)
 	if err != nil {
 		return err
 	}
@@ -94,11 +99,11 @@ func (m *Memory) Init(n, srcOffset, destOffset uint32, content []byte) error {
 
 // Copy copies n elements from a source memory to a destination memory.
 func (m *Memory) Copy(dest *Memory, n, srcOffset, destOffset uint32) error {
-	src, err := m.getRange(srcOffset, 0, n)
+	src, err := m.Get(srcOffset, 0, n)
 	if err != nil {
 		return err
 	}
-	dst, err := dest.getRange(destOffset, 0, n)
+	dst, err := dest.Get(destOffset, 0, n)
 	if err != nil {
 		return err
 	}
@@ -108,7 +113,7 @@ func (m *Memory) Copy(dest *Memory, n, srcOffset, destOffset uint32) error {
 
 // Fill sets n elements to a given value.
 func (m *Memory) Fill(n, offset uint32, val byte) error {
-	mem, err := m.getRange(offset, 0, n)
+	mem, err := m.Get(offset, 0, n)
 	if err != nil {
 		return err
 	}
@@ -127,7 +132,7 @@ func (m *Memory) LoadByte(offset, index uint32) (byte, error) {
 }
 
 func (m *Memory) LoadUint16(offset, index uint32) (uint16, error) {
-	buf, err := m.getRange(offset, index, 2)
+	buf, err := m.Get(offset, index, 2)
 	if err != nil {
 		return 0, err
 	}
@@ -135,7 +140,7 @@ func (m *Memory) LoadUint16(offset, index uint32) (uint16, error) {
 }
 
 func (m *Memory) LoadUint32(offset, index uint32) (uint32, error) {
-	buf, err := m.getRange(offset, index, 4)
+	buf, err := m.Get(offset, index, 4)
 	if err != nil {
 		return 0, err
 	}
@@ -143,7 +148,7 @@ func (m *Memory) LoadUint32(offset, index uint32) (uint32, error) {
 }
 
 func (m *Memory) LoadUint64(offset, index uint32) (uint64, error) {
-	buf, err := m.getRange(offset, index, 8)
+	buf, err := m.Get(offset, index, 8)
 	if err != nil {
 		return 0, err
 	}
@@ -151,7 +156,7 @@ func (m *Memory) LoadUint64(offset, index uint32) (uint64, error) {
 }
 
 func (m *Memory) LoadV128(offset, index uint32) (V128Value, error) {
-	buf, err := m.getRange(offset, index, 16)
+	buf, err := m.Get(offset, index, 16)
 	if err != nil {
 		return V128Value{}, err
 	}
@@ -171,7 +176,7 @@ func (m *Memory) StoreByte(offset, index uint32, val byte) error {
 }
 
 func (m *Memory) StoreUint16(offset, index uint32, val uint16) error {
-	buf, err := m.getRange(offset, index, 2)
+	buf, err := m.Get(offset, index, 2)
 	if err != nil {
 		return err
 	}
@@ -180,7 +185,7 @@ func (m *Memory) StoreUint16(offset, index uint32, val uint16) error {
 }
 
 func (m *Memory) StoreUint32(offset, index uint32, val uint32) error {
-	buf, err := m.getRange(offset, index, 4)
+	buf, err := m.Get(offset, index, 4)
 	if err != nil {
 		return err
 	}
@@ -189,7 +194,7 @@ func (m *Memory) StoreUint32(offset, index uint32, val uint32) error {
 }
 
 func (m *Memory) StoreUint64(offset, index uint32, val uint64) error {
-	buf, err := m.getRange(offset, index, 8)
+	buf, err := m.Get(offset, index, 8)
 	if err != nil {
 		return err
 	}
@@ -198,20 +203,11 @@ func (m *Memory) StoreUint64(offset, index uint32, val uint64) error {
 }
 
 func (m *Memory) StoreV128(offset, index uint32, val V128Value) error {
-	buf, err := m.getRange(offset, index, 16)
+	buf, err := m.Get(offset, index, 16)
 	if err != nil {
 		return err
 	}
 	binary.LittleEndian.PutUint64(buf[:8], val.Low)
 	binary.LittleEndian.PutUint64(buf[8:], val.High)
 	return nil
-}
-
-func (m *Memory) getRange(offset, index, length uint32) ([]byte, error) {
-	start := uint64(index) + uint64(offset)
-	end := start + uint64(length)
-	if end > uint64(len(m.data)) {
-		return nil, errMemoryOutOfBounds
-	}
-	return m.data[start:end], nil
 }
