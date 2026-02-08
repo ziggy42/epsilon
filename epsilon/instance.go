@@ -19,7 +19,7 @@ import (
 	"fmt"
 )
 
-var errFailedToFindExport = errors.New("failed to find export")
+var errExportNotFound = errors.New("export not found")
 
 // exportInstance represents the runtime representation of an export.
 type exportInstance struct {
@@ -119,7 +119,7 @@ func (m *ModuleInstance) findExport(name string) (any, error) {
 			return export.value, nil
 		}
 	}
-	return nil, errFailedToFindExport
+	return nil, errExportNotFound
 }
 
 type FunctionInstance interface {
