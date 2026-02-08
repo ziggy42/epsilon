@@ -421,7 +421,7 @@ func (v *validator) validate(op opcode) error {
 	case drop:
 		return v.validateDrop()
 	case selectOp:
-		return v.validateSelect(bottom)
+		return v.validateSelect(bottom, v.pc-1)
 	case selectT:
 		return v.validateSelectT()
 	case localGet:
@@ -865,7 +865,7 @@ func (v *validator) validateDrop() error {
 	return err
 }
 
-func (v *validator) validateSelect(t ValueType) error {
+func (v *validator) validateSelect(t ValueType, opcodePos uint) error {
 	if _, err := v.popExpectedValue(I32); err != nil {
 		return err
 	}
@@ -888,20 +888,28 @@ func (v *validator) validateSelect(t ValueType) error {
 		}
 	}
 
+	// Determine the resolved type.
+	resolvedType := type1
 	if type1 == bottom {
-		v.pushValue(type2)
-	} else {
-		v.pushValue(type1)
+		resolvedType = type2
 	}
+
+	// If the resolved type is V128, rewrite opcode to internalSelectV128.
+	if resolvedType == V128 {
+		v.code[opcodePos] = uint64(internalSelectV128)
+	}
+
+	v.pushValue(resolvedType)
 
 	return nil
 }
 
 func (v *validator) validateSelectT() error {
+	opcodePos := v.pc - 1
 	size := v.next()
 	t := toValueType(v.next())
 	v.pc += uint(size - 1)
-	return v.validateSelect(t)
+	return v.validateSelect(t, opcodePos)
 }
 
 func (v *validator) validateLocalTee() error {

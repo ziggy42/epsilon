@@ -600,7 +600,7 @@ func TestExecuteReturn(t *testing.T) {
 		t.Fatalf("failed to create vm: %v", err)
 	}
 
-	result, err := moduleInstance.Invoke("test", int32(10))
+	result, err := moduleInstance.Invoke("test")
 
 	if err != nil {
 		t.Fatalf("failed to execute function: %v", err)

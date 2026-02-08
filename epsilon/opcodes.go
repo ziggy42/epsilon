@@ -457,4 +457,9 @@ const (
 	i32x4TruncSatF64x2UZero   opcode = 0xFDFD
 	f64x2ConvertLowI32x4S     opcode = 0xFDFE
 	f64x2ConvertLowI32x4U     opcode = 0xFDFF
+
+	// Internal opcodes not part of the WASM spec.
+	// Used to handle special cases during validation that require
+	// different runtime behavior.
+	internalSelectV128 opcode = 0xE0
 )

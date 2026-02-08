@@ -16,85 +16,43 @@ package epsilon
 
 import "math"
 
-// NullReference is the internal representation of a null reference.
+// NullReference is the internal representation of a null reference for
+// funcref and externref types. It is a sentinel value that is invalid
+// as a function or external object index.
 // It is represented as -1.
 const NullReference int32 = -1
 
-type value struct {
-	low, high uint64
-}
-
-func newValue(v any) value {
+func anyToU64(v any) (low, high uint64) {
 	switch val := v.(type) {
 	case int32:
-		return i32(val)
+		return uint64(val), 0
 	case int64:
-		return i64(val)
+		return uint64(val), 0
 	case float32:
-		return f32(val)
+		return uint64(math.Float32bits(val)), 0
 	case float64:
-		return f64(val)
+		return math.Float64bits(val), 0
 	case V128Value:
-		return v128(val)
+		return val.Low, val.High
 	default:
 		panic("unreachable")
 	}
 }
 
-func i32(v int32) value {
-	return value{low: uint64(v)}
-}
-
-func i64(v int64) value {
-	return value{low: uint64(v)}
-}
-
-func f32(v float32) value {
-	return value{low: uint64(math.Float32bits(v))}
-}
-
-func f64(v float64) value {
-	return value{low: math.Float64bits(v)}
-}
-
-func v128(v V128Value) value {
-	return value{low: v.Low, high: v.High}
-}
-
-func (v value) int32() int32 {
-	return int32(v.low)
-}
-
-func (v value) int64() int64 {
-	return int64(v.low)
-}
-
-func (v value) float32() float32 {
-	return math.Float32frombits(uint32(v.low))
-}
-
-func (v value) float64() float64 {
-	return math.Float64frombits(v.low)
-}
-
-func (v value) v128() V128Value {
-	return V128Value{Low: v.low, High: v.high}
-}
-
-func (v value) any(t ValueType) any {
+func u64ToAny(low, high uint64, t ValueType) any {
 	switch t {
 	case I32:
-		return v.int32()
+		return int32(low)
 	case I64:
-		return v.int64()
+		return int64(low)
 	case F32:
-		return v.float32()
+		return math.Float32frombits(uint32(low))
 	case F64:
-		return v.float64()
+		return math.Float64frombits(low)
 	case V128:
-		return v.v128()
+		return V128Value{Low: low, High: high}
 	case FuncRefType, ExternRefType:
-		return v.int32()
+		return int32(low)
 	default:
 		panic("unreachable")
 	}

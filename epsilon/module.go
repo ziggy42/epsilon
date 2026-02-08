@@ -25,6 +25,13 @@ type function struct {
 	// the position of the instruction after the matching 'else' (or 'end' if no
 	// else).
 	jumpElseCache map[uint32]uint32
+
+	// Precomputed local metadata (populated during instantiation).
+	localTypes    []ValueType // Types of all locals (params + declared locals)
+	localSlots    []uint32    // Maps local index to starting slot in locals
+	numSlots      int         // Total number of uint64 slots needed
+	numParamSlots int         // Number of slots used by parameters
+	hasV128Locals bool        // True if any local is V128 (enables fast-path when false)
 }
 
 type exportIndexKind int

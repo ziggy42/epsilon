@@ -52,7 +52,7 @@ type store struct {
 type callFrame struct {
 	pc           uint32
 	controlStack []controlFrame
-	locals       []value
+	locals       []uint64
 	function     *function
 	module       *ModuleInstance
 }
@@ -77,7 +77,7 @@ type vm struct {
 	stack             *valueStack
 	callStack         []callFrame
 	controlStackCache []controlFrame
-	localsCache       []value
+	localsCache       []uint64
 	config            Config
 	fuel              uint64
 }
@@ -90,7 +90,7 @@ func newVm(config Config) *vm {
 		stack:             newValueStack(),
 		callStack:         make([]callFrame, 0, config.CallStackPreallocationSize),
 		controlStackCache: make([]controlFrame, ctrlCacheSize),
-		localsCache:       make([]value, localsCacheSize),
+		localsCache:       make([]uint64, localsCacheSize),
 		config:            config,
 		fuel:              config.Fuel,
 	}
@@ -117,13 +117,50 @@ func (vm *vm) instantiate(
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
 	}
 
-	for _, function := range module.funcs {
+	for i := range module.funcs {
+		function := &module.funcs[i]
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.types[function.typeIndex]
+
+		// Precompute local metadata once (params + declared locals).
+		paramTypes := funType.ParamTypes
+		numLocalIndices := len(paramTypes) + len(function.locals)
+		localTypes := make([]ValueType, numLocalIndices)
+		copy(localTypes, paramTypes)
+		copy(localTypes[len(paramTypes):], function.locals)
+
+		// Compute slot offsets (v128 uses 2 slots).
+		localSlots := make([]uint32, numLocalIndices)
+		numSlots := 0
+		hasV128 := false
+		for j, t := range localTypes {
+			localSlots[j] = uint32(numSlots)
+			if t == V128 {
+				numSlots += 2
+				hasV128 = true
+			} else {
+				numSlots++
+			}
+		}
+		numParamSlots := 0
+		for _, t := range paramTypes {
+			if t == V128 {
+				numParamSlots += 2
+			} else {
+				numParamSlots++
+			}
+		}
+
+		function.localTypes = localTypes
+		function.localSlots = localSlots
+		function.numSlots = numSlots
+		function.numParamSlots = numParamSlots
+		function.hasV128Locals = hasV128
+
 		wasmFunc := &wasmFunction{
 			functionType: funType,
 			module:       moduleInstance,
-			code:         function,
+			code:         *function,
 		}
 		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
@@ -171,10 +208,12 @@ func (vm *vm) instantiate(
 			return nil, err
 		}
 
+		low, high := anyToU64(val)
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, &Global{
-			value:   val,
+			low:     low,
+			high:    high,
 			Mutable: global.globalType.IsMutable,
 			Type:    global.globalType.ValueType,
 		})
@@ -215,7 +254,7 @@ func (vm *vm) instantiate(
 }
 
 func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
-	vm.stack.pushAll(args)
+	vm.stack.pushAll(args, function.GetType().ParamTypes)
 	if err := vm.invokeFunction(function); err != nil {
 		return nil, err
 	}
@@ -241,25 +280,28 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	callDepth := len(vm.callStack)
 	withinPreallocation := callDepth < vm.config.CallStackPreallocationSize
 
-	numParams := len(function.functionType.ParamTypes)
-	numLocals := numParams + len(function.code.locals)
-	var locals []value
-	if withinPreallocation && numLocals <= localsCacheSlotSize {
+	// Use precomputed local metadata from function.
+	code := &function.code
+	numSlots := code.numSlots
+	numParamSlots := code.numParamSlots
+
+	var locals []uint64
+	if withinPreallocation && numSlots <= localsCacheSlotSize {
 		blockDepth := callDepth * localsCacheSlotSize
 		max := blockDepth + localsCacheSlotSize
-		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
+		locals = vm.localsCache[blockDepth : blockDepth+numSlots : max]
 		// Clear non-parameter locals to their zero values. WASM allows reading
 		// uninitialized locals, so we must zero them to avoid reusing stale values
 		// from previous invocations. Parameters are overwritten below.
-		clear(locals[numParams:])
+		clear(locals[numParamSlots:])
 	} else {
 		// Beyond preallocation or too many locals: heap allocate.
-		locals = make([]value, numLocals)
+		locals = make([]uint64, numSlots)
 	}
 
 	// Copy params and shrink stack by operating on the underlying slice directly.
-	newLen := len(vm.stack.data) - numParams
-	copy(locals[:numParams], vm.stack.data[newLen:])
+	newLen := len(vm.stack.data) - numParamSlots
+	copy(locals[:numParamSlots], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
 	var controlStack []controlFrame
@@ -272,8 +314,8 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	}
 	controlStack = append(controlStack, controlFrame{
 		isLoop:         false,
-		blockType:      int32(function.code.typeIndex),
-		continuationPc: uint32(len(function.code.body)),
+		blockType:      int32(code.typeIndex),
+		continuationPc: uint32(len(code.body)),
 		stackHeight:    vm.stack.size(),
 	})
 
@@ -281,7 +323,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		pc:           0,
 		controlStack: controlStack,
 		locals:       locals,
-		function:     &function.code,
+		function:     code,
 		module:       function.module,
 	})
 
@@ -374,17 +416,56 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case drop:
 		vm.stack.drop()
 	case selectOp:
-		vm.handleSelect()
+		vm.handleSelect(1)
+	case internalSelectV128:
+		vm.handleSelect(2)
 	case selectT:
-		count := frame.next()
-		frame.pc += uint32(count)
-		vm.handleSelect()
+		n := int(frame.next())
+		slots := n // Default: 1 slot per type.
+		for range n {
+			if byte(frame.next()) == byte(V128) {
+				slots++ // V128 uses 2 slots.
+			}
+		}
+		vm.handleSelect(slots)
 	case localGet:
-		vm.stack.push(frame.locals[frame.next()])
+		localIdx := frame.next()
+		if frame.function.hasV128Locals {
+			slot := frame.function.localSlots[localIdx]
+			if frame.function.localTypes[localIdx] == V128 {
+				vm.stack.pushV128Raw(frame.locals[slot], frame.locals[slot+1])
+			} else {
+				vm.stack.pushU64(frame.locals[slot])
+			}
+		} else {
+			vm.stack.pushU64(frame.locals[localIdx])
+		}
 	case localSet:
-		frame.locals[frame.next()] = vm.stack.pop()
+		localIdx := frame.next()
+		if frame.function.hasV128Locals {
+			slot := frame.function.localSlots[localIdx]
+			if frame.function.localTypes[localIdx] == V128 {
+				frame.locals[slot], frame.locals[slot+1] = vm.stack.popV128Raw()
+			} else {
+				frame.locals[slot] = vm.stack.popU64()
+			}
+		} else {
+			frame.locals[localIdx] = vm.stack.popU64()
+		}
 	case localTee:
-		frame.locals[frame.next()] = vm.stack.data[len(vm.stack.data)-1]
+		localIdx := frame.next()
+		if frame.function.hasV128Locals {
+			slot := frame.function.localSlots[localIdx]
+			if frame.function.localTypes[localIdx] == V128 {
+				n := len(vm.stack.data)
+				frame.locals[slot] = vm.stack.data[n-2]
+				frame.locals[slot+1] = vm.stack.data[n-1]
+			} else {
+				frame.locals[slot] = vm.stack.data[len(vm.stack.data)-1]
+			}
+		} else {
+			frame.locals[localIdx] = vm.stack.data[len(vm.stack.data)-1]
+		}
 	case globalGet:
 		vm.handleGlobalGet(frame)
 	case globalSet:
@@ -527,16 +608,16 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		vm.stack.pushInt32(popcnt32(vm.stack.popInt32()))
 	case i32Add:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() + b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) + b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Sub:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() - b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) - b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Mul:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() * b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) * b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32DivS:
 		err = vm.handleBinarySafeInt32(divS32)
 	case i32DivU:
@@ -547,36 +628,36 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		err = vm.handleBinarySafeInt32(remU32)
 	case i32And:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() & b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) & b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Or:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() | b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) | b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Xor:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() ^ b
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) ^ b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Shl:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() << (uint32(b) % 32)
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) << (uint32(b) % 32)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32ShrS:
 		b := vm.stack.popInt32()
-		res := vm.stack.data[len(vm.stack.data)-1].int32() >> (uint32(b) % 32)
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := int32(vm.stack.data[len(vm.stack.data)-1]) >> (uint32(b) % 32)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32ShrU:
 		b := vm.stack.popInt32()
-		res := shrU32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := shrU32(int32(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Rotl:
 		b := vm.stack.popInt32()
-		res := rotl32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := rotl32(int32(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i32Rotr:
 		b := vm.stack.popInt32()
-		res := rotr32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i32(res)
+		res := rotr32(int32(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Clz:
 		vm.stack.pushInt64(clz64(vm.stack.popInt64()))
 	case i64Ctz:
@@ -585,16 +666,16 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		vm.stack.pushInt64(popcnt64(vm.stack.popInt64()))
 	case i64Add:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() + b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) + b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Sub:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() - b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) - b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Mul:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() * b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) * b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64DivS:
 		err = vm.handleBinarySafeInt64(divS64)
 	case i64DivU:
@@ -605,36 +686,36 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		err = vm.handleBinarySafeInt64(remU64)
 	case i64And:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() & b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) & b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Or:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() | b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) | b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Xor:
 		b := vm.stack.popInt64()
-		res := vm.stack.data[len(vm.stack.data)-1].int64() ^ b
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := int64(vm.stack.data[len(vm.stack.data)-1]) ^ b
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Shl:
 		b := vm.stack.popInt64()
-		res := shl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := shl64(int64(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64ShrS:
 		b := vm.stack.popInt64()
-		res := shrS64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := shrS64(int64(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64ShrU:
 		b := vm.stack.popInt64()
-		res := shrU64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := shrU64(int64(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Rotl:
 		b := vm.stack.popInt64()
-		res := rotl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := rotl64(int64(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case i64Rotr:
 		b := vm.stack.popInt64()
-		res := rotr64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
-		vm.stack.data[len(vm.stack.data)-1] = i64(res)
+		res := rotr64(int64(vm.stack.data[len(vm.stack.data)-1]), b)
+		vm.stack.data[len(vm.stack.data)-1] = uint64(res)
 	case f32Abs:
 		vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
 	case f32Neg:
@@ -819,7 +900,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case v128Store:
 		err = handleStore(vm, frame, vm.stack.popV128(), (*Memory).StoreV128)
 	case v128Const:
-		vm.stack.pushV128(V128Value{Low: frame.next(), High: frame.next()})
+		vm.stack.pushV128Raw(frame.next(), frame.next())
 	case i8x16Shuffle:
 		vm.handleI8x16Shuffle(frame)
 	case i8x16Swizzle:
@@ -1389,29 +1470,36 @@ func (vm *vm) handleCallIndirect(frame *callFrame) error {
 	return vm.invokeFunction(function)
 }
 
-func (vm *vm) handleSelect() {
+func (vm *vm) handleSelect(slotCount int) {
 	data := vm.stack.data
 	n := len(data)
-	var top value
-	if data[n-1].int32() != 0 {
-		top = data[n-3]
-	} else {
-		top = data[n-2]
+	cond := int32(data[n-1])
+	resultEnd := n - 1 - slotCount
+	if cond == 0 {
+		// Select val2: copy it over val1.
+		copy(data[resultEnd-slotCount:resultEnd], data[resultEnd:n-1])
 	}
-	data[n-3] = top
-	vm.stack.data = data[:n-2]
+	vm.stack.data = data[:resultEnd]
 }
 
 func (vm *vm) handleGlobalGet(frame *callFrame) {
 	localIndex := uint32(frame.next())
 	global := vm.getGlobal(frame, localIndex)
-	vm.stack.push(global.value)
+	if global.Type == V128 {
+		vm.stack.pushV128Raw(global.low, global.high)
+	} else {
+		vm.stack.pushU64(global.low)
+	}
 }
 
 func (vm *vm) handleGlobalSet(frame *callFrame) {
 	localIndex := uint32(frame.next())
 	global := vm.getGlobal(frame, localIndex)
-	global.value = vm.stack.pop()
+	if global.Type == V128 {
+		global.low, global.high = vm.stack.popV128Raw()
+	} else {
+		global.low = vm.stack.popU64()
+	}
 }
 
 func (vm *vm) handleTableGet(frame *callFrame) error {
@@ -1774,23 +1862,37 @@ func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
 
 	if blockType >= 0 { // type index.
 		funcType := module.types[blockType]
-		return uint32(len(funcType.ParamTypes))
+		return slotCountForTypes(funcType.ParamTypes)
 	}
 
-	return 0 // value type.
+	return 0 // valtype blocks have 0 params
 }
 
 func (vm *vm) getOutputCount(module *ModuleInstance, blockType int32) uint32 {
-	if blockType == -0x40 { // empty block type.
+	if blockType == -0x40 {
 		return 0
 	}
 
-	if blockType >= 0 { // type index.
+	if blockType >= 0 {
 		funcType := module.types[blockType]
-		return uint32(len(funcType.ResultTypes))
+		return slotCountForTypes(funcType.ResultTypes)
 	}
 
-	return 1 // value type.
+	// V128 (0x7B) is encoded as -5 in SLEB128; masking recovers the opcode.
+	if (blockType & 0x7F) == int32(V128) {
+		return 2
+	}
+	return 1
+}
+
+func slotCountForTypes(types []ValueType) uint32 {
+	count := uint32(len(types))
+	for _, t := range types {
+		if t == V128 {
+			count++ // V128 uses 2 slots.
+		}
+	}
+	return count
 }
 
 func (vm *vm) pushControlFrame(frame *callFrame, controlFrame controlFrame) {
@@ -1819,7 +1921,7 @@ func (vm *vm) initActiveElements(
 		if err != nil {
 			return err
 		}
-		offset := offsetVal.int32()
+		offset := offsetVal.(int32)
 
 		storeTableIndex := moduleInstance.tableAddrs[element.tableIndex]
 		table := vm.store.tables[storeTableIndex]
@@ -1845,7 +1947,7 @@ func (vm *vm) initActiveElements(
 				if err != nil {
 					return err
 				}
-				values[i] = refVal.int32()
+				values[i] = refVal.(int32)
 			}
 
 			if err := table.InitFromSlice(offset, values); err != nil {
@@ -1870,7 +1972,7 @@ func (vm *vm) initActiveDatas(
 		if err != nil {
 			return err
 		}
-		offset := offsetVal.int32()
+		offset := offsetVal.(int32)
 		storeMemoryIndex := moduleInstance.memAddrs[segment.memoryIndex]
 		memory := vm.store.memories[storeMemoryIndex]
 		if err := memory.Set(uint32(offset), 0, segment.content); err != nil {
@@ -1923,7 +2025,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 
 	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
 	res := fun.hostCode(fun.module, args...)
-	vm.stack.pushAll(res)
+	vm.stack.pushAll(res, fun.GetType().ResultTypes)
 	return err
 }
 
@@ -1931,7 +2033,7 @@ func (vm *vm) invokeInitExpression(
 	expression []uint64,
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
-) (value, error) {
+) (any, error) {
 	// We create a fake function to execute the expression.
 	// The expression is expected to return a single value.
 	function := wasmFunction{
@@ -1943,9 +2045,9 @@ func (vm *vm) invokeInitExpression(
 		module: moduleInstance,
 	}
 	if err := vm.invokeWasmFunction(&function); err != nil {
-		return value{}, err
+		return nil, err
 	}
-	return vm.stack.pop(), nil
+	return vm.stack.popValueTypes([]ValueType{resultType})[0], nil
 }
 
 func toStoreFuncIndexes(
