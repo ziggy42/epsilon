@@ -900,7 +900,6 @@ func (v *validator) validateSelect(t ValueType, opcodePos uint) error {
 	}
 
 	v.pushValue(resolvedType)
-
 	return nil
 }
 

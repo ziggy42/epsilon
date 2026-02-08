@@ -400,10 +400,10 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 			if frame.function.localTypes[localIdx] == V128 {
 				vm.stack.pushV128Raw(frame.locals[slot], frame.locals[slot+1])
 			} else {
-				vm.stack.pushU64(frame.locals[slot])
+				vm.stack.pushUint64(frame.locals[slot])
 			}
 		} else {
-			vm.stack.pushU64(frame.locals[localIdx])
+			vm.stack.pushUint64(frame.locals[localIdx])
 		}
 	case localSet:
 		localIdx := frame.next()
@@ -412,10 +412,10 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 			if frame.function.localTypes[localIdx] == V128 {
 				frame.locals[slot], frame.locals[slot+1] = vm.stack.popV128Raw()
 			} else {
-				frame.locals[slot] = vm.stack.popU64()
+				frame.locals[slot] = vm.stack.popUint64()
 			}
 		} else {
-			frame.locals[localIdx] = vm.stack.popU64()
+			frame.locals[localIdx] = vm.stack.popUint64()
 		}
 	case localTee:
 		localIdx := frame.next()
@@ -1453,7 +1453,7 @@ func (vm *vm) handleGlobalGet(frame *callFrame) {
 	if global.Type == V128 {
 		vm.stack.pushV128Raw(global.low, global.high)
 	} else {
-		vm.stack.pushU64(global.low)
+		vm.stack.pushUint64(global.low)
 	}
 }
 
@@ -1463,7 +1463,7 @@ func (vm *vm) handleGlobalSet(frame *callFrame) {
 	if global.Type == V128 {
 		global.low, global.high = vm.stack.popV128Raw()
 	} else {
-		global.low = vm.stack.popU64()
+		global.low = vm.stack.popUint64()
 	}
 }
 

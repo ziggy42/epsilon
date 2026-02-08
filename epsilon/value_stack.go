@@ -48,7 +48,7 @@ func (s *valueStack) pushV128Raw(low, high uint64) {
 	s.data = append(s.data, low, high)
 }
 
-func (s *valueStack) pushU64(v uint64) {
+func (s *valueStack) pushUint64(v uint64) {
 	s.data = append(s.data, v)
 }
 
@@ -118,7 +118,7 @@ func (s *valueStack) popV128Raw() (low, high uint64) {
 	return
 }
 
-func (s *valueStack) popU64() uint64 {
+func (s *valueStack) popUint64() uint64 {
 	n := len(s.data) - 1
 	result := s.data[n]
 	s.data = s.data[:n]

@@ -458,8 +458,12 @@ const (
 	f64x2ConvertLowI32x4S     opcode = 0xFDFE
 	f64x2ConvertLowI32x4U     opcode = 0xFDFF
 
-	// Internal opcodes not part of the WASM spec.
-	// Used to handle special cases during validation that require
-	// different runtime behavior.
-	internalSelectV128 opcode = 0xE0
+	// Internal opcodes (0xC5-0xDF range, unused by WebAssembly 2.0).
+	// These are never parsed from bytecode; they're substituted during
+	// validation when we detect instructions that need special runtime handling.
+
+	// internalSelectV128 replaces selectOp when selecting v128 values.
+	// The regular select (0x1B) assumes 32/64-bit values, but v128 needs
+	// to read/write 2 stack slots.
+	internalSelectV128 opcode = 0xC5
 )
