@@ -153,5 +153,5 @@ type Global struct {
 }
 
 func (g *Global) Get() any {
-	return u64ToAny(g.low, g.high, g.Type)
+	return uint64ToAny(g.low, g.high, g.Type)
 }

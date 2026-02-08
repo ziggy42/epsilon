@@ -142,7 +142,7 @@ func (b *ModuleImportBuilder) AddGlobal(
 	mutable bool,
 	valueType ValueType,
 ) *ModuleImportBuilder {
-	low, high := anyToU64(value)
+	low, high := anyToUint64(value)
 	b.imports[name] = &Global{
 		low:     low,
 		high:    high,

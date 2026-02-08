@@ -107,7 +107,7 @@ func (ft *FunctionType) Equal(other FunctionType) bool {
 // external object index. It is represented as -1.
 const NullReference int32 = -1
 
-func anyToU64(v any) (low, high uint64) {
+func anyToUint64(v any) (low, high uint64) {
 	switch val := v.(type) {
 	case int32:
 		return uint64(val), 0
@@ -124,7 +124,7 @@ func anyToU64(v any) (low, high uint64) {
 	}
 }
 
-func u64ToAny(low, high uint64, t ValueType) any {
+func uint64ToAny(low, high uint64, t ValueType) any {
 	switch t {
 	case I32:
 		return int32(low)

@@ -54,7 +54,7 @@ func (s *valueStack) pushUint64(v uint64) {
 
 func (s *valueStack) pushAll(values []any, types []ValueType) {
 	for i, v := range values {
-		low, high := anyToU64(v)
+		low, high := anyToUint64(v)
 		s.data = append(s.data, low)
 		if types[i] == V128 {
 			s.data = append(s.data, high)

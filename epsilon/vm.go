@@ -173,7 +173,7 @@ func (vm *vm) instantiate(
 			return nil, err
 		}
 
-		low, high := anyToU64(val)
+		low, high := anyToUint64(val)
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		vm.store.globals = append(vm.store.globals, &Global{
