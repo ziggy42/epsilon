@@ -1358,7 +1358,7 @@ func (vm *vm) handleElse(frame *callFrame) {
 
 func (vm *vm) handleEnd(frame *callFrame) {
 	controlFrame := vm.popControlFrame(frame)
-	outputCount := vm.getOutputCount(frame.module, controlFrame.blockType)
+	outputCount := vm.outputSlotCount(frame.module, controlFrame.blockType)
 	vm.stack.unwind(controlFrame.stackHeight, outputCount)
 }
 
@@ -1391,9 +1391,9 @@ func (vm *vm) brToLabel(frame *callFrame, labelIndex uint32) {
 
 	var arity uint32
 	if targetFrame.isLoop {
-		arity = vm.getInputCount(frame.module, targetFrame.blockType)
+		arity = vm.inputSlotCount(frame.module, targetFrame.blockType)
 	} else {
-		arity = vm.getOutputCount(frame.module, targetFrame.blockType)
+		arity = vm.outputSlotCount(frame.module, targetFrame.blockType)
 	}
 
 	vm.stack.unwind(targetFrame.stackHeight, arity)
@@ -1820,7 +1820,7 @@ func handleSimdReplaceLane[T wasmNumber](
 	vm.stack.pushV128(replaceLane(vector, laneIndex, laneValue))
 }
 
-func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
+func (vm *vm) inputSlotCount(module *ModuleInstance, blockType int32) uint32 {
 	if blockType == -0x40 { // empty block type.
 		return 0
 	}
@@ -1833,7 +1833,7 @@ func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
 	return 0 // valtype blocks have 0 params
 }
 
-func (vm *vm) getOutputCount(module *ModuleInstance, blockType int32) uint32 {
+func (vm *vm) outputSlotCount(module *ModuleInstance, blockType int32) uint32 {
 	if blockType == -0x40 {
 		return 0
 	}
