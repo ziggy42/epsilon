@@ -21,12 +21,15 @@ import (
 )
 
 var (
-	errUnreachable        = errors.New("unreachable")
-	errCallStackExhausted = errors.New("call stack exhausted")
-	errFuelExhausted      = errors.New("fuel exhausted")
-	// Special error to signal a return instruction was hit.
-	errReturn = errors.New("return instruction")
+	errUnreachable              = errors.New("unreachable")
+	errCallStackExhausted       = errors.New("call stack exhausted")
+	errFuelExhausted            = errors.New("fuel exhausted")
+	errUnknownFunctionType      = errors.New("unknown function type")
+	errIndirectCallTypeMismatch = errors.New("indirect call type mismatch")
 )
+
+// Special error to signal a return instruction was hit.
+var errReturn = errors.New("return instruction")
 
 const (
 	controlStackCacheSlotSize = 14 // Control stack slot size per call frame.
@@ -101,10 +104,7 @@ func (vm *vm) instantiate(
 	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
-	moduleInstance := &ModuleInstance{
-		types: module.types,
-		vm:    vm,
-	}
+	moduleInstance := &ModuleInstance{types: module.types, vm: vm}
 
 	resolvedImports, err := resolveImports(module, moduleInstance, imports)
 	if err != nil {
@@ -229,7 +229,7 @@ func (vm *vm) invokeFunction(function FunctionInstance) error {
 	case *hostFunction:
 		return vm.invokeHostFunction(f)
 	default:
-		return fmt.Errorf("unknown function type")
+		return errUnknownFunctionType
 	}
 }
 
@@ -1383,7 +1383,7 @@ func (vm *vm) handleCallIndirect(frame *callFrame) error {
 
 	function := vm.store.funcs[uint32(tableElement)]
 	if !function.GetType().Equal(expectedType) {
-		return fmt.Errorf("indirect call type mismatch")
+		return errIndirectCallTypeMismatch
 	}
 
 	return vm.invokeFunction(function)
