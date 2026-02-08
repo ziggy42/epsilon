@@ -22,6 +22,7 @@ import (
 
 var (
 	errAlignmentTooLarge           = errors.New("alignment too large")
+	errBrLabelArityMismatch        = errors.New("br label arity mismatch")
 	errBrLabelIndexOutOfBounds     = errors.New("br label index out of bounds")
 	errControlStackEmpty           = errors.New("control stack empty")
 	errDataCountNotSet             = errors.New("data count not set")
@@ -793,7 +794,7 @@ func (v *validator) validateBrTable() error {
 		frameIndex := len(v.controlStack) - 1 - int(index)
 		labelTypes := v.labelTypes(v.controlStack[frameIndex])
 		if len(labelTypes) != arity {
-			return errors.New("br label arity mismatch")
+			return errBrLabelArityMismatch
 		}
 
 		values, err := v.popExpectedValues(labelTypes)
