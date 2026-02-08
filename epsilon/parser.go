@@ -26,11 +26,20 @@ import (
 )
 
 var (
-	errElementKindNotZero                = errors.New("element kind for passive element segment must be 0x00")
-	errIncompatibleNumberOfFunctionTypes = errors.New("incompatible number of function types")
-	errIntRepresentationTooLong          = errors.New("integer representation too long")
-	errIntegerTooLarge                   = errors.New("integer too large")
-	errMalformedMemopFlags               = errors.New("malformed memop flags")
+	errFunctionTypeMismatch      = errors.New("function type count mismatch")
+	errInconsistentDataCount     = errors.New("inconsistent data count")
+	errIntRepresentationTooLong  = errors.New("integer representation too long")
+	errIntegerTooLarge           = errors.New("integer too large")
+	errInvalidElementKind        = errors.New("invalid element kind")
+	errInvalidFunctionTypePrefix = errors.New("invalid function type prefix")
+	errInvalidGlobalMutability   = errors.New("invalid global mutability")
+	errInvalidImportDescriptor   = errors.New("invalid import descriptor")
+	errInvalidLimitsFormat       = errors.New("invalid limits format")
+	errInvalidMagicNumber        = errors.New("invalid magic number")
+	errInvalidUTF8               = errors.New("invalid UTF-8")
+	errMalformedMemopFlags       = errors.New("malformed memop flags")
+	errMissingEndOpcode          = errors.New("missing end opcode")
+	errUnexpectedContent         = errors.New("unexpected content after last section")
 )
 
 const (
@@ -196,11 +205,11 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	}
 
 	if dataCount != nil && *dataCount != uint64(len(dataSegments)) {
-		return nil, fmt.Errorf("inconsistent data count")
+		return nil, errInconsistentDataCount
 	}
 
 	if len(functionTypeIndexes) != len(functions) {
-		return nil, errIncompatibleNumberOfFunctionTypes
+		return nil, errFunctionTypeMismatch
 	}
 
 	for i := range functions {
@@ -225,14 +234,11 @@ func (p *parser) parse() (*moduleDefinition, error) {
 func (p *parser) parseHeader() error {
 	header := make([]byte, 8)
 	if _, err := io.ReadFull(p.reader, header); err != nil {
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return fmt.Errorf("file is too short to be valid WASM")
-		}
-		return fmt.Errorf("could not read header: %w", err)
+		return err
 	}
 
 	if !bytes.HasPrefix(header, []byte(wasmMagicNumber)) {
-		return fmt.Errorf("invalid WASM: does not start with magic number")
+		return errInvalidMagicNumber
 	}
 	version := int32(binary.LittleEndian.Uint32(header[4:8]))
 	if version != supportedWasmVersion {
@@ -246,7 +252,7 @@ func (p *parser) parseCustomSection(payloadLen uint32) error {
 	// if it's not valid.
 	nameLength, bytesRead, err := p.readUleb128(5)
 	if err != nil {
-		return fmt.Errorf("failed to read custom section name length: %w", err)
+		return err
 	}
 
 	if nameLength > math.MaxUint32 {
@@ -255,25 +261,22 @@ func (p *parser) parseCustomSection(payloadLen uint32) error {
 
 	nameBytes := make([]byte, nameLength)
 	if _, err := io.ReadFull(p.reader, nameBytes); err != nil {
-		return fmt.Errorf("failed to read custom section name: %w", err)
+		return err
 	}
 	if !utf8.Valid(nameBytes) {
-		return fmt.Errorf("custom section name is not valid UTF-8")
+		return errInvalidUTF8
 	}
 
 	// Discard the actual bytes of the section.
 	remainingBytes := payloadLen - uint32(nameLength) - uint32(bytesRead)
 	_, err = io.CopyN(io.Discard, p.reader, int64(remainingBytes))
-	if err != nil {
-		return fmt.Errorf("failed to skip custom section: %w", err)
-	}
-	return nil
+	return err
 }
 
 func (p *parser) parseFunction() (function, error) {
 	size, err := p.parseUint32()
 	if err != nil {
-		return function{}, fmt.Errorf("failed to read function size: %w", err)
+		return function{}, err
 	}
 
 	originalReader := p.reader
@@ -285,7 +288,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	localEntries, err := parseVector(p, p.parseLocalVariables)
 	if err != nil {
-		return function{}, fmt.Errorf("failed to parse locals: %w", err)
+		return function{}, err
 	}
 
 	var totalLocalsCount uint64
@@ -305,12 +308,12 @@ func (p *parser) parseFunction() (function, error) {
 
 	result, err := p.readCode(nil)
 	if err != nil {
-		return function{}, fmt.Errorf("failed to read function body: %w", err)
+		return function{}, err
 	}
 
 	body := result.bytecode
 	if len(body) == 0 || body[len(body)-1] != uint64(end) {
-		return function{}, fmt.Errorf("function body must end with End opcode")
+		return function{}, errMissingEndOpcode
 	}
 
 	return function{
@@ -375,7 +378,7 @@ func (p *parser) parseImport() (moduleImport, error) {
 			return moduleImport{}, err
 		}
 	default:
-		return moduleImport{}, fmt.Errorf("failed to parse import description")
+		return moduleImport{}, errInvalidImportDescriptor
 	}
 	return moduleImport{
 		moduleName: moduleName,
@@ -457,19 +460,18 @@ func (p *parser) parseFunctionType() (FunctionType, error) {
 		return FunctionType{}, err
 	}
 	if b != 0x60 {
-		return FunctionType{}, fmt.Errorf("invalid function type prefix")
+		return FunctionType{}, errInvalidFunctionTypePrefix
 	}
 
 	paramTypes, err := parseVector(p, p.parseValueType)
 	if err != nil {
-		return FunctionType{}, fmt.Errorf("failed to parse param types: %w", err)
+		return FunctionType{}, err
 	}
 
 	resultTypes, err := parseVector(p, p.parseValueType)
 	if err != nil {
-		return FunctionType{}, fmt.Errorf("failed to parse result types: %w", err)
+		return FunctionType{}, err
 	}
-
 	return FunctionType{ParamTypes: paramTypes, ResultTypes: resultTypes}, nil
 }
 
@@ -532,7 +534,7 @@ func (p *parser) parseGlobalType() (GlobalType, error) {
 		return GlobalType{}, err
 	}
 	if isMutable != 0 && isMutable != 1 {
-		return GlobalType{}, fmt.Errorf("invalid global type mutability")
+		return GlobalType{}, errInvalidGlobalMutability
 	}
 	return GlobalType{ValueType: valueType, IsMutable: isMutable == 1}, nil
 }
@@ -566,7 +568,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return elementSegment{}, errElementKindNotZero
+			return elementSegment{}, errInvalidElementKind
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
@@ -591,7 +593,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return elementSegment{}, errElementKindNotZero
+			return elementSegment{}, errInvalidElementKind
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
@@ -610,7 +612,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			return elementSegment{}, err
 		}
 		if elemkind != 0x00 {
-			return elementSegment{}, errElementKindNotZero
+			return elementSegment{}, errInvalidElementKind
 		}
 		indexes, err := parseVector(p, p.parseUint64)
 		if err != nil {
@@ -726,7 +728,7 @@ func (p *parser) parseLimits() (Limits, error) {
 		}
 		return Limits{Min: min, Max: &max}, nil
 	default:
-		return Limits{}, fmt.Errorf("unexpected limits format")
+		return Limits{}, errInvalidLimitsFormat
 	}
 }
 
@@ -793,7 +795,7 @@ func validateSectionOrder(last sectionId, current sectionId) error {
 		return fmt.Errorf("malformed section id: %d", current)
 	}
 	if order <= getSectionOrder(last) {
-		return fmt.Errorf("unexpected content after last section")
+		return errUnexpectedContent
 	}
 	return nil
 }
@@ -1247,7 +1249,7 @@ func (p *parser) readUleb128(maxBytes int) (uint64, int, error) {
 		}
 		bytesRead++
 		if bytesRead > maxBytes {
-			return 0, bytesRead, fmt.Errorf("uleb128 value too large")
+			return 0, bytesRead, errIntRepresentationTooLong
 		}
 
 		group := b & 0b01111111
