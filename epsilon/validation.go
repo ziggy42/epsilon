@@ -21,34 +21,34 @@ import (
 )
 
 var (
-	errBrLabelIndexOutOfBounds          = errors.New("br label index out of bounds")
-	errTypesDoNotMatch                  = errors.New("types do not match")
-	errLocalIndexOutOfBounds            = errors.New("local index out of bounds")
-	errGlobalIndexOutOfBounds           = errors.New("global index out of bounds")
-	errTableIndexOutOfBounds            = errors.New("table index out of bounds")
-	errMemoryIndexOutOfBounds           = errors.New("memory index out of bounds")
-	errAlignmentTooLarge                = errors.New("alignment too large")
-	errControlStackEmpty                = errors.New("control stack is empty")
-	errElementIndexOutOfBounds          = errors.New("element index out of bounds")
-	errDataIndexOutOfBounds             = errors.New("data index out of bounds")
-	errFunctionIndexOutOfBounds         = errors.New("function index out of bounds")
-	errValueStackUnderflow              = errors.New("value stack underflow")
-	errValueStackHeightMismatch         = errors.New("value stack height mismatch")
-	errReturnTypeNotSet                 = errors.New("return type not set")
-	errElseMustMatchIf                  = errors.New("else must match if")
-	errTableTypeMustBeFuncRef           = errors.New("table type must be func ref")
-	errCallIndirectTypeIndexOutOfBounds = errors.New("call indirect type index out of bounds")
-	errGlobalIsImmutable                = errors.New("global is immutable")
-	errRefNullRequiresReferenceType     = errors.New("ref.null requires a reference type")
-	errSimdLaneIndexOutOfBounds         = errors.New("simd lane index out of bounds")
-	errInvalidConstantExpression        = errors.New("invalid constant expression")
-	errInvalidLimits                    = errors.New("invalid limits")
-	errDuplicateExport                  = errors.New("duplicate export")
-	errInvalidStartFunction             = errors.New("invalid start function")
-	errUndeclaredFunctionReference      = errors.New("undeclared function reference")
-	errMultipleMemoriesNotEnabled       = errors.New("multiple memories not enabled")
-	errDataCountNotSet                  = errors.New("data count not set")
-	errUnclosedControlFrames            = errors.New("unclosed control frames")
+	errAlignmentTooLarge           = errors.New("alignment too large")
+	errBrLabelIndexOutOfBounds     = errors.New("br label index out of bounds")
+	errControlStackEmpty           = errors.New("control stack empty")
+	errDataCountNotSet             = errors.New("data count not set")
+	errDataIndexOutOfBounds        = errors.New("data index out of bounds")
+	errDuplicateExport             = errors.New("duplicate export")
+	errElementIndexOutOfBounds     = errors.New("element index out of bounds")
+	errElseMustMatchIf             = errors.New("else must match if")
+	errFunctionIndexOutOfBounds    = errors.New("function index out of bounds")
+	errGlobalIndexOutOfBounds      = errors.New("global index out of bounds")
+	errGlobalIsImmutable           = errors.New("global is immutable")
+	errInvalidCallIndirectType     = errors.New("invalid call_indirect type")
+	errInvalidConstantExpression   = errors.New("invalid constant expression")
+	errInvalidLimits               = errors.New("invalid limits")
+	errInvalidRefNullType          = errors.New("invalid ref.null type")
+	errInvalidStartFunction        = errors.New("invalid start function")
+	errInvalidTableType            = errors.New("invalid table type")
+	errLocalIndexOutOfBounds       = errors.New("local index out of bounds")
+	errMemoryIndexOutOfBounds      = errors.New("memory index out of bounds")
+	errMultipleMemoriesNotEnabled  = errors.New("multiple memories not enabled")
+	errReturnTypeNotSet            = errors.New("return type not set")
+	errSimdLaneIndexOutOfBounds    = errors.New("simd lane index out of bounds")
+	errStackHeightMismatch         = errors.New("stack height mismatch")
+	errTableIndexOutOfBounds       = errors.New("table index out of bounds")
+	errTypeMismatch                = errors.New("type mismatch")
+	errUnclosedControlFrame        = errors.New("unclosed control frame")
+	errUndeclaredFunctionReference = errors.New("undeclared function reference")
+	errValueStackUnderflow         = errors.New("value stack underflow")
 )
 
 type bottomType struct{}
@@ -121,7 +121,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 		switch t := imp.importType.(type) {
 		case functionTypeIndex:
 			if uint32(t) >= uint32(len(v.typeDefs)) {
-				return errTypesDoNotMatch
+				return errTypeMismatch
 			}
 
 			v.funcTypes = append(v.funcTypes, module.types[t])
@@ -266,7 +266,7 @@ func (v *validator) validateElementSegment(elem *elementSegment) error {
 		}
 
 		if v.tableTypes[elem.tableIndex].ReferenceType != elem.kind {
-			return errTypesDoNotMatch
+			return errTypeMismatch
 		}
 	}
 
@@ -279,7 +279,7 @@ func (v *validator) validateElementSegment(elem *elementSegment) error {
 	for _, funcIndex := range elem.functionIndexes {
 		v.referencedFunctions[uint32(funcIndex)] = true
 		if elem.kind != FuncRefType {
-			return errTypesDoNotMatch
+			return errTypeMismatch
 		}
 		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
 			return err
@@ -328,7 +328,7 @@ func (v *validator) validateFunction(function *function) error {
 		return err
 	}
 	if len(v.controlStack) != 0 {
-		return errUnclosedControlFrames
+		return errUnclosedControlFrame
 	}
 	return nil
 }
@@ -719,11 +719,11 @@ func (v *validator) validateEnd() error {
 		// This is the end of an if without an else, therefore the end types
 		// should match the start types.
 		if len(frame.startTypes) != len(frame.endTypes) {
-			return errTypesDoNotMatch
+			return errTypeMismatch
 		}
 		for i := range frame.startTypes {
 			if frame.startTypes[i] != frame.endTypes[i] {
-				return errTypesDoNotMatch
+				return errTypeMismatch
 			}
 		}
 	}
@@ -841,11 +841,11 @@ func (v *validator) validateCallIndirect() error {
 
 	tableType := v.tableTypes[tableIndex]
 	if tableType.ReferenceType != FuncRefType {
-		return errTableTypeMustBeFuncRef
+		return errInvalidTableType
 	}
 
 	if typeIndex >= uint32(len(v.typeDefs)) {
-		return errCallIndirectTypeIndexOutOfBounds
+		return errInvalidCallIndirectType
 	}
 	functionType := v.typeDefs[typeIndex]
 
@@ -880,10 +880,10 @@ func (v *validator) validateSelect(t ValueType) error {
 	if t == bottom {
 		if !((isNumber(type1) && isNumber(type2)) ||
 			(isVector(type1) && isVector(type2))) {
-			return errTypesDoNotMatch
+			return errTypeMismatch
 		}
 		if type1 != type2 && type1 != bottom && type2 != bottom {
-			return errTypesDoNotMatch
+			return errTypeMismatch
 		}
 	}
 
@@ -1110,7 +1110,7 @@ func (v *validator) validateRefNull() error {
 	refTypeVal := v.next()
 	refType := toValueType(refTypeVal)
 	if _, ok := refType.(ReferenceType); !ok {
-		return errRefNullRequiresReferenceType
+		return errInvalidRefNullType
 	}
 	v.pushValue(refType)
 	return nil
@@ -1197,7 +1197,7 @@ func (v *validator) validateTableInit() error {
 	tableType := v.tableTypes[tableIndex]
 	elemType := v.elemTypes[elemIndex]
 	if tableType.ReferenceType != elemType {
-		return errTypesDoNotMatch
+		return errTypeMismatch
 	}
 
 	return nil
@@ -1219,7 +1219,7 @@ func (v *validator) validateTableCopy() error {
 	destTableType := v.tableTypes[destTableIndex]
 	srcTableType := v.tableTypes[srcTableIndex]
 	if destTableType.ReferenceType != srcTableType.ReferenceType {
-		return errTypesDoNotMatch
+		return errTypeMismatch
 	}
 
 	return nil
@@ -1421,7 +1421,7 @@ func (v *validator) popExpectedValue(expected ValueType) (ValueType, error) {
 		return nil, err
 	}
 	if val != expected && val != bottom && expected != bottom {
-		return nil, errTypesDoNotMatch
+		return nil, errTypeMismatch
 	}
 	return val, nil
 }
@@ -1467,7 +1467,7 @@ func (v *validator) popControlFrame() (validationControlFrame, error) {
 		return validationControlFrame{}, err
 	}
 	if len(v.valueStack) != frame.height {
-		return validationControlFrame{}, errValueStackHeightMismatch
+		return validationControlFrame{}, errStackHeightMismatch
 	}
 	v.controlStack = v.controlStack[:len(v.controlStack)-1]
 	return frame, nil
