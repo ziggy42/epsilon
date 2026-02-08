@@ -122,41 +122,6 @@ func (vm *vm) instantiate(
 		storeIndex := uint32(len(vm.store.funcs))
 		funType := module.types[function.typeIndex]
 
-		// Precompute local metadata once (params + declared locals).
-		paramTypes := funType.ParamTypes
-		numLocalIndices := len(paramTypes) + len(function.locals)
-		localTypes := make([]ValueType, numLocalIndices)
-		copy(localTypes, paramTypes)
-		copy(localTypes[len(paramTypes):], function.locals)
-
-		// Compute slot offsets (v128 uses 2 slots).
-		localSlots := make([]uint32, numLocalIndices)
-		numSlots := 0
-		hasV128 := false
-		for j, t := range localTypes {
-			localSlots[j] = uint32(numSlots)
-			if t == V128 {
-				numSlots += 2
-				hasV128 = true
-			} else {
-				numSlots++
-			}
-		}
-		numParamSlots := 0
-		for _, t := range paramTypes {
-			if t == V128 {
-				numParamSlots += 2
-			} else {
-				numParamSlots++
-			}
-		}
-
-		function.localTypes = localTypes
-		function.localSlots = localSlots
-		function.numSlots = numSlots
-		function.numParamSlots = numParamSlots
-		function.hasV128Locals = hasV128
-
 		wasmFunc := &wasmFunction{
 			functionType: funType,
 			module:       moduleInstance,

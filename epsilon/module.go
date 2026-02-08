@@ -16,8 +16,8 @@ package epsilon
 
 type function struct {
 	typeIndex uint32
-	locals    []ValueType
 	body      []uint64
+
 	// jumpCache maps the position of the first instruction inside a block/if to
 	// the position of the instruction after the matching 'end'.
 	jumpCache map[uint32]uint32
@@ -26,12 +26,14 @@ type function struct {
 	// else).
 	jumpElseCache map[uint32]uint32
 
-	// Precomputed local metadata (populated during instantiation).
-	localTypes    []ValueType // Types of all locals (params + declared locals)
-	localSlots    []uint32    // Maps local index to starting slot in locals
-	numSlots      int         // Total number of uint64 slots needed
-	numParamSlots int         // Number of slots used by parameters
-	hasV128Locals bool        // True if any local is V128 (enables fast-path when false)
+	// Precomputed local metadata (populated during parsing).
+	// Locals are stored at runtime in a []uint64 slice. Most types use 1 slot,
+	// but v128 requires 2 consecutive slots (128 bits).
+	localTypes    []ValueType // Params first, then declared locals
+	localSlots    []uint32    // Local index → slot offset
+	numSlots      int         // Total slots (> len(localTypes) if v128 present)
+	numParamSlots int         // Slots for parameters
+	hasV128Locals bool        // If false, localIdx == slot (fast path)
 }
 
 type exportIndexKind int

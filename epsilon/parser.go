@@ -213,7 +213,12 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	}
 
 	for i := range functions {
-		functions[i].typeIndex = functionTypeIndexes[i]
+		typeIdx := functionTypeIndexes[i]
+		if int(typeIdx) >= len(types) {
+			return nil, errFunctionTypeMismatch
+		}
+		functions[i].typeIndex = typeIdx
+		setLocalsMetadata(&functions[i], types[typeIdx].ParamTypes)
 	}
 
 	return &moduleDefinition{
@@ -299,10 +304,12 @@ func (p *parser) parseFunction() (function, error) {
 		return function{}, fmt.Errorf("too many locals: %d", totalLocalsCount)
 	}
 
-	locals := make([]ValueType, 0, totalLocalsCount)
+	// Store declared locals in localTypes temporarily; params will be
+	// prepended after parsing when we have access to the function type.
+	declaredLocals := make([]ValueType, 0, totalLocalsCount)
 	for _, entry := range localEntries {
-		for i := uint64(0); i < entry.count; i++ {
-			locals = append(locals, entry.typ)
+		for range entry.count {
+			declaredLocals = append(declaredLocals, entry.typ)
 		}
 	}
 
@@ -317,7 +324,7 @@ func (p *parser) parseFunction() (function, error) {
 	}
 
 	return function{
-		locals:        locals,
+		localTypes:    declaredLocals, // Temporarily holds declared locals only
 		body:          body[:len(body)-1],
 		jumpCache:     result.jumpCache,
 		jumpElseCache: result.jumpElseCache,
@@ -1312,4 +1319,35 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	}
 
 	return uint64(result), nil
+}
+
+// setLocalsMetadata populates local metadata fields on a function.
+// It prepends param types to the declared locals (already in localTypes).
+func setLocalsMetadata(f *function, paramTypes []ValueType) {
+	declaredLocals := f.localTypes
+	numLocalIndices := len(paramTypes) + len(declaredLocals)
+
+	// Rebuild localTypes with params prepended.
+	f.localTypes = make([]ValueType, numLocalIndices)
+	copy(f.localTypes, paramTypes)
+	copy(f.localTypes[len(paramTypes):], declaredLocals)
+
+	// Compute slot offsets (v128 uses 2 slots).
+	f.localSlots = make([]uint32, numLocalIndices)
+	for j, t := range f.localTypes {
+		f.localSlots[j] = uint32(f.numSlots)
+		if t == V128 {
+			f.numSlots += 2
+			f.hasV128Locals = true
+		} else {
+			f.numSlots++
+		}
+	}
+	for _, t := range paramTypes {
+		if t == V128 {
+			f.numParamSlots += 2
+		} else {
+			f.numParamSlots++
+		}
+	}
 }

@@ -304,7 +304,7 @@ func (v *validator) validateDataSegment(data *dataSegment) error {
 
 func (v *validator) validateFunction(function *function) error {
 	functionType := v.typeDefs[function.typeIndex]
-	v.locals = append(functionType.ParamTypes, function.locals...)
+	v.locals = function.localTypes
 	v.returnType = functionType.ResultTypes
 	v.valueStack = v.valueStack[:0]
 	v.controlStack = v.controlStack[:0]
