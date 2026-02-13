@@ -296,10 +296,7 @@ func (v *validator) validateDataSegment(data *dataSegment) error {
 	if err := v.validateMemoryExists(data.memoryIndex); err != nil {
 		return err
 	}
-	if err := v.validateConstExpression(data.offsetExpression, I32); err != nil {
-		return err
-	}
-	return nil
+	return v.validateConstExpression(data.offsetExpression, I32)
 }
 
 func (v *validator) validateFunction(function *function) error {
@@ -1035,10 +1032,8 @@ func (v *validator) validateMemoryFill() error {
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValues([]ValueType{I32, I32, I32})
+	return err
 }
 
 func (v *validator) validateMemoryInit() error {
@@ -1054,10 +1049,8 @@ func (v *validator) validateMemoryInit() error {
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValues([]ValueType{I32, I32, I32})
+	return err
 }
 
 func (v *validator) validateMemoryCopy() error {
@@ -1069,10 +1062,8 @@ func (v *validator) validateMemoryCopy() error {
 	if err := v.validateMemoryExists(srcMemoryIndex); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValues([]ValueType{I32, I32, I32})
+	return err
 }
 
 func (v *validator) validateFunctionTypeExists(index uint32) error {
@@ -1185,10 +1176,8 @@ func (v *validator) validateTableSet() error {
 	if _, err := v.popExpectedValue(referenceType); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValue(I32)
+	return err
 }
 
 func (v *validator) validateTableInit() error {
@@ -1272,10 +1261,8 @@ func (v *validator) validateTableFill() error {
 	if _, err := v.popExpectedValue(referenceType); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValue(I32)
+	return err
 }
 
 func (v *validator) validateElemDrop() error {
@@ -1376,10 +1363,8 @@ func (v *validator) validateSimdStoreLane(sizeBytes uint32) error {
 	if _, err := v.popExpectedValue(V128); err != nil {
 		return err
 	}
-	if _, err := v.popExpectedValue(I32); err != nil {
-		return err
-	}
-	return nil
+	_, err := v.popExpectedValue(I32)
+	return err
 }
 
 func (v *validator) validateShuffle() error {
