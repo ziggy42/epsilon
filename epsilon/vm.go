@@ -1328,7 +1328,7 @@ func (vm *vm) handleBrTable(frame *callFrame) {
 	size := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	var targetLabel uint32
-	if index >= 0 && index < size {
+	if index < size {
 		targetLabel = uint32(frame.function.body[frame.pc+index])
 	} else {
 		targetLabel = uint32(frame.function.body[frame.pc+size])
