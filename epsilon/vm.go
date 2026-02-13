@@ -376,8 +376,7 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case selectOp:
 		vm.handleSelect()
 	case selectT:
-		count := frame.next()
-		frame.pc += uint32(count)
+		frame.pc += uint32(frame.next())
 		vm.handleSelect()
 	case localGet:
 		vm.stack.push(frame.locals[frame.next()])
@@ -1359,16 +1358,14 @@ func (vm *vm) brToLabel(frame *callFrame, labelIndex uint32) {
 }
 
 func (vm *vm) handleCall(frame *callFrame) error {
-	localIndex := uint32(frame.next())
-	function := vm.getFunction(frame, localIndex)
+	functionIndex := frame.module.funcAddrs[frame.next()]
+	function := vm.store.funcs[functionIndex]
 	return vm.invokeFunction(function)
 }
 
 func (vm *vm) handleCallIndirect(frame *callFrame) error {
-	typeIndex := uint32(frame.next())
+	expectedType := frame.module.types[frame.next()]
 	tableIndex := uint32(frame.next())
-
-	expectedType := frame.module.types[typeIndex]
 	table := vm.getTable(frame, tableIndex)
 
 	elementIndex := vm.stack.popInt32()
@@ -1957,14 +1954,6 @@ func toStoreFuncIndexes(
 		storeIndices[i] = int32(moduleInstance.funcAddrs[localIndex])
 	}
 	return storeIndices
-}
-
-func (vm *vm) getFunction(
-	frame *callFrame,
-	localIndex uint32,
-) FunctionInstance {
-	functionIndex := frame.module.funcAddrs[localIndex]
-	return vm.store.funcs[functionIndex]
 }
 
 func (vm *vm) getTable(frame *callFrame, localIndex uint32) *Table {
