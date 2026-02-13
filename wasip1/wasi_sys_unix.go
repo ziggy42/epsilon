@@ -182,7 +182,7 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 	return result, nil
 }
 
-// setFdFlags sets flags on a file..
+// setFdFlags sets flags on a file.
 func setFdFlags(file *os.File, fdFlags int32) error {
 	var osFlags int
 	if fdFlags&int32(fdFlagsAppend) != 0 {
