@@ -58,8 +58,11 @@ func TestParseExportedFunction(t *testing.T) {
 		},
 		funcs: []function{
 			{
-				typeIndex: 0,
-				locals:    []ValueType{},
+				typeIndex:     0,
+				localTypes:    []ValueType{I32, I32}, // params only, no declared locals
+				localSlots:    []uint32{0, 1},
+				numSlots:      2,
+				numParamSlots: 2,
 				body: []uint64{
 					uint64(localGet), 0,
 					uint64(localGet), 1,
@@ -115,12 +118,13 @@ func TestParseLocals(t *testing.T) {
 		t.Fatalf("parsing module failed: %v", err)
 	}
 
-	expectedLocals := []ValueType{I32}
-	if !reflect.DeepEqual(expectedLocals, module.funcs[0].locals) {
+	// localTypes includes params + declared locals
+	expectedLocalTypes := []ValueType{I32, I32, I32} // 2 params + 1 local
+	if !reflect.DeepEqual(expectedLocalTypes, module.funcs[0].localTypes) {
 		t.Errorf(
 			"parseModule() result mismatch:\n\nwant: %+v\n\ngot:  %+v",
-			expectedLocals,
-			module.funcs[0].locals,
+			expectedLocalTypes,
+			module.funcs[0].localTypes,
 		)
 	}
 }

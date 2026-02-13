@@ -14,7 +14,10 @@
 
 package epsilon
 
-import "slices"
+import (
+	"math"
+	"slices"
+)
 
 // ValueType classifies the individual values that WebAssembly code can compute
 // with and the values that a variable accepts. They are either NumberType,
@@ -97,4 +100,45 @@ type FunctionType struct {
 func (ft *FunctionType) Equal(other FunctionType) bool {
 	return slices.Equal(ft.ParamTypes, other.ParamTypes) &&
 		slices.Equal(ft.ResultTypes, other.ResultTypes)
+}
+
+// NullReference is the internal representation of a null reference for funcref
+// and externref types. It is a sentinel value that is invalid as a function or
+// external object index. It is represented as -1.
+const NullReference int32 = -1
+
+func anyToUint64(v any) (low, high uint64) {
+	switch val := v.(type) {
+	case int32:
+		return uint64(val), 0
+	case int64:
+		return uint64(val), 0
+	case float32:
+		return uint64(math.Float32bits(val)), 0
+	case float64:
+		return math.Float64bits(val), 0
+	case V128Value:
+		return val.Low, val.High
+	default:
+		panic("unreachable")
+	}
+}
+
+func uint64ToAny(low, high uint64, t ValueType) any {
+	switch t {
+	case I32:
+		return int32(low)
+	case I64:
+		return int64(low)
+	case F32:
+		return math.Float32frombits(uint32(low))
+	case F64:
+		return math.Float64frombits(low)
+	case V128:
+		return V128Value{Low: low, High: high}
+	case FuncRefType, ExternRefType:
+		return int32(low)
+	default:
+		panic("unreachable")
+	}
 }

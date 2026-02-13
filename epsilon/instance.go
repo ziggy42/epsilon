@@ -146,11 +146,12 @@ func (hf *hostFunction) GetType() *FunctionType { return &hf.functionType }
 
 // Global is a global variable.
 type Global struct {
-	value   value
+	low     uint64
+	high    uint64 // Only used for v128
 	Mutable bool
 	Type    ValueType
 }
 
 func (g *Global) Get() any {
-	return g.value.any(g.Type)
+	return uint64ToAny(g.low, g.high, g.Type)
 }

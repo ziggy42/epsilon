@@ -139,8 +139,10 @@ func resolveGlobalImport(
 			"value type mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
+	low, high := anyToUint64(obj)
 	return &Global{
-		value:   newValue(obj),
+		low:     low,
+		high:    high,
 		Mutable: globalType.IsMutable,
 		Type:    globalType.ValueType,
 	}, nil
