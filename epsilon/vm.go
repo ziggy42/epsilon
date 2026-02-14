@@ -1746,8 +1746,26 @@ func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 	v := vm.stack.popV128()
 	index := vm.stack.popInt32()
 
-	laneData := extractLane(v, laneSize, laneIndex)
-	return memory.Set(offset, uint32(index), laneData)
+	lanesPerUint64 := 64 / laneSize
+	shift := (laneIndex % lanesPerUint64) * laneSize
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+
+	switch laneSize {
+	case 8:
+		return memory.StoreByte(offset, uint32(index), byte(val))
+	case 16:
+		return memory.StoreUint16(offset, uint32(index), uint16(val))
+	case 32:
+		return memory.StoreUint32(offset, uint32(index), uint32(val))
+	case 64:
+		return memory.StoreUint64(offset, uint32(index), val)
+	}
+	return nil
 }
 func handleSimdReplaceLane[T wasmNumber](
 	vm *vm,

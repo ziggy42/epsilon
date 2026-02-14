@@ -195,15 +195,19 @@ func simdF64x2Splat(val float64) V128Value {
 // simdI8x16ExtractLaneS extracts a signed 8-bit integer from the specified
 // lane.
 func simdI8x16ExtractLaneS(v V128Value, laneIndex uint32) int32 {
-	bytes := extractLane(v, 8, laneIndex)
-	return int32(int8(bytes[0]))
+	if laneIndex < 8 {
+		return int32(int8(v.Low >> (laneIndex * 8)))
+	}
+	return int32(int8(v.High >> ((laneIndex - 8) * 8)))
 }
 
 // simdI8x16ExtractLaneU extracts an unsigned 8-bit integer from the specified
 // lane.
 func simdI8x16ExtractLaneU(v V128Value, laneIndex uint32) int32 {
-	bytes := extractLane(v, 8, laneIndex)
-	return int32(bytes[0])
+	if laneIndex < 8 {
+		return int32(uint8(v.Low >> (laneIndex * 8)))
+	}
+	return int32(uint8(v.High >> ((laneIndex - 8) * 8)))
 }
 
 func simdI8x16ReplaceLane(
@@ -229,15 +233,19 @@ func simdI8x16ReplaceLane(
 // simdI16x8ExtractLaneS extracts a signed 16-bit integer from the specified
 // lane.
 func simdI16x8ExtractLaneS(v V128Value, laneIndex uint32) int32 {
-	bytes := extractLane(v, 16, laneIndex)
-	return int32(int16(binary.LittleEndian.Uint16(bytes)))
+	if laneIndex < 4 {
+		return int32(int16(v.Low >> (laneIndex * 16)))
+	}
+	return int32(int16(v.High >> ((laneIndex - 4) * 16)))
 }
 
 // simdI16x8ExtractLaneU extracts an unsigned 16-bit integer from the specified
 // lane.
 func simdI16x8ExtractLaneU(v V128Value, laneIndex uint32) int32 {
-	bytes := extractLane(v, 16, laneIndex)
-	return int32(binary.LittleEndian.Uint16(bytes))
+	if laneIndex < 4 {
+		return int32(uint16(v.Low >> (laneIndex * 16)))
+	}
+	return int32(uint16(v.High >> ((laneIndex - 4) * 16)))
 }
 
 func simdI16x8ReplaceLane(
@@ -261,8 +269,10 @@ func simdI16x8ReplaceLane(
 
 // simdI32x4ExtractLane extracts a 32-bit integer from the specified lane.
 func simdI32x4ExtractLane(v V128Value, laneIndex uint32) int32 {
-	bytes := extractLane(v, 32, laneIndex)
-	return int32(binary.LittleEndian.Uint32(bytes))
+	if laneIndex < 2 {
+		return int32(uint32(v.Low >> (laneIndex * 32)))
+	}
+	return int32(uint32(v.High >> ((laneIndex - 2) * 32)))
 }
 
 func simdI32x4ReplaceLane(
@@ -286,8 +296,10 @@ func simdI32x4ReplaceLane(
 
 // simdI64x2ExtractLane extracts a 64-bit integer from the specified lane.
 func simdI64x2ExtractLane(v V128Value, laneIndex uint32) int64 {
-	bytes := extractLane(v, 64, laneIndex)
-	return int64(binary.LittleEndian.Uint64(bytes))
+	if laneIndex == 0 {
+		return int64(v.Low)
+	}
+	return int64(v.High)
 }
 
 func simdI64x2ReplaceLane(
@@ -305,8 +317,10 @@ func simdI64x2ReplaceLane(
 
 // simdF32x4ExtractLane extracts a 32-bit float from the specified lane.
 func simdF32x4ExtractLane(v V128Value, laneIndex uint32) float32 {
-	bytes := extractLane(v, 32, laneIndex)
-	return math.Float32frombits(binary.LittleEndian.Uint32(bytes))
+	if laneIndex < 2 {
+		return math.Float32frombits(uint32(v.Low >> (laneIndex * 32)))
+	}
+	return math.Float32frombits(uint32(v.High >> ((laneIndex - 2) * 32)))
 }
 
 func simdF32x4ReplaceLane(
@@ -331,8 +345,10 @@ func simdF32x4ReplaceLane(
 
 // simdF64x2ExtractLane extracts a 64-bit float from the specified lane.
 func simdF64x2ExtractLane(v V128Value, laneIndex uint32) float64 {
-	bytes := extractLane(v, 64, laneIndex)
-	return math.Float64frombits(binary.LittleEndian.Uint64(bytes))
+	if laneIndex == 0 {
+		return math.Float64frombits(v.Low)
+	}
+	return math.Float64frombits(v.High)
 }
 
 func simdF64x2ReplaceLane(
@@ -844,30 +860,6 @@ func simdLoadLane(v V128Value, idx uint32, data []byte) V128Value {
 		return simdI64x2ReplaceLane(v, idx, int64(binary.LittleEndian.Uint64(data)))
 	}
 	return v
-}
-
-func extractLane(value V128Value, laneSize, laneIndex uint32) []byte {
-	shift := laneIndex * laneSize
-	source := value.Low
-	if shift >= 64 {
-		source = value.High
-		shift -= 64
-	}
-
-	val := source >> shift
-
-	bytes := make([]byte, laneSize/8)
-	switch laneSize {
-	case 8:
-		bytes[0] = byte(val)
-	case 16:
-		binary.LittleEndian.PutUint16(bytes, uint16(val))
-	case 32:
-		binary.LittleEndian.PutUint32(bytes, uint32(val))
-	case 64:
-		binary.LittleEndian.PutUint64(bytes, val)
-	}
-	return bytes
 }
 
 func simdF32x4DemoteF64x2Zero(v V128Value) V128Value {
