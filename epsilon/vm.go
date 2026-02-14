@@ -1767,6 +1767,7 @@ func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 	}
 	return nil
 }
+
 func handleSimdReplaceLane[T wasmNumber](
 	vm *vm,
 	frame *callFrame,
