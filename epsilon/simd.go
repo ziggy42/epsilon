@@ -1564,10 +1564,6 @@ func simdF32x4Div(v1, v2 V128Value) V128Value {
 	return binaryOpF32x4(v1, v2, div[float32])
 }
 
-func simdF32x4Copysign(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, copysign[float32])
-}
-
 // simdF64x2Add performs an addition on each 64-bit float lane of two V128Value.
 func simdF64x2Add(v1, v2 V128Value) V128Value {
 	return binaryOpF64x2(v1, v2, add[float64])
