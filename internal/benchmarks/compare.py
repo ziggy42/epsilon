@@ -77,9 +77,10 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
   return _worktree(tmpdir, ref)
 
 
-def _run_benchmarks(cwd: str, output_file: Path, bench_pattern: str = ".") -> None:
+def _run_benchmarks(
+        cwd: str, output_file: Path, bench_pattern: str = ".") -> None:
   """Run benchmarks and append results to file."""
-  with open(output_file, "a") as f:
+  with open(output_file, "a", encoding="utf-8") as f:
     result = subprocess.run(
         _get_benchmark_cmd(bench_pattern),
         cwd=cwd,
@@ -109,8 +110,7 @@ def _run_benchstat(base_file: Path, target_file: Path) -> None:
 
 def _main():
   parser = argparse.ArgumentParser(
-      description="Compare benchmarks between two git references using benchstat."
-  )
+      description="Compare benchmarks between two git references.")
   parser.add_argument(
       "--base",
       default="main",
