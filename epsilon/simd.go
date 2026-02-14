@@ -832,33 +832,19 @@ func extractLane(value V128Value, laneSize, laneIndex uint32) []byte {
 }
 
 func simdF32x4DemoteF64x2Zero(v V128Value) V128Value {
-	f64Low := math.Float64frombits(v.Low)
-	f64High := math.Float64frombits(v.High)
-
-	f32Low := float32(f64Low)
-	f32High := float32(f64High)
-
-	buf := [8]byte{}
-	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(f32Low))
-	binary.LittleEndian.PutUint32(buf[4:8], math.Float32bits(f32High))
+	lowBits := math.Float32bits(float32(math.Float64frombits(v.Low)))
+	highBits := math.Float32bits(float32(math.Float64frombits(v.High)))
 
 	return V128Value{
-		Low:  binary.LittleEndian.Uint64(buf[0:8]),
+		Low:  uint64(lowBits) | (uint64(highBits) << 32),
 		High: 0,
 	}
 }
 
 func simdF64x2PromoteLowF32x4(v V128Value) V128Value {
-	f32Low := math.Float32frombits(uint32(v.Low))
-	f32High := math.Float32frombits(uint32(v.Low >> 32))
-
-	low := float64(f32Low)
-	high := float64(f32High)
-
-	return V128Value{
-		Low:  math.Float64bits(low),
-		High: math.Float64bits(high),
-	}
+	low := math.Float64bits(float64(math.Float32frombits(uint32(v.Low))))
+	high := math.Float64bits(float64(math.Float32frombits(uint32(v.Low >> 32))))
+	return V128Value{Low: low, High: high}
 }
 
 func simdI8x16Abs(v V128Value) V128Value {
