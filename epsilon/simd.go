@@ -77,8 +77,8 @@ func simdV128Load16x4U(data []byte) V128Value {
 }
 
 func simdV128Load32x2S(data []byte) V128Value {
-	low := uint64(int64(int32(binary.LittleEndian.Uint32(data[0:4]))))
-	high := uint64(int64(int32(binary.LittleEndian.Uint32(data[4:8]))))
+	low := uint64(int32(binary.LittleEndian.Uint32(data[0:4])))
+	high := uint64(int32(binary.LittleEndian.Uint32(data[4:8])))
 	return V128Value{Low: low, High: high}
 }
 
@@ -836,14 +836,7 @@ func simdF32x4DemoteF64x2Zero(v V128Value) V128Value {
 	f64High := math.Float64frombits(v.High)
 
 	f32Low := float32(f64Low)
-	if math.IsNaN(float64(f32Low)) {
-		f32Low = float32(math.NaN())
-	}
-
 	f32High := float32(f64High)
-	if math.IsNaN(float64(f32High)) {
-		f32High = float32(math.NaN())
-	}
 
 	buf := [8]byte{}
 	binary.LittleEndian.PutUint32(buf[0:4], math.Float32bits(f32Low))
@@ -860,14 +853,7 @@ func simdF64x2PromoteLowF32x4(v V128Value) V128Value {
 	f32High := math.Float32frombits(uint32(v.Low >> 32))
 
 	low := float64(f32Low)
-	if math.IsNaN(low) {
-		low = math.NaN()
-	}
-
 	high := float64(f32High)
-	if math.IsNaN(high) {
-		high = math.NaN()
-	}
 
 	return V128Value{
 		Low:  math.Float64bits(low),
@@ -1333,15 +1319,15 @@ func simdI32x4ShrU(v V128Value, shift int32) V128Value {
 }
 
 func simdI32x4Add(v1, v2 V128Value) V128Value {
-	return binaryOpI32x4(v1, v2, func(a, b int32) int32 { return a + b })
+	return binaryOpI32x4(v1, v2, add[int32])
 }
 
 func simdI32x4Sub(v1, v2 V128Value) V128Value {
-	return binaryOpI32x4(v1, v2, func(a, b int32) int32 { return a - b })
+	return binaryOpI32x4(v1, v2, sub[int32])
 }
 
 func simdI32x4Mul(v1, v2 V128Value) V128Value {
-	return binaryOpI32x4(v1, v2, func(a, b int32) int32 { return a * b })
+	return binaryOpI32x4(v1, v2, mul[int32])
 }
 
 func simdI32x4MinS(v1, v2 V128Value) V128Value {
@@ -1504,9 +1490,7 @@ func simdI64x2GeS(v1, v2 V128Value) V128Value {
 
 // simdF32x4Abs performs an absolute value operation on each 32-bit float lane.
 func simdF32x4Abs(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		return float32(math.Abs(float64(f)))
-	})
+	return unaryOpF32x4(v, abs[float32])
 }
 
 func simdF32x4Neg(v V128Value) V128Value {
@@ -1514,103 +1498,47 @@ func simdF32x4Neg(v V128Value) V128Value {
 }
 
 func simdF32x4Sqrt(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		if math.IsNaN(float64(f)) {
-			return float32(math.NaN())
-		}
-		if f < 0 {
-			return float32(math.NaN())
-		}
-		return float32(math.Sqrt(float64(f)))
-	})
+	return unaryOpF32x4(v, sqrt[float32])
 }
 
 // simdF32x4Add performs an addition on each 32-bit float lane.
 func simdF32x4Add(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		res := a + b
-		if math.IsNaN(float64(res)) {
-			return float32(math.NaN())
-		}
-		return res
-	})
+	return binaryOpF32x4(v1, v2, add[float32])
 }
 
 func simdF32x4Ceil(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		if math.IsNaN(float64(f)) {
-			return math.Float32frombits(0x7fc00000)
-		}
-		return float32(math.Ceil(float64(f)))
-	})
+	return unaryOpF32x4(v, ceil[float32])
 }
 
 func simdF32x4Floor(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		if math.IsNaN(float64(f)) {
-			return math.Float32frombits(0x7fc00000)
-		}
-		return float32(math.Floor(float64(f)))
-	})
+	return unaryOpF32x4(v, floor[float32])
 }
 
 func simdF32x4Trunc(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		if math.IsNaN(float64(f)) {
-			return math.Float32frombits(0x7fc00000)
-		}
-		return float32(math.Trunc(float64(f)))
-	})
+	return unaryOpF32x4(v, trunc[float32])
 }
 
 func simdF32x4Nearest(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 {
-		if math.IsNaN(float64(f)) {
-			return math.Float32frombits(0x7fc00000)
-		}
-		return float32(math.RoundToEven(float64(f)))
-	})
+	return unaryOpF32x4(v, nearest[float32])
 }
 
 // simdF32x4Sub performs a subtraction on each 32-bit float lane.
 func simdF32x4Sub(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		res := a - b
-		if math.IsNaN(float64(res)) {
-			return float32(math.NaN())
-		}
-		return res
-	})
+	return binaryOpF32x4(v1, v2, sub[float32])
 }
 
 // simdF32x4Mul performs a multiplication on each 32-bit float lane.
 func simdF32x4Mul(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		res := a * b
-		if math.IsNaN(float64(res)) {
-			return float32(math.NaN())
-		}
-		return res
-	})
+	return binaryOpF32x4(v1, v2, mul[float32])
 }
 
 // simdF32x4Min performs a minimum operation on each 32-bit float lane.
 func simdF32x4Min(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
-			return float32(math.NaN())
-		}
-		return min(a, b)
-	})
+	return binaryOpF32x4(v1, v2, wasmMin[float32])
 }
 
 func simdF32x4Max(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		if math.IsNaN(float64(a)) || math.IsNaN(float64(b)) {
-			return float32(math.NaN())
-		}
-		return max(a, b)
-	})
+	return binaryOpF32x4(v1, v2, wasmMax[float32])
 }
 
 func simdF32x4Pmin(v1, v2 V128Value) V128Value {
@@ -1633,125 +1561,69 @@ func simdF32x4Pmax(v1, v2 V128Value) V128Value {
 
 // simdF32x4Div performs a division operation on each 32-bit float lane.
 func simdF32x4Div(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		res := a / b
-		if math.IsNaN(float64(res)) {
-			return float32(math.NaN())
-		}
-		return res
-	})
+	return binaryOpF32x4(v1, v2, div[float32])
+}
+
+func simdF32x4Copysign(v1, v2 V128Value) V128Value {
+	return binaryOpF32x4(v1, v2, copysign[float32])
 }
 
 // simdF64x2Add performs an addition on each 64-bit float lane of two V128Value.
 func simdF64x2Add(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		res := a + b
-		if math.IsNaN(res) {
-			return math.NaN()
-		}
-		return res
-	})
+	return binaryOpF64x2(v1, v2, add[float64])
 }
 
 // simdF64x2Sub performs a subtraction on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Sub(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		res := a - b
-		if math.IsNaN(res) {
-			return math.NaN()
-		}
-		return res
-	})
+	return binaryOpF64x2(v1, v2, sub[float64])
 }
 
 func simdF64x2Ceil(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 {
-		if math.IsNaN(f) {
-			return math.NaN()
-		}
-		return math.Ceil(f)
-	})
+	return unaryOpF64x2(v, ceil[float64])
 }
 
 func simdF64x2Floor(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 {
-		if math.IsNaN(f) {
-			return math.NaN()
-		}
-		return math.Floor(f)
-	})
+	return unaryOpF64x2(v, floor[float64])
 }
 
 func simdF64x2Trunc(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 {
-		if math.IsNaN(f) {
-			return math.NaN()
-		}
-		return math.Trunc(f)
-	})
+	return unaryOpF64x2(v, trunc[float64])
 }
 
 func simdF64x2Nearest(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 {
-		if math.IsNaN(f) {
-			return math.NaN()
-		}
-		return math.RoundToEven(f)
-	})
+	return unaryOpF64x2(v, nearest[float64])
 }
 
 // simdF64x2Mul performs a multiplication on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Mul(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		res := a * b
-		if math.IsNaN(res) {
-			return math.NaN()
-		}
-		return res
-	})
+	return binaryOpF64x2(v1, v2, mul[float64])
 }
 
 func simdF64x2Min(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if math.IsNaN(a) || math.IsNaN(b) {
-			return math.NaN()
-		}
-		return min(a, b)
-	})
+	return binaryOpF64x2(v1, v2, wasmMin[float64])
 }
 
 func simdF64x2Max(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if math.IsNaN(a) || math.IsNaN(b) {
-			return math.NaN()
-		}
-		return max(a, b)
-	})
+	return binaryOpF64x2(v1, v2, wasmMax[float64])
 }
 
 func simdF64x2Pmin(v1, v2 V128Value) V128Value {
 	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if math.IsNaN(a) || math.IsNaN(b) {
-			return a
+		if b < a {
+			return b
 		}
-		if a <= b {
-			return a
-		}
-		return b
+		return a
 	})
 }
 
 func simdF64x2Pmax(v1, v2 V128Value) V128Value {
 	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if math.IsNaN(a) || math.IsNaN(b) {
-			return a
+		if a < b {
+			return b
 		}
-		if a >= b {
-			return a
-		}
-		return b
+		return a
 	})
 }
 
@@ -1822,7 +1694,7 @@ func simdF32x4ConvertI32x4U(v V128Value) V128Value {
 }
 
 func simdF64x2Abs(v V128Value) V128Value {
-	return unaryOpF64x2(v, math.Abs)
+	return unaryOpF64x2(v, abs[float64])
 }
 
 func simdF64x2Neg(v V128Value) V128Value {
@@ -1830,25 +1702,11 @@ func simdF64x2Neg(v V128Value) V128Value {
 }
 
 func simdF64x2Sqrt(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 {
-		if math.IsNaN(f) {
-			return math.NaN()
-		}
-		if f < 0 {
-			return math.NaN()
-		}
-		return math.Sqrt(f)
-	})
+	return unaryOpF64x2(v, sqrt[float64])
 }
 
 func simdF64x2Div(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		res := a / b
-		if math.IsNaN(res) {
-			return math.NaN()
-		}
-		return res
-	})
+	return binaryOpF64x2(v1, v2, div[float64])
 }
 
 func simdF64x2ConvertLowI32x4S(v V128Value) V128Value {
@@ -2074,11 +1932,11 @@ func extend(v V128Value, fromBytes, toBytes int, high, signed bool) V128Value {
 		if signed {
 			switch fromBytes {
 			case 1:
-				return uint64(int64(int8(src >> shift)))
+				return uint64(int8(src >> shift))
 			case 2:
-				return uint64(int64(int16(src >> shift)))
+				return uint64(int16(src >> shift))
 			case 4:
-				return uint64(int64(int32(src >> shift)))
+				return uint64(int32(src >> shift))
 			}
 		} else {
 			mask := uint64(1<<(fromBytes*8)) - 1
@@ -2203,7 +2061,7 @@ func saturateS32ToS16(v int32) uint64 {
 	if v > math.MaxInt16 {
 		return 0x7FFF
 	}
-	return uint64(uint16(int16(v)))
+	return uint64(uint16(v))
 }
 
 // saturateS32ToU16: Signed 32-bit -> Unsigned 16-bit
@@ -2225,7 +2083,7 @@ func saturateS16ToS8(v int16) uint64 {
 	if v > math.MaxInt8 {
 		return 0x7F
 	}
-	return uint64(uint8(int8(v)))
+	return uint64(uint8(v))
 }
 
 // saturateS16ToU8: Signed 16-bit -> Unsigned 8-bit
