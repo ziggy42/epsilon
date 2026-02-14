@@ -105,6 +105,20 @@ func BenchmarkMatrixMultiplication(b *testing.B) {
 	}
 }
 
+func BenchmarkVectorMath(b *testing.B) {
+	instance, err := instantiate("code/vector_math.wasm")
+	if err != nil {
+		b.Fatalf("failed to initialize test: %v", err)
+	}
+
+	for b.Loop() {
+		_, err := instance.Invoke("compute_vector_math", int32(100))
+		if err != nil {
+			b.Fatalf("failed to execute benchmark: %v", err)
+		}
+	}
+}
+
 func BenchmarkMemoryAccess(b *testing.B) {
 	instance, err := instantiate("code/memory_access.wasm")
 	if err != nil {
