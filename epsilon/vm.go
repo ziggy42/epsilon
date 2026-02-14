@@ -1532,12 +1532,15 @@ func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
 
-	var lanes [16]byte
-	for i := range 16 {
-		lanes[i] = byte(frame.next())
-	}
-
-	vm.stack.pushV128(simdI8x16Shuffle(v1, v2, lanes))
+	body := frame.function.body
+	pc := frame.pc
+	vm.stack.pushV128(simdI8x16Shuffle(v1, v2,
+		byte(body[pc]), byte(body[pc+1]), byte(body[pc+2]), byte(body[pc+3]),
+		byte(body[pc+4]), byte(body[pc+5]), byte(body[pc+6]), byte(body[pc+7]),
+		byte(body[pc+8]), byte(body[pc+9]), byte(body[pc+10]), byte(body[pc+11]),
+		byte(body[pc+12]), byte(body[pc+13]), byte(body[pc+14]), byte(body[pc+15]),
+	))
+	frame.pc += 16
 }
 
 func (vm *vm) handleBinaryFloat32(op func(a, b float32) float32) {
@@ -1731,7 +1734,7 @@ func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
 		return err
 	}
 
-	vm.stack.pushV128(setLane(v, laneIndex, laneValue))
+	vm.stack.pushV128(simdLoadLane(v, laneIndex, laneValue))
 	return nil
 }
 
@@ -1743,9 +1746,28 @@ func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 	v := vm.stack.popV128()
 	index := vm.stack.popInt32()
 
-	laneData := extractLane(v, laneSize, laneIndex)
-	return memory.Set(offset, uint32(index), laneData)
+	lanesPerUint64 := 64 / laneSize
+	shift := (laneIndex % lanesPerUint64) * laneSize
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+
+	switch laneSize {
+	case 8:
+		return memory.StoreByte(offset, uint32(index), byte(val))
+	case 16:
+		return memory.StoreUint16(offset, uint32(index), uint16(val))
+	case 32:
+		return memory.StoreUint32(offset, uint32(index), uint32(val))
+	case 64:
+		return memory.StoreUint64(offset, uint32(index), val)
+	}
+	return nil
 }
+
 func handleSimdReplaceLane[T wasmNumber](
 	vm *vm,
 	frame *callFrame,

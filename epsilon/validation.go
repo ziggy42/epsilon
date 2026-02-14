@@ -1359,7 +1359,12 @@ func (v *validator) validateSimdStoreLane(sizeBytes uint32) error {
 }
 
 func (v *validator) validateShuffle() error {
-	v.pc += 16
+	for range 16 {
+		if v.code[v.pc] >= 32 {
+			return errSimdLaneIndexOutOfBounds
+		}
+		v.pc++
+	}
 	return v.validateBinaryOp(V128, V128)
 }
 

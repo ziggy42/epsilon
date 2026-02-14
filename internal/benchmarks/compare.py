@@ -27,7 +27,7 @@ _DEFAULT_ITERATIONS_COUNT = 20
 _BENCHTIME = "2s"
 
 
-def _get_benchmark_cmd() -> list[str]:
+def _get_benchmark_cmd(bench_pattern: str = ".") -> list[str]:
   """Build the benchmark command, with CPU pinning where available.
 
   On Linux, we use taskset to pin the process to a single CPU core. This
@@ -41,7 +41,7 @@ def _get_benchmark_cmd() -> list[str]:
   scheduling noise within the Go runtime.
   """
   base = [
-      "go", "test", "-bench=.", "-benchmem", "-cpu=1",
+      "go", "test", f"-bench={bench_pattern}", "-benchmem", "-cpu=1",
       f"-benchtime={_BENCHTIME}", "./internal/benchmarks"
   ]
   if platform.system() == "Linux":
@@ -77,11 +77,12 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
   return _worktree(tmpdir, ref)
 
 
-def _run_benchmarks(cwd: str, output_file: Path) -> None:
+def _run_benchmarks(
+        cwd: str, output_file: Path, bench_pattern: str = ".") -> None:
   """Run benchmarks and append results to file."""
-  with open(output_file, "a") as f:
+  with open(output_file, "a", encoding="utf-8") as f:
     result = subprocess.run(
-        _get_benchmark_cmd(),
+        _get_benchmark_cmd(bench_pattern),
         cwd=cwd,
         stdout=f,
         stderr=subprocess.PIPE,
@@ -109,8 +110,7 @@ def _run_benchstat(base_file: Path, target_file: Path) -> None:
 
 def _main():
   parser = argparse.ArgumentParser(
-      description="Compare benchmarks between two git references using benchstat."
-  )
+      description="Compare benchmarks between two git references.")
   parser.add_argument(
       "--base",
       default="main",
@@ -126,6 +126,11 @@ def _main():
       type=int,
       default=_DEFAULT_ITERATIONS_COUNT,
       help=f"Number of iterations. Defaults to {_DEFAULT_ITERATIONS_COUNT}.",
+  )
+  parser.add_argument(
+      "--bench",
+      default=".",
+      help="Benchmark filter (passed to 'go test -bench'). Defaults to '.'.",
   )
   args = parser.parse_args()
 
@@ -146,8 +151,8 @@ def _main():
       for i in range(args.count):
         print(f"Iteration {i+1}/{args.count}...", end="\r")
         sys.stdout.flush()
-        _run_benchmarks(base_path, base_file)
-        _run_benchmarks(target_path, target_file)
+        _run_benchmarks(base_path, base_file, args.bench)
+        _run_benchmarks(target_path, target_file, args.bench)
 
       print(f"\nFinished {args.count} iterations.")
       print("\nBenchstat comparison:\n")
