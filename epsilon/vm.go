@@ -1532,12 +1532,15 @@ func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
 
-	var lanes [16]byte
-	for i := range 16 {
-		lanes[i] = byte(frame.next())
-	}
-
-	vm.stack.pushV128(simdI8x16Shuffle(v1, v2, lanes))
+	body := frame.function.body
+	pc := frame.pc
+	vm.stack.pushV128(simdI8x16Shuffle(v1, v2,
+		byte(body[pc]), byte(body[pc+1]), byte(body[pc+2]), byte(body[pc+3]),
+		byte(body[pc+4]), byte(body[pc+5]), byte(body[pc+6]), byte(body[pc+7]),
+		byte(body[pc+8]), byte(body[pc+9]), byte(body[pc+10]), byte(body[pc+11]),
+		byte(body[pc+12]), byte(body[pc+13]), byte(body[pc+14]), byte(body[pc+15]),
+	))
+	frame.pc += 16
 }
 
 func (vm *vm) handleBinaryFloat32(op func(a, b float32) float32) {

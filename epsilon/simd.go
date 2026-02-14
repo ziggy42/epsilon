@@ -89,24 +89,29 @@ func simdV128Load32x2U(data []byte) V128Value {
 }
 
 // simdI8x16Shuffle performs a byte shuffle operation.
-func simdI8x16Shuffle(v1, v2 V128Value, lanes [16]byte) V128Value {
+func simdI8x16Shuffle(
+	v1, v2 V128Value,
+	l0, l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11, l12, l13, l14, l15 byte,
+) V128Value {
 	sources := [4]uint64{v1.Low, v1.High, v2.Low, v2.High}
-	var low, high uint64
-	for i := range 8 {
-		lane := lanes[i]
-		if lane < 32 {
-			val := (sources[lane/8] >> ((lane & 7) * 8)) & 0xFF
-			low |= val << (uint(i) * 8)
-		}
-	}
 
-	for i := range 8 {
-		lane := lanes[i+8]
-		if lane < 32 {
-			val := (sources[lane/8] >> ((lane & 7) * 8)) & 0xFF
-			high |= val << (uint(i) * 8)
-		}
-	}
+	low := (sources[l0>>3] >> ((l0 & 7) << 3)) & 0xFF
+	low |= ((sources[l1>>3] >> ((l1 & 7) << 3)) & 0xFF) << 8
+	low |= ((sources[l2>>3] >> ((l2 & 7) << 3)) & 0xFF) << 16
+	low |= ((sources[l3>>3] >> ((l3 & 7) << 3)) & 0xFF) << 24
+	low |= ((sources[l4>>3] >> ((l4 & 7) << 3)) & 0xFF) << 32
+	low |= ((sources[l5>>3] >> ((l5 & 7) << 3)) & 0xFF) << 40
+	low |= ((sources[l6>>3] >> ((l6 & 7) << 3)) & 0xFF) << 48
+	low |= ((sources[l7>>3] >> ((l7 & 7) << 3)) & 0xFF) << 56
+
+	high := (sources[l8>>3] >> ((l8 & 7) << 3)) & 0xFF
+	high |= ((sources[l9>>3] >> ((l9 & 7) << 3)) & 0xFF) << 8
+	high |= ((sources[l10>>3] >> ((l10 & 7) << 3)) & 0xFF) << 16
+	high |= ((sources[l11>>3] >> ((l11 & 7) << 3)) & 0xFF) << 24
+	high |= ((sources[l12>>3] >> ((l12 & 7) << 3)) & 0xFF) << 32
+	high |= ((sources[l13>>3] >> ((l13 & 7) << 3)) & 0xFF) << 40
+	high |= ((sources[l14>>3] >> ((l14 & 7) << 3)) & 0xFF) << 48
+	high |= ((sources[l15>>3] >> ((l15 & 7) << 3)) & 0xFF) << 56
 
 	return V128Value{Low: low, High: high}
 }
