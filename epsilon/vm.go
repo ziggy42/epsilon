@@ -1734,7 +1734,7 @@ func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
 		return err
 	}
 
-	vm.stack.pushV128(setLane(v, laneIndex, laneValue))
+	vm.stack.pushV128(simdLoadLane(v, laneIndex, laneValue))
 	return nil
 }
 

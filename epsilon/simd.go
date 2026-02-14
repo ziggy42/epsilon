@@ -211,7 +211,19 @@ func simdI8x16ReplaceLane(
 	laneIndex uint32,
 	laneValue int32,
 ) V128Value {
-	return setLane(v, laneIndex, []byte{byte(laneValue)})
+	// We use the modulo operator so shift is valid for both v.Low and v.High.
+	shift := (laneIndex % 8) * 8
+
+	val := uint64(byte(laneValue)) << shift
+	mask := uint64(0xFF) << shift
+
+	if laneIndex < 8 {
+		v.Low = (v.Low &^ mask) | val
+	} else {
+		v.High = (v.High &^ mask) | val
+	}
+
+	return v
 }
 
 // simdI16x8ExtractLaneS extracts a signed 16-bit integer from the specified
@@ -233,9 +245,18 @@ func simdI16x8ReplaceLane(
 	laneIndex uint32,
 	laneValue int32,
 ) V128Value {
-	buf := make([]byte, 2)
-	binary.LittleEndian.PutUint16(buf, uint16(laneValue))
-	return setLane(v, laneIndex, buf)
+	shift := (uint(laneIndex) % 4) * 16
+
+	val := uint64(uint16(laneValue)) << shift
+	mask := uint64(0xFFFF) << shift
+
+	if laneIndex < 4 {
+		v.Low = (v.Low &^ mask) | val
+	} else {
+		v.High = (v.High &^ mask) | val
+	}
+
+	return v
 }
 
 // simdI32x4ExtractLane extracts a 32-bit integer from the specified lane.
@@ -249,9 +270,18 @@ func simdI32x4ReplaceLane(
 	laneIndex uint32,
 	laneValue int32,
 ) V128Value {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, uint32(laneValue))
-	return setLane(v, laneIndex, buf)
+	shift := (uint(laneIndex) % 2) * 32
+
+	val := uint64(uint32(laneValue)) << shift
+	mask := uint64(0xFFFFFFFF) << shift
+
+	if laneIndex < 2 {
+		v.Low = (v.Low &^ mask) | val
+	} else {
+		v.High = (v.High &^ mask) | val
+	}
+
+	return v
 }
 
 // simdI64x2ExtractLane extracts a 64-bit integer from the specified lane.
@@ -265,9 +295,12 @@ func simdI64x2ReplaceLane(
 	laneIndex uint32,
 	laneValue int64,
 ) V128Value {
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, uint64(laneValue))
-	return setLane(v, laneIndex, buf)
+	if laneIndex == 0 {
+		v.Low = uint64(laneValue)
+	} else {
+		v.High = uint64(laneValue)
+	}
+	return v
 }
 
 // simdF32x4ExtractLane extracts a 32-bit float from the specified lane.
@@ -281,9 +314,19 @@ func simdF32x4ReplaceLane(
 	laneIndex uint32,
 	laneValue float32,
 ) V128Value {
-	buf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(buf, math.Float32bits(laneValue))
-	return setLane(v, laneIndex, buf)
+	// We use the modulo operator so shift is valid for both v.Low and v.High.
+	shift := (laneIndex % 2) * 32
+
+	val := uint64(math.Float32bits(laneValue)) << shift
+	mask := uint64(0xFFFFFFFF) << shift
+
+	if laneIndex < 2 {
+		v.Low = (v.Low &^ mask) | val
+	} else {
+		v.High = (v.High &^ mask) | val
+	}
+
+	return v
 }
 
 // simdF64x2ExtractLane extracts a 64-bit float from the specified lane.
@@ -297,9 +340,12 @@ func simdF64x2ReplaceLane(
 	laneIndex uint32,
 	laneValue float64,
 ) V128Value {
-	buf := make([]byte, 8)
-	binary.LittleEndian.PutUint64(buf, math.Float64bits(laneValue))
-	return setLane(v, laneIndex, buf)
+	if laneIndex == 0 {
+		v.Low = math.Float64bits(laneValue)
+	} else {
+		v.High = math.Float64bits(laneValue)
+	}
+	return v
 }
 
 // simdI8x16Eq performs an equality comparison on each 8-bit lane of two
@@ -786,29 +832,17 @@ func simdV128Load64Zero(data []byte) V128Value {
 	return V128Value{Low: low, High: 0}
 }
 
-func setLane(v V128Value, laneIndex uint32, value []byte) V128Value {
-	width := uint(len(value) * 8)
-	var val uint64
-	switch width {
+func simdLoadLane(v V128Value, idx uint32, data []byte) V128Value {
+	switch len(data) {
+	case 1:
+		return simdI8x16ReplaceLane(v, idx, int32(data[0]))
+	case 2:
+		return simdI16x8ReplaceLane(v, idx, int32(binary.LittleEndian.Uint16(data)))
+	case 4:
+		return simdI32x4ReplaceLane(v, idx, int32(binary.LittleEndian.Uint32(data)))
 	case 8:
-		val = uint64(value[0])
-	case 16:
-		val = uint64(binary.LittleEndian.Uint16(value))
-	case 32:
-		val = uint64(binary.LittleEndian.Uint32(value))
-	case 64:
-		val = binary.LittleEndian.Uint64(value)
+		return simdI64x2ReplaceLane(v, idx, int64(binary.LittleEndian.Uint64(data)))
 	}
-
-	target := &v.Low
-	shift := uint(laneIndex) * width
-	if shift >= 64 {
-		target = &v.High
-		shift -= 64
-	}
-
-	mask := ^((uint64(1)<<width - 1) << shift)
-	*target = (*target & mask) | (val << shift)
 	return v
 }
 
