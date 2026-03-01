@@ -21,9 +21,6 @@ go.work
 prompt.txt
 cpu.prof
 
-# Antigravity
-.agent
-
 # Python
 __pycache__/
 .venv/
