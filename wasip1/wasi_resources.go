@@ -25,9 +25,6 @@ import (
 	"github.com/ziggy42/epsilon/epsilon"
 )
 
-const connectedSocketDefaultRights = RightsFdRead | RightsFdWrite |
-	RightsPollFdReadwrite | RightsFdFilestatGet | RightsSockShutdown
-
 const maxFileDescriptors = 2048
 
 var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
@@ -141,8 +138,9 @@ func (w *wasiResourceTable) advise(
 	offset, length int64,
 	advice int32,
 ) int32 {
-	if _, ok := w.fds[fdIndex]; !ok {
-		return errnoBadF
+	_, errCode := w.getFileOrDir(fdIndex, RightsFdAdvise)
+	if errCode != errnoSuccess {
+		return errCode
 	}
 	// This WASI implementation does not use the hints provided by this API.
 	return errnoSuccess
@@ -251,9 +249,9 @@ func (w *wasiResourceTable) getFileStat(
 	memory *epsilon.Memory,
 	fdIndex, bufPtr int32,
 ) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFilestatGet)
+	if errCode != errnoSuccess {
+		return errCode
 	}
 
 	fs, err := fdstat(fd.file)
@@ -509,10 +507,10 @@ func (w *wasiResourceTable) seek(
 	return errnoSuccess
 }
 
-func (w *wasiResourceTable) sync(fdIndex int32) int32 {
-	fd, ok := w.fds[fdIndex]
-	if !ok {
-		return errnoBadF
+func (w *wasiResourceTable) sync(fdIndex int32, rights int64) int32 {
+	fd, errCode := w.getFileOrDir(fdIndex, rights)
+	if errCode != errnoSuccess {
+		return errCode
 	}
 	if err := fd.file.Sync(); err != nil {
 		return mapError(err)
@@ -849,7 +847,7 @@ func (w *wasiResourceTable) sockAccept(
 	memory *epsilon.Memory,
 	fdIndex, flags, fdPtr int32,
 ) int32 {
-	fd, errCode := w.getSocket(fdIndex)
+	fd, errCode := w.getSocket(fdIndex, RightsSockAccept)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -860,8 +858,12 @@ func (w *wasiResourceTable) sockAccept(
 	}
 
 	newFile := os.NewFile(uintptr(connectedSocketFd), "")
-	rights := connectedSocketDefaultRights
-	newFdIndex, errCode := w.allocateFd(newFile, rights, 0, uint16(flags))
+	// The accepted socket inherits its rights from the listener's
+	// rights_inheriting mask.
+	rights := fd.rightsInheriting
+	// Inheritance for inheriting rights usually follows the same mask in WASI.
+	inheritRights := fd.rightsInheriting
+	newFdIndex, errCode := w.allocateFd(newFile, rights, inheritRights, uint16(flags))
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -877,8 +879,9 @@ func (w *wasiResourceTable) sockAccept(
 func (w *wasiResourceTable) sockRecv(
 	memory *epsilon.Memory,
 	fdIndex, riDataPtr, riDataLen, riFlags, roDataLenPtr, roFlagsPtr int32,
+	rights int64,
 ) int32 {
-	fd, errCode := w.getSocket(fdIndex)
+	fd, errCode := w.getSocket(fdIndex, rights)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -906,8 +909,9 @@ func (w *wasiResourceTable) sockRecv(
 func (w *wasiResourceTable) sockSend(
 	memory *epsilon.Memory,
 	fdIndex, siDataPtr, siDataLen, siFlags, soDataLenPtr int32,
+	rights int64,
 ) int32 {
-	fd, errCode := w.getSocket(fdIndex)
+	fd, errCode := w.getSocket(fdIndex, rights)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -918,7 +922,7 @@ func (w *wasiResourceTable) sockSend(
 }
 
 func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
-	fd, errCode := w.getSocket(fdIndex)
+	fd, errCode := w.getSocket(fdIndex, RightsSockShutdown)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -1007,6 +1011,7 @@ func (w *wasiResourceTable) getFileOrDir(
 
 func (w *wasiResourceTable) getSocket(
 	fdIdx int32,
+	rights int64,
 ) (*wasiFileDescriptor, int32) {
 	fd, ok := w.fds[fdIdx]
 	if !ok {
@@ -1014,6 +1019,9 @@ func (w *wasiResourceTable) getSocket(
 	}
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return nil, errnoNotSock
+	}
+	if fd.rights&rights == 0 {
+		return nil, errnoNotCapable
 	}
 	return fd, errnoSuccess
 }

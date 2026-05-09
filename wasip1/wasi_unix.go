@@ -485,10 +485,10 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 			)
 		})).
 		AddHostFunc("fd_datasync", bind(func(args []any) int32 {
-			return w.fs.sync(args[0].(int32))
+			return w.fs.sync(args[0].(int32), RightsFdDatasync)
 		})).
 		AddHostFunc("fd_sync", bind(func(args []any) int32 {
-			return w.fs.sync(args[0].(int32))
+			return w.fs.sync(args[0].(int32), RightsFdSync)
 		})).
 		AddHostFunc("fd_tell", bindMem(func(m *epsilon.Memory, args []any) int32 {
 			return w.fs.tell(m, args[0].(int32), args[1].(int32))
@@ -667,6 +667,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[3].(int32),
 				args[4].(int32),
 				args[5].(int32),
+				RightsFdRead,
 			)
 		})).
 		AddHostFunc("sock_send", bindMem(func(m *epsilon.Memory, args []any) int32 {
@@ -677,6 +678,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 				args[2].(int32),
 				args[3].(int32),
 				args[4].(int32),
+				RightsFdWrite,
 			)
 		})).
 		AddHostFunc("sock_shutdown", bind(func(args []any) int32 {
