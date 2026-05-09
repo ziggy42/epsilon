@@ -1074,3 +1074,60 @@ func TestFuelDisabled(t *testing.T) {
 		t.Fatalf("expected 42, got %v", result[0])
 	}
 }
+
+func TestReturnUnwind(t *testing.T) {
+	wat := `(module
+		(func $malicious (result i32)
+			i32.const 1337
+			i32.const 42
+			return)
+		(func (export "test") (result i32)
+			i32.const 10
+			call $malicious
+			drop)
+	)`
+
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := moduleInstance.Invoke("test")
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	observedValue := result[0].(int32)
+	if observedValue != 10 {
+		t.Errorf("expected 10, got %d", observedValue)
+	}
+}
+
+func TestBlockParamUnwind(t *testing.T) {
+	wat := `(module
+		(type $multi (func (param i32 i32) (result i32)))
+		(func (export "test") (result i32)
+			i32.const 10
+			i32.const 20
+			i32.const 30
+			block (type $multi)
+				i32.add
+			end
+			drop)
+	)`
+
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := moduleInstance.Invoke("test")
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+
+	observedValue := result[0].(int32)
+	if observedValue != 10 {
+		t.Errorf("expected 10, got %d", observedValue)
+	}
+}
