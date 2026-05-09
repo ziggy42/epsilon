@@ -82,6 +82,7 @@ const (
 	RightsPathUnlinkFile       int64 = 1 << 26
 	RightsPollFdReadwrite      int64 = 1 << 27
 	RightsSockShutdown         int64 = 1 << 28
+	RightsSockAccept           int64 = 1 << 29
 )
 
 // WasiPreopen represents a pre-opened os.File to be provided to WASI.
