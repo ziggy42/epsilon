@@ -123,9 +123,31 @@ func (w *WasiModule) handleClockSubscription(
 				eventType: eventTypeClock,
 			}
 		}
-		timeout = max(int64(clockSub.timeout)-now, 0)
+		if now < 0 {
+			if clockSub.timeout > uint64(math.MaxInt64) {
+				timeout = math.MaxInt64
+			} else {
+				timeout = int64(clockSub.timeout) - now
+				if timeout < 0 {
+					timeout = math.MaxInt64
+				}
+			}
+		} else if clockSub.timeout > uint64(now) {
+			diff := clockSub.timeout - uint64(now)
+			if diff > uint64(math.MaxInt64) {
+				timeout = math.MaxInt64
+			} else {
+				timeout = int64(diff)
+			}
+		} else {
+			timeout = 0
+		}
 	} else {
-		timeout = int64(clockSub.timeout)
+		if clockSub.timeout > uint64(math.MaxInt64) {
+			timeout = math.MaxInt64
+		} else {
+			timeout = int64(clockSub.timeout)
+		}
 	}
 
 	event := event{
