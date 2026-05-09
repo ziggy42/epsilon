@@ -312,9 +312,6 @@ func (p *parser) parseFunction() (function, error) {
 	}
 
 	body := result.bytecode
-	if len(body) == 0 || body[len(body)-1] != uint64(end) {
-		return function{}, errMissingEndOpcode
-	}
 
 	return function{
 		locals:        locals,
@@ -835,6 +832,7 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 	jumpCache := map[uint32]uint32{}
 	jumpElseCache := map[uint32]uint32{}
 	controlStack := []controlEntry{}
+	var lastOp opcode
 
 	for {
 		opcodeVal, err := p.readOpcode()
@@ -845,6 +843,7 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 			return bytecodeResult{}, err
 		}
 
+		lastOp = opcodeVal
 		currentInstructionStart := len(bytecode)
 		bytecode = append(bytecode, uint64(opcodeVal))
 
@@ -1073,6 +1072,11 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 			break
 		}
 	}
+
+	if len(bytecode) == 0 || lastOp != end {
+		return bytecodeResult{}, errMissingEndOpcode
+	}
+
 	return bytecodeResult{
 		bytecode:      bytecode,
 		jumpCache:     jumpCache,

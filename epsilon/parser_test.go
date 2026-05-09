@@ -468,3 +468,23 @@ func TestParsePassiveDataSegment(t *testing.T) {
 		)
 	}
 }
+
+func TestParseTruncatedFunctionBody(t *testing.T) {
+	// Truncated function body where the last byte is 0x0B (end), but it's
+	// actually an immediate for i32.const.
+	wasm := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+		0x01, 0x05, 0x01, 0x60, 0x00, 0x00, // type section
+		0x03, 0x02, 0x01, 0x00, // function section
+		0x0a, 0x05, 0x01, 0x03, 0x00, 0x41, 0x0b, // i32.const 0x0B (truncated)
+	}
+
+	p := newParser(bytes.NewReader(wasm))
+	_, err := p.parse()
+	if err == nil {
+		t.Fatal("expected parse error for truncated function body, got nil")
+	}
+	if err != errMissingEndOpcode {
+		t.Errorf("expected errMissingEndOpcode, got %v", err)
+	}
+}
