@@ -115,7 +115,7 @@ func (w *WasiModule) handleClockSubscription(
 
 	var timeout int64
 	if isAbsoluteTime {
-		now, errCode := getTimestamp(w.monotonicClockStartNs, clockSub.clockId)
+		now, errCode := getTimestamp(w.monotonicClockStart, clockSub.clockId)
 		if errCode != errnoSuccess {
 			return 0, event{
 				userData:  sub.userData,

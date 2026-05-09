@@ -167,7 +167,7 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 func TestPollOneoff_ClockOverflow(t *testing.T) {
 	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	w := &WasiModule{
-		monotonicClockStartNs: 1, // now - start = now - 1
+		monotonicClockStart: time.Now(), // now - start = now - 1
 	}
 
 	// Create a clock subscription with a past timeout

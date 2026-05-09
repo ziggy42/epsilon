@@ -16,7 +16,7 @@ package wasip1
 
 import "time"
 
-const clockResolutionNs = 1
+const clockResolutionNs = 100_000 // 100 microseconds to mitigate side-channel attacks.
 
 const (
 	clockRealtime         uint32 = 0 // The clock measuring real time.
@@ -26,37 +26,25 @@ const (
 )
 
 func getClockResolution(clockId uint32) (uint64, int32) {
-	if !isValidClockId(clockId) {
+	switch clockId {
+	case clockRealtime, clockMonotonic:
+		return clockResolutionNs, errnoSuccess
+	case clockProcessCPUTimeID, clockThreadCPUTimeID:
+		return 0, errnoNotSup
+	default:
 		return 0, errnoInval
 	}
-
-	return clockResolutionNs, errnoSuccess
 }
 
-func getTimestamp(monotonicClockStartNs int64, clockId uint32) (int64, int32) {
-	if !isValidClockId(clockId) {
-		return 0, errnoInval
-	}
-
+func getTimestamp(monotonicClockStart time.Time, clockId uint32) (int64, int32) {
 	switch clockId {
 	case clockRealtime:
 		return time.Now().UnixNano(), errnoSuccess
 	case clockMonotonic:
-		return time.Now().UnixNano() - monotonicClockStartNs, errnoSuccess
-	default:
-		// TODO: ClockProcessCPUTimeID, ClockThreadCPUTimeID are not supported.
+		return time.Since(monotonicClockStart).Nanoseconds(), errnoSuccess
+	case clockProcessCPUTimeID, clockThreadCPUTimeID:
 		return 0, errnoNotSup
-	}
-}
-
-func isValidClockId(clockId uint32) bool {
-	switch clockId {
-	case clockRealtime,
-		clockMonotonic,
-		clockProcessCPUTimeID,
-		clockThreadCPUTimeID:
-		return true
 	default:
-		return false
+		return 0, errnoInval
 	}
 }
