@@ -17,8 +17,11 @@
 package wasip1
 
 import (
+	"encoding/binary"
 	"net"
 	"testing"
+	"time"
+	"unsafe"
 
 	"github.com/ziggy42/epsilon/epsilon"
 )
@@ -158,5 +161,59 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 	
 	if (newFd.rights & ^customRight) != 0 {
 		t.Errorf("new FD has rights it should not have: %x (expected only %x or subset)", newFd.rights, customRight)
+	}
+}
+
+func TestPollOneoff_ClockOverflow(t *testing.T) {
+	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	w := &WasiModule{
+		monotonicClockStartNs: 1, // now - start = now - 1
+	}
+
+	// Create a clock subscription with a past timeout
+	
+	sub := subscription{
+		userData: 0x1234,
+		subscriptionType: eventTypeClock,
+	}
+	clockSub := subscriptionClock{
+		clockId: clockMonotonic,
+		timeout: 100,
+		flags: subclockFlagsSubscriptionClockAbstime,
+	}
+	binary.LittleEndian.PutUint32(sub.body[0:4], clockSub.clockId)
+	binary.LittleEndian.PutUint64(sub.body[8:16], clockSub.timeout)
+	binary.LittleEndian.PutUint16(sub.body[24:26], clockSub.flags)
+
+	// Write subscription to memory
+	subSize := uint32(unsafe.Sizeof(subscription{}))
+	subBytes := make([]byte, subSize)
+	binary.LittleEndian.PutUint64(subBytes[0:8], sub.userData)
+	subBytes[8] = sub.subscriptionType
+	copy(subBytes[16:], sub.body[:])
+	
+	memory.Set(0, 0, subBytes)
+
+	// Call pollOneoff
+	start := time.Now()
+	// We use a timeout to avoid hanging the test if it fails
+	done := make(chan int32)
+	go func() {
+		done <- w.pollOneoff(memory, 0, 128, 1, 256)
+	}()
+
+	select {
+	case errno := <-done:
+		if errno != errnoSuccess {
+			t.Errorf("pollOneoff failed with errno %d", errno)
+		}
+		duration := time.Since(start)
+		// If it overflows, it sleeps for ~292 years.
+		// If it's fixed, it should return immediately (because timeout is in the past).
+		if duration > 100*time.Millisecond {
+			t.Errorf("pollOneoff took too long: %v (likely overflow)", duration)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("pollOneoff timed out (likely overflow causing indefinite sleep)")
 	}
 }
