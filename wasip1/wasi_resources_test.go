@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 	}
 	defer f.Close()
 
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	rt := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
@@ -75,7 +75,7 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 		},
 	}
 
-	errno := rt.getFileStat(memory, 3, 0)
+	errno := rt.getFileStat(mem, 3, 0)
 	if errno != errnoNotCapable {
 		t.Errorf("expected errnoNotCapable (76), got %d", errno)
 	}
@@ -132,54 +132,55 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 	}
 	defer file.Close()
 
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
-	
-	// Define a custom right to see if it's NOT inherited if not in rightsInheriting
+	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+
+	// Define a custom right to see if it's NOT inherited if not in
+	// rightsInheriting.
 	const customRight = RightsFdRead
-	
+
 	rt := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
 				file:             file,
 				fileType:         fileTypeSocketStream,
 				rights:           rightsAll,
-				rightsInheriting: customRight, 
+				rightsInheriting: customRight,
 			},
 		},
 	}
 
-	errno := rt.sockAccept(memory, 3, 0, 0)
+	errno := rt.sockAccept(mem, 3, 0, 0)
 	if errno != errnoSuccess {
 		t.Fatalf("sockAccept failed: %d", errno)
 	}
 
-	newFdPtr, _ := memory.LoadUint32(0, 0)
+	newFdPtr, _ := mem.LoadUint32(0, 0)
 	newFd := rt.fds[int32(newFdPtr)]
-	
-	// The new FD should ONLY have customRight (RightsFdRead) + maybe some defaults?
-	// But the vulnerability is that it gets connectedSocketDefaultRights regardless.
-	
 	if (newFd.rights & ^customRight) != 0 {
-		t.Errorf("new FD has rights it should not have: %x (expected only %x or subset)", newFd.rights, customRight)
+		t.Errorf(
+			"new FD has rights it should not have: %x (expected only %x or subset)",
+			newFd.rights,
+			customRight,
+		)
 	}
 }
 
 func TestPollOneoff_ClockOverflow(t *testing.T) {
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	w := &WasiModule{
 		monotonicClockStart: time.Now(), // now - start = now - 1
 	}
 
 	// Create a clock subscription with a past timeout
-	
+
 	sub := subscription{
-		userData: 0x1234,
+		userData:         0x1234,
 		subscriptionType: eventTypeClock,
 	}
 	clockSub := subscriptionClock{
 		clockId: clockMonotonic,
 		timeout: 100,
-		flags: subclockFlagsSubscriptionClockAbstime,
+		flags:   subclockFlagsSubscriptionClockAbstime,
 	}
 	binary.LittleEndian.PutUint32(sub.body[0:4], clockSub.clockId)
 	binary.LittleEndian.PutUint64(sub.body[8:16], clockSub.timeout)
@@ -191,15 +192,15 @@ func TestPollOneoff_ClockOverflow(t *testing.T) {
 	binary.LittleEndian.PutUint64(subBytes[0:8], sub.userData)
 	subBytes[8] = sub.subscriptionType
 	copy(subBytes[16:], sub.body[:])
-	
-	memory.Set(0, 0, subBytes)
+
+	mem.Set(0, 0, subBytes)
 
 	// Call pollOneoff
 	start := time.Now()
 	// We use a timeout to avoid hanging the test if it fails
 	done := make(chan int32)
 	go func() {
-		done <- w.pollOneoff(memory, 0, 128, 1, 256)
+		done <- w.pollOneoff(mem, 0, 128, 1, 256)
 	}()
 
 	select {
@@ -208,8 +209,6 @@ func TestPollOneoff_ClockOverflow(t *testing.T) {
 			t.Errorf("pollOneoff failed with errno %d", errno)
 		}
 		duration := time.Since(start)
-		// If it overflows, it sleeps for ~292 years.
-		// If it's fixed, it should return immediately (because timeout is in the past).
 		if duration > 100*time.Millisecond {
 			t.Errorf("pollOneoff took too long: %v (likely overflow)", duration)
 		}

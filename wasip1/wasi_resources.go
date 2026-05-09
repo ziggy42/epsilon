@@ -872,7 +872,12 @@ func (w *wasiResourceTable) sockAccept(
 	rights := fd.rightsInheriting
 	// Inheritance for inheriting rights usually follows the same mask in WASI.
 	inheritRights := fd.rightsInheriting
-	newFdIndex, errCode := w.allocateFd(newFile, rights, inheritRights, uint16(flags))
+	newFdIndex, errCode := w.allocateFd(
+		newFile,
+		rights,
+		inheritRights,
+		uint16(flags),
+	)
 	if errCode != errnoSuccess {
 		return errCode
 	}

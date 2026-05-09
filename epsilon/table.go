@@ -134,8 +134,11 @@ func (t *Table) Copy(
 
 // Fill sets n elements to a given value, starting from an index.
 func (t *Table) Fill(n, startIndex int32, val int32) error {
+	if n < 0 || startIndex < 0 {
+		return errTableOutOfBounds
+	}
 	uStartIndex := uint64(uint32(startIndex))
-	if n < 0 || startIndex < 0 || uStartIndex+uint64(uint32(n)) > uint64(t.Size()) {
+	if uStartIndex+uint64(uint32(n)) > uint64(t.Size()) {
 		return errTableOutOfBounds
 	}
 

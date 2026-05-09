@@ -1486,7 +1486,9 @@ func (v *validator) markFrameUnreachable() error {
 	return nil
 }
 
-func (v *validator) getBlockTypes(blockType int32) ([]ValueType, []ValueType, error) {
+func (v *validator) getBlockTypes(
+	blockType int32,
+) ([]ValueType, []ValueType, error) {
 	if blockType == -0x40 { // empty block type.
 		return []ValueType{}, []ValueType{}, nil
 	}

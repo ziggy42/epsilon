@@ -123,6 +123,6 @@ func TestMemoryIndexValidation(t *testing.T) {
 	validator := newValidator(Config{ExperimentalMultipleMemories: true})
 	err = validator.validateModule(module)
 	if err == nil {
-		t.Errorf("expected validation error for OOB memory index in i32.load, got nil")
+		t.Errorf("expected validation error for OOB memory index, got nil")
 	}
 }

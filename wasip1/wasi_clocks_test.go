@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,16 +47,16 @@ func TestClocks_Consistency(t *testing.T) {
 }
 
 func TestClocks_TimeGetConsistency(t *testing.T) {
-	memory := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	w := &WasiModule{monotonicClockStart: time.Now()}
 
 	// Verify clock_res_get consistency with clock_time_get for CPU clocks
-	errno := w.clockResGet(memory, int32(clockProcessCPUTimeID), 0)
+	errno := w.clockResGet(mem, int32(clockProcessCPUTimeID), 0)
 	if errno != errnoNotSup {
 		t.Errorf("expected clockResGet(CPU) to return ENOTSUP, got %d", errno)
 	}
 
-	errno = w.clockTimeGet(memory, int32(clockProcessCPUTimeID), 8)
+	errno = w.clockTimeGet(mem, int32(clockProcessCPUTimeID), 8)
 	if errno != errnoNotSup {
 		t.Errorf("expected clockTimeGet(CPU) to return ENOTSUP, got %d", errno)
 	}

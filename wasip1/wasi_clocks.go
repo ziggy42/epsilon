@@ -16,7 +16,7 @@ package wasip1
 
 import "time"
 
-const clockResolutionNs = 100_000 // 100 microseconds to mitigate side-channel attacks.
+const clockResolutionNs = 100_000 // To mitigate side-channel attacks.
 
 const (
 	clockRealtime         uint32 = 0 // The clock measuring real time.
@@ -36,7 +36,10 @@ func getClockResolution(clockId uint32) (uint64, int32) {
 	}
 }
 
-func getTimestamp(monotonicClockStart time.Time, clockId uint32) (int64, int32) {
+func getTimestamp(
+	monotonicClockStart time.Time,
+	clockId uint32,
+) (int64, int32) {
 	switch clockId {
 	case clockRealtime:
 		return time.Now().UnixNano(), errnoSuccess
