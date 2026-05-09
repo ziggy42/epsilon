@@ -279,6 +279,10 @@ func (w *WasiModule) randomGet(
 	memory *epsilon.Memory,
 	bufPtr, bufLen int32,
 ) int32 {
+	if bufLen < 0 {
+		return errnoInval
+	}
+
 	randBytes := make([]byte, bufLen)
 	_, err := rand.Read(randBytes)
 	if err != nil {

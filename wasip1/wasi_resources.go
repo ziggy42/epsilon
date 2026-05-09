@@ -405,6 +405,10 @@ func (w *wasiResourceTable) readdir(
 	cookie int64,
 	bufusedPtr int32,
 ) int32 {
+	if cookie < 0 || bufLen < 0 {
+		return errnoInval
+	}
+
 	fd, errCode := w.getDir(fdIndex, RightsFdReaddir)
 	if errCode != errnoSuccess {
 		return errCode
@@ -712,6 +716,7 @@ func (w *wasiResourceTable) pathOpen(
 
 	err = memory.StoreUint32(0, uint32(newFdPtr), uint32(newFdIndex))
 	if err != nil {
+		w.close(newFdIndex)
 		return errnoFault
 	}
 	return errnoSuccess
@@ -721,6 +726,10 @@ func (w *wasiResourceTable) pathReadlink(
 	memory *epsilon.Memory,
 	fdIndex, pathPtr, pathLen, bufPtr, bufLen, bufusedPtr int32,
 ) int32 {
+	if bufLen < 0 {
+		return errnoInval
+	}
+
 	fd, errCode := w.getDir(fdIndex, RightsPathReadlink)
 	if errCode != errnoSuccess {
 		return errCode
