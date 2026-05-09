@@ -312,3 +312,50 @@ func TestInvokeFuncrefInjectionIsRejected(t *testing.T) {
 		t.Fatal("expected trap from call_indirect with null reference")
 	}
 }
+
+func TestRuntimeConfusion(t *testing.T) {
+	// 1. Create two completely isolated Runtimes
+	r1 := NewRuntime()
+	r2 := NewRuntime()
+
+	// 2. Instantiate Module A in Runtime 1
+	wasmA, _ := wabt.Wat2Wasm(`(module
+		(func $secret (result i32) i32.const 42)
+		(func (export "wrapper") (result i32) call $secret)
+	)`)
+	modA, err := r1.InstantiateModule(bytes.NewReader(wasmA))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module A: %v", err)
+	}
+
+	// 3. Instantiate Module B in Runtime 2
+	wasmB, _ := wabt.Wat2Wasm(`(module
+		(func $secret2 (result i32) i32.const 1337)
+		(export "unused" (func $secret2))
+	)`)
+	_, err = r2.InstantiateModule(bytes.NewReader(wasmB))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module B: %v", err)
+	}
+
+	// 4. Create Module C in Runtime 2, but import the "wrapper" from Runtime 1
+	wasmC, _ := wabt.Wat2Wasm(`(module
+		(import "env" "wrapper" (func $wrapper (result i32)))
+		(func (export "exploit") (result i32) call $wrapper)
+	)`)
+
+	imports := NewModuleImportBuilder("env").
+		AddModuleExports(modA).
+		Build()
+
+	_, err = r2.InstantiateModuleWithImports(bytes.NewReader(wasmC), imports)
+	if err == nil {
+		t.Fatal("expected error when instantiating module with " +
+			"cross-runtime function import")
+	}
+
+	expectedErrMsg := "cross-runtime function import of env.wrapper is forbidden"
+	if err.Error() != expectedErrMsg {
+		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+}
