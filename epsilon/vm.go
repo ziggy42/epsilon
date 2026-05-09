@@ -28,9 +28,6 @@ var (
 	errIndirectCallTypeMismatch = errors.New("indirect call type mismatch")
 )
 
-// Special error to signal a return instruction was hit.
-var errReturn = errors.New("return instruction")
-
 const (
 	controlStackCacheSlotSize = 14 // Control stack slot size per call frame.
 	localsCacheSlotSize       = 12 // Locals slot size per call frame.
@@ -306,9 +303,6 @@ func (vm *vm) runLoop() error {
 			break
 		}
 		if err := vm.executeInstruction(frame); err != nil {
-			if errors.Is(err, errReturn) {
-				break
-			}
 			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return err
 		}
@@ -330,9 +324,6 @@ func (vm *vm) runLoopWithFuel() error {
 		}
 		vm.fuel--
 		if err := vm.executeInstruction(frame); err != nil {
-			if errors.Is(err, errReturn) {
-				break
-			}
 			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return err
 		}
@@ -366,7 +357,11 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case brTable:
 		vm.handleBrTable(frame)
 	case returnOp:
-		err = errReturn
+		// Semantically, a return is equivalent to a branch to the outermost block
+		// of the function. By branching to label N-1 (where N is the depth of the
+		// control stack), we trigger a stack unwind to the function's base height
+		// and jump to the 'end' instruction at the end of the function body.
+		vm.brToLabel(frame, uint32(len(frame.controlStack)-1))
 	case call:
 		err = vm.handleCall(frame)
 	case callIndirect:
@@ -1284,7 +1279,7 @@ func (vm *vm) pushBlockFrame(frame *callFrame, opcode opcode) {
 	vm.pushControlFrame(frame, controlFrame{
 		isLoop:         opcode == loop,
 		blockType:      blockType,
-		stackHeight:    vm.stack.size(),
+		stackHeight:    vm.stack.size() - vm.getInputCount(frame.module, blockType),
 		continuationPc: continuationPc,
 	})
 }
@@ -1950,7 +1945,10 @@ func (vm *vm) invokeExpression(
 			ParamTypes:  []ValueType{},
 			ResultTypes: []ValueType{resultType},
 		},
-		code:   function{body: expression},
+		code: function{
+			body:      expression,
+			typeIndex: 0xffffffff, // Represents -1. See getOutputCount.
+		},
 		module: moduleInstance,
 	}
 	if err := vm.invokeWasmFunction(&function); err != nil {

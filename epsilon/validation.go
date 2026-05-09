@@ -317,14 +317,6 @@ func (v *validator) validateFunction(function *function) error {
 		}
 	}
 
-	// The parser strips the trailing End instruction from the function body,
-	// but we still need to validate that the control frame is properly closed.
-	// We don't call validateEnd() here because that would push endTypes onto
-	// the stack, which is only needed for nested blocks.
-	_, err := v.popControlFrame()
-	if err != nil {
-		return err
-	}
 	if len(v.controlStack) != 0 {
 		return errUnclosedControlFrame
 	}
@@ -364,10 +356,10 @@ func (v *validator) validateConstExpression(
 		}
 	}
 
-	// Same as validateFunction, we are working around the fact the parser
-	// strips the trailing End instruction from the function body.
-	_, err := v.popControlFrame()
-	return err
+	if len(v.controlStack) != 0 {
+		return errUnclosedControlFrame
+	}
+	return nil
 }
 
 func (v *validator) isConstantOpcode(op opcode) bool {
@@ -386,7 +378,8 @@ func (v *validator) isConstantOpcode(op opcode) bool {
 		op == f64Const ||
 		op == v128Const ||
 		op == refNull ||
-		op == refFunc
+		op == refFunc ||
+		op == end
 }
 
 func (v *validator) validate(op opcode) error {
