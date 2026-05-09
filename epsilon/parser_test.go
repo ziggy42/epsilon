@@ -64,6 +64,7 @@ func TestParseExportedFunction(t *testing.T) {
 					uint64(localGet), 0,
 					uint64(localGet), 1,
 					uint64(i32Add),
+					uint64(end),
 				},
 				jumpCache:     map[uint32]uint32{},
 				jumpElseCache: map[uint32]uint32{},
@@ -159,7 +160,7 @@ func TestParseActiveElement(t *testing.T) {
 		t.Fatalf("expected table index 0, got %d", element.tableIndex)
 	}
 
-	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0}
+	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0, uint64(end)}
 	if !slices.Equal(element.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset %v, got %v",
@@ -216,7 +217,7 @@ func TestParseGlobalVariable(t *testing.T) {
 		)
 	}
 
-	expectedInitExpression := []uint64{uint64(i32Const), 42}
+	expectedInitExpression := []uint64{uint64(i32Const), 42, uint64(end)}
 	if !slices.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
@@ -251,7 +252,7 @@ func TestParseImmutableGlobalVariable(t *testing.T) {
 		)
 	}
 
-	expectedInitExpression := []uint64{uint64(i32Const), 63}
+	expectedInitExpression := []uint64{uint64(i32Const), 63, uint64(end)}
 	if !slices.Equal(globalVar.initExpression, expectedInitExpression) {
 		t.Errorf(
 			"expected init expression %v, got %v",
@@ -397,7 +398,7 @@ func TestParseActiveDataSegment(t *testing.T) {
 	if data.memoryIndex != 0 {
 		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
-	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0}
+	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0, uint64(end)}
 	if !slices.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",
@@ -429,7 +430,7 @@ func TestParseActiveDataSegmentWithMemoryIndex(t *testing.T) {
 	if data.memoryIndex != 0 {
 		t.Fatalf("expected memory index 0, got %d", data.memoryIndex)
 	}
-	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0}
+	expectedOffsetExpression := []uint64{uint64(i32Const), 0x0, uint64(end)}
 	if !slices.Equal(data.offsetExpression, expectedOffsetExpression) {
 		t.Fatalf(
 			"expected offset expression %v, got %v",

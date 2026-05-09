@@ -318,7 +318,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	return function{
 		locals:        locals,
-		body:          body[:len(body)-1],
+		body:          body,
 		jumpCache:     result.jumpCache,
 		jumpElseCache: result.jumpElseCache,
 	}, nil
@@ -1070,7 +1070,6 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 		}
 
 		if isEnd != nil && isEnd(bytecode[currentInstructionStart:]) {
-			bytecode = bytecode[:currentInstructionStart]
 			break
 		}
 	}
