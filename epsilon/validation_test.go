@@ -79,15 +79,15 @@ func TestValidDataMemory(t *testing.T) {
 }
 
 func TestVuln06(t *testing.T) {
-	// Raw WASM bytes from VULN-06 report.
-	// This module has 1 type definition (index 0) but tries to use index 1 in a block.
+	// We use raw bytes because standard assemblers like wat2wasm often 
+	// catch or "fix" OOB indices before they reach the engine.
 	wasm := []byte{
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
 		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // 1 type definition
-		0x03, 0x02, 0x01, 0x00,
-		0x0a, 0x08, 0x01, 0x06, 0x00,
-		0x02, 0x01, // block (type index 1) — OOB
-		0x0b, 0x0b,
+		0x03, 0x02, 0x01, 0x00,             // 1 function, type index 0
+		0x0a, 0x07, 0x01, 0x05, 0x00,       // code size 7, function body size 5
+		0x02, 0x01,                         // block, type index 1 (OOB)
+		0x0b, 0x0b,                         // end of block, end of function
 	}
 
 	module, err := newParser(bytes.NewReader(wasm)).parse()
@@ -96,14 +96,8 @@ func TestVuln06(t *testing.T) {
 	}
 	validator := newValidator(Config{})
 
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("Recovered from panic: %v", r)
-		}
-	}()
-
 	err = validator.validateModule(module)
 	if err == nil {
-		t.Errorf("expected validation error, got nil")
+		t.Errorf("expected validation error for OOB block type index, got nil")
 	}
 }
