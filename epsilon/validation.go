@@ -950,9 +950,13 @@ func (v *validator) validateGlobalSet() error {
 }
 
 func (v *validator) validateLoad(valueType ValueType, sizeBytes uint32) error {
-	align, _, _ := v.nextMemArg()
+	align, memoryIndex, _ := v.nextMemArg()
 
-	if err := v.validateMemoryExists(0); err != nil {
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
+		return errMultipleMemoriesNotEnabled
+	}
+
+	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
 	}
 
@@ -964,9 +968,13 @@ func (v *validator) validateLoad(valueType ValueType, sizeBytes uint32) error {
 }
 
 func (v *validator) validateStore(valueType ValueType, sizeBytes uint32) error {
-	align, _, _ := v.nextMemArg()
+	align, memoryIndex, _ := v.nextMemArg()
 
-	if err := v.validateMemoryExists(0); err != nil {
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
+		return errMultipleMemoriesNotEnabled
+	}
+
+	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
 	}
 

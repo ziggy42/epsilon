@@ -101,3 +101,45 @@ func TestVuln06(t *testing.T) {
 		t.Errorf("expected validation error for OOB block type index, got nil")
 	}
 }
+
+func TestMemoryIndexValidation(t *testing.T) {
+	// Standard header
+	wasm := []byte{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00}
+
+	// Type section: 1 type ( ) -> ( )
+	wasm = append(wasm, 0x01, 0x05, 0x01, 0x60, 0x00, 0x00)
+
+	// Function section: 1 function with type index 0
+	wasm = append(wasm, 0x03, 0x02, 0x01, 0x00)
+
+	// Memory section: 1 memory (min 1)
+	wasm = append(wasm, 0x05, 0x03, 0x01, 0x00, 0x01)
+
+	// Code section
+	// i32.const 0
+	// i32.load align=0x40 (bit 6 set), memIndex=1, offset=0
+	// end
+	body := []byte{
+		0x00,                   // local count
+		0x41, 0x00,             // i32.const 0
+		0x28, 0x40, 0x01, 0x00, // i32.load align=0x40 (bit 6 set), memIndex=1, offset=0
+		0x0b, // end
+	}
+
+	wasm = append(wasm, 0x0a)            // section id
+	wasm = append(wasm, byte(len(body)+2)) // section size
+	wasm = append(wasm, 0x01)            // 1 function
+	wasm = append(wasm, byte(len(body))) // body size
+	wasm = append(wasm, body...)
+
+	module, err := newParser(bytes.NewReader(wasm)).parse()
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	validator := newValidator(Config{ExperimentalMultipleMemories: true})
+	err = validator.validateModule(module)
+	if err == nil {
+		t.Errorf("expected validation error for OOB memory index in i32.load, got nil")
+	}
+}
