@@ -77,3 +77,33 @@ func TestValidDataMemory(t *testing.T) {
 		t.Fatalf("expected validation success, got error: %v", err)
 	}
 }
+
+func TestVuln06(t *testing.T) {
+	// Raw WASM bytes from VULN-06 report.
+	// This module has 1 type definition (index 0) but tries to use index 1 in a block.
+	wasm := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // 1 type definition
+		0x03, 0x02, 0x01, 0x00,
+		0x0a, 0x08, 0x01, 0x06, 0x00,
+		0x02, 0x01, // block (type index 1) — OOB
+		0x0b, 0x0b,
+	}
+
+	module, err := newParser(bytes.NewReader(wasm)).parse()
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+	validator := newValidator(Config{})
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Recovered from panic: %v", r)
+		}
+	}()
+
+	err = validator.validateModule(module)
+	if err == nil {
+		t.Errorf("expected validation error, got nil")
+	}
+}

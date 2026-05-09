@@ -39,6 +39,7 @@ var (
 	errInvalidRefNullType          = errors.New("invalid ref.null type")
 	errInvalidStartFunction        = errors.New("invalid start function")
 	errInvalidTableType            = errors.New("invalid table type")
+	errInvalidBlockType            = errors.New("invalid block type")
 	errLocalIndexOutOfBounds       = errors.New("local index out of bounds")
 	errMemoryIndexOutOfBounds      = errors.New("memory index out of bounds")
 	errMultipleMemoriesNotEnabled  = errors.New("multiple memories not enabled")
@@ -670,7 +671,10 @@ func (v *validator) validate(op opcode) error {
 }
 
 func (v *validator) validateBlock(op opcode) error {
-	startTypes, endTypes := v.getBlockTypes(int32(v.next()))
+	startTypes, endTypes, err := v.getBlockTypes(int32(v.next()))
+	if err != nil {
+		return err
+	}
 	if _, err := v.popExpectedValues(startTypes); err != nil {
 		return err
 	}
@@ -1474,17 +1478,24 @@ func (v *validator) markFrameUnreachable() error {
 	return nil
 }
 
-func (v *validator) getBlockTypes(blockType int32) ([]ValueType, []ValueType) {
+func (v *validator) getBlockTypes(blockType int32) ([]ValueType, []ValueType, error) {
 	if blockType == -0x40 { // empty block type.
-		return []ValueType{}, []ValueType{}
+		return []ValueType{}, []ValueType{}, nil
 	}
 
 	if blockType >= 0 {
+		if blockType >= int32(len(v.typeDefs)) {
+			return nil, nil, errInvalidBlockType
+		}
 		funcType := v.typeDefs[blockType]
-		return funcType.ParamTypes, funcType.ResultTypes
+		return funcType.ParamTypes, funcType.ResultTypes, nil
 	}
 
-	return []ValueType{}, []ValueType{toValueType(uint64(blockType & 0x7F))}
+	vt := toValueType(uint64(blockType & 0x7F))
+	if vt == bottom {
+		return nil, nil, errInvalidBlockType
+	}
+	return []ValueType{}, []ValueType{vt}, nil
 }
 
 func toValueType(code uint64) ValueType {
