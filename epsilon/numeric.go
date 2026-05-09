@@ -152,12 +152,18 @@ func remS32(a, b int32) (int32, error) {
 	if b == 0 {
 		return 0, errIntegerDivideByZero
 	}
+	if a == math.MinInt32 && b == -1 {
+		return 0, nil
+	}
 	return a % b, nil
 }
 
 func remS64(a, b int64) (int64, error) {
 	if b == 0 {
 		return 0, errIntegerDivideByZero
+	}
+	if a == math.MinInt64 && b == -1 {
+		return 0, nil
 	}
 	return a % b, nil
 }

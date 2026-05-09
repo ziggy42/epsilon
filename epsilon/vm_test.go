@@ -1131,3 +1131,40 @@ func TestBlockParamUnwind(t *testing.T) {
 		t.Errorf("expected 10, got %d", observedValue)
 	}
 }
+
+func TestRemSPanic(t *testing.T) {
+	wat := `(module
+		(func (export "rem32") (result i32)
+			i32.const -2147483648
+			i32.const -1
+			i32.rem_s)
+		(func (export "rem64") (result i64)
+			i64.const -9223372036854775808
+			i64.const -1
+			i64.rem_s)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	t.Run("i32.rem_s MinInt32 -1", func(t *testing.T) {
+		result, err := moduleInstance.Invoke("rem32")
+		if err != nil {
+			t.Fatalf("failed to execute rem32: %v", err)
+		}
+		if result[0] != int32(0) {
+			t.Errorf("expected 0, got %v", result[0])
+		}
+	})
+
+	t.Run("i64.rem_s MinInt64 -1", func(t *testing.T) {
+		result, err := moduleInstance.Invoke("rem64")
+		if err != nil {
+			t.Fatalf("failed to execute rem64: %v", err)
+		}
+		if result[0] != int64(0) {
+			t.Errorf("expected 0, got %v", result[0])
+		}
+	})
+}
