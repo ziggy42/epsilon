@@ -17,6 +17,7 @@ package epsilon
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 var errExportNotFound = errors.New("export not found")
@@ -49,7 +50,31 @@ func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := m.validateRefArgs(function.GetType(), args); err != nil {
+		return nil, err
+	}
 	return m.vm.invoke(function, args)
+}
+
+func (m *ModuleInstance) validateRefArgs(
+	funcType *FunctionType,
+	args []any,
+) error {
+	for i, paramType := range funcType.ParamTypes {
+		if paramType != FuncRefType {
+			continue
+		}
+		idx, ok := args[i].(int32)
+		if !ok || idx == NullReference {
+			continue
+		}
+		// BinarySearch is safe here because funcAddrs is strictly increasing by
+		// construction as functions are sequentially appended during instantiation.
+		if _, found := slices.BinarySearch(m.funcAddrs, uint32(idx)); !found {
+			return fmt.Errorf("funcref at parameter %d is inaccessible", i)
+		}
+	}
+	return nil
 }
 
 // GetMemory returns an exported memory by name.

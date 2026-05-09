@@ -270,3 +270,45 @@ func TestRuntimeModuleToModuleImport(t *testing.T) {
 		t.Fatalf("expected %d, got %d", expected, results[0])
 	}
 }
+
+func TestInvokeFuncrefInjectionIsRejected(t *testing.T) {
+	// Module A has a private function $secret that is NOT exported.
+	wasmA, _ := wabt.Wat2Wasm(`(module
+		(func $secret (result i32) i32.const 42)
+		(func (export "nop"))
+	)`)
+
+	// Module B accepts a funcref, puts it in a table, and calls it.
+	wasmB, _ := wabt.Wat2Wasm(`(module
+		(table $t 1 funcref)
+		(type $void_to_i32 (func (result i32)))
+		(func (export "exploit") (param $f funcref) (result i32)
+			(table.set $t (i32.const 0) (local.get $f))
+			(call_indirect $t (type $void_to_i32) (i32.const 0)))
+	)`)
+
+	runtime := NewRuntime()
+	_, err := runtime.InstantiateModule(bytes.NewReader(wasmA))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module A: %v", err)
+	}
+
+	moduleB, err := runtime.InstantiateModule(bytes.NewReader(wasmB))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module B: %v", err)
+	}
+
+	// Attempt to inject store index 0 (Module A's private $secret) as a
+	// funcref into Module B. This should be rejected.
+	_, err = moduleB.Invoke("exploit", int32(0))
+	if err == nil {
+		t.Fatal("expected error injecting funcref to inaccessible function")
+	}
+
+	// Null references should still be allowed (they'll trap at call_indirect,
+	// not at the validation boundary).
+	_, err = moduleB.Invoke("exploit", NullReference)
+	if err == nil {
+		t.Fatal("expected trap from call_indirect with null reference")
+	}
+}
