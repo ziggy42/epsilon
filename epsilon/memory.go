@@ -36,27 +36,39 @@ type Memory struct {
 
 // NewMemory creates a new Memory instance from a MemoryType.
 func NewMemory(memType MemoryType) *Memory {
+	size := uint64(memType.Limits.Min) * pageSize
 	return &Memory{
 		Limits: memType.Limits,
-		data:   make([]byte, memType.Limits.Min*pageSize),
+		data:   make([]byte, size),
 	}
 }
 
 // Grow extends the memory by the given number of pages.
 // It returns the original size in pages if successful, otherwise -1.
 func (m *Memory) Grow(pages int32) int32 {
-	currentSize := m.Size()
+	if pages < 0 {
+		return -1
+	}
+	currentSize := uint32(m.Size())
 	max := maxPages
 	if m.Limits.Max != nil {
 		max = *m.Limits.Max
 	}
 
-	if uint32(pages)+uint32(currentSize) > max {
+	newSizePages := uint64(pages) + uint64(currentSize)
+	if newSizePages > uint64(max) {
 		return -1
 	}
+
+	growthBytes := uint64(pages) * pageSize
+	// Ensure we don't overflow the host's 'int' type which is used by make/append
+	if uint64(int(growthBytes)) != growthBytes {
+		return -1
+	}
+
 	// Append a new zero-initialized slice of the required size.
-	m.data = append(m.data, make([]byte, pages*pageSize)...)
-	return currentSize
+	m.data = append(m.data, make([]byte, growthBytes)...)
+	return int32(currentSize)
 }
 
 // Size returns the size of the memory in pages.

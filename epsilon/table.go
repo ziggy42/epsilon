@@ -36,23 +36,25 @@ func NewTable(tt TableType) *Table {
 
 // Get returns the element at the given index.
 func (t *Table) Get(index int32) (int32, error) {
-	if index < 0 || index >= int32(len(t.elements)) {
+	uIndex := uint64(uint32(index))
+	if index < 0 || uIndex >= uint64(len(t.elements)) {
 		return 0, errTableOutOfBounds
 	}
-	return t.elements[index], nil
+	return t.elements[uIndex], nil
 }
 
 // Set places a value at the given index.
 func (t *Table) Set(index int32, value int32) error {
-	if index < 0 || index >= int32(len(t.elements)) {
+	uIndex := uint64(uint32(index))
+	if index < 0 || uIndex >= uint64(len(t.elements)) {
 		return errTableOutOfBounds
 	}
-	t.elements[index] = value
+	t.elements[uIndex] = value
 	return nil
 }
 
-func (t *Table) Size() int32 {
-	return int32(len(t.elements))
+func (t *Table) Size() uint32 {
+	return uint32(len(t.elements))
 }
 
 // Grow increases the table size by n, initializing new elements with val.
@@ -63,7 +65,7 @@ func (t *Table) Grow(n int32, val int32) int32 {
 	}
 	previousSize := t.Size()
 	if t.Type.Limits.Max != nil {
-		if uint32(previousSize)+uint32(n) > *t.Type.Limits.Max {
+		if uint64(previousSize)+uint64(uint32(n)) > uint64(*t.Type.Limits.Max) {
 			return -1
 		}
 	}
@@ -72,7 +74,7 @@ func (t *Table) Grow(n int32, val int32) int32 {
 		t.elements = append(t.elements, val)
 	}
 
-	return previousSize
+	return int32(previousSize)
 }
 
 // Init copies elements from a slice of function indexes into the table.
@@ -87,9 +89,13 @@ func (t *Table) Init(
 		return errTableOutOfBounds
 	}
 
+	uTableStartIndex := uint64(uint32(tableStartIndex))
+	uN := uint64(uint32(n))
+	uFuncStartIndex := uint64(uint32(funcStartIndex))
+
 	copy(
-		t.elements[tableStartIndex:tableStartIndex+n],
-		funcIndexes[funcStartIndex:funcStartIndex+n],
+		t.elements[uTableStartIndex:uTableStartIndex+uN],
+		funcIndexes[uFuncStartIndex:uFuncStartIndex+uN],
 	)
 	return nil
 }
@@ -115,21 +121,26 @@ func (t *Table) Copy(
 		return errTableOutOfBounds
 	}
 
+	uDestStartIndex := uint64(uint32(destStartIndex))
+	uSourceStartIndex := uint64(uint32(sourceStartIndex))
+	uN := uint64(uint32(n))
+
 	copy(
-		destTable.elements[destStartIndex:destStartIndex+n],
-		t.elements[sourceStartIndex:sourceStartIndex+n],
+		destTable.elements[uDestStartIndex:uDestStartIndex+uN],
+		t.elements[uSourceStartIndex:uSourceStartIndex+uN],
 	)
 	return nil
 }
 
 // Fill sets n elements to a given value, starting from an index.
 func (t *Table) Fill(n, startIndex int32, val int32) error {
-	if uint64(uint32(startIndex))+uint64(uint32(n)) > uint64(uint32(t.Size())) {
+	uStartIndex := uint64(uint32(startIndex))
+	if n < 0 || startIndex < 0 || uStartIndex+uint64(uint32(n)) > uint64(t.Size()) {
 		return errTableOutOfBounds
 	}
 
 	for i := range n {
-		t.elements[startIndex+i] = val
+		t.elements[uStartIndex+uint64(uint32(i))] = val
 	}
 	return nil
 }

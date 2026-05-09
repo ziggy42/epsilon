@@ -1514,7 +1514,7 @@ func (vm *vm) handleTableGrow(frame *callFrame) {
 
 func (vm *vm) handleTableSize(frame *callFrame) {
 	table := vm.getTable(frame, frame.next())
-	vm.stack.pushInt32(table.Size())
+	vm.stack.pushInt32(int32(table.Size()))
 }
 
 func (vm *vm) handleTableFill(frame *callFrame) error {
@@ -1831,7 +1831,7 @@ func (vm *vm) initActiveElements(
 
 		storeTableIndex := moduleInstance.tableAddrs[element.tableIndex]
 		table := vm.store.tables[storeTableIndex]
-		if offset > table.Size() {
+		if uint32(offset) > table.Size() {
 			return errTableOutOfBounds
 		}
 
