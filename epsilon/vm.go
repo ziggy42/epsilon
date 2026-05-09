@@ -1284,7 +1284,7 @@ func (vm *vm) pushBlockFrame(frame *callFrame, opcode opcode) {
 	vm.pushControlFrame(frame, controlFrame{
 		isLoop:         opcode == loop,
 		blockType:      blockType,
-		stackHeight:    vm.stack.size(),
+		stackHeight:    vm.stack.size() - vm.getInputCount(frame.module, blockType),
 		continuationPc: continuationPc,
 	})
 }
