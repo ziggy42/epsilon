@@ -16,7 +16,7 @@ package wasip1
 
 import "time"
 
-const clockResolutionNs = 1 // High resolution for spec compliance.
+const clockResolutionNs = 1
 
 const (
 	clockRealtime         uint32 = 0 // The clock measuring real time.
@@ -40,17 +40,14 @@ func getTimestamp(
 	monotonicClockStart time.Time,
 	clockId uint32,
 ) (int64, int32) {
-	var ts int64
 	switch clockId {
 	case clockRealtime:
-		ts = time.Now().UnixNano()
+		return time.Now().UnixNano(), errnoSuccess
 	case clockMonotonic:
-		ts = time.Since(monotonicClockStart).Nanoseconds()
+		return time.Since(monotonicClockStart).Nanoseconds(), errnoSuccess
 	case clockProcessCPUTimeID, clockThreadCPUTimeID:
 		return 0, errnoNotSup
 	default:
 		return 0, errnoInval
 	}
-
-	return ts, errnoSuccess
 }
