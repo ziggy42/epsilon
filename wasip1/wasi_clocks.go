@@ -16,7 +16,7 @@ package wasip1
 
 import "time"
 
-const clockResolutionNs = 100_000 // To mitigate side-channel attacks.
+const clockResolutionNs = 1
 
 const (
 	clockRealtime         uint32 = 0 // The clock measuring real time.

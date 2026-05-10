@@ -27,8 +27,8 @@ func TestClocks_Resolution(t *testing.T) {
 	if errno != errnoSuccess {
 		t.Fatalf("getClockResolution failed: %d", errno)
 	}
-	if res != 100000 {
-		t.Errorf("expected resolution 100000 ns (100µs), got %d ns", res)
+	if res != 1 {
+		t.Errorf("expected resolution 1 ns, got %d ns", res)
 	}
 }
 
