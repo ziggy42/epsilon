@@ -25,8 +25,6 @@ const (
 	clockThreadCPUTimeID  uint32 = 3 // The CPU-time clock for the thread.
 )
 
-
-
 func getClockResolution(clockId uint32) (uint64, int32) {
 	switch clockId {
 	case clockRealtime, clockMonotonic:
@@ -54,6 +52,5 @@ func getTimestamp(
 		return 0, errnoInval
 	}
 
-	// Round down to the nearest multiple of clockResolutionNs to mitigate side-channel attacks.
-	return ts - (ts % int64(clockResolutionNs)), errnoSuccess
+	return ts, errnoSuccess
 }

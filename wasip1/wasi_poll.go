@@ -271,10 +271,6 @@ func (w *WasiModule) pollOneoff(
 
 	// Only sleep if there are no immediate events and we have pending clocks
 	if len(events) == 0 && len(pendingClocks) > 0 {
-		// Round up to the nearest multiple of clockResolutionNs to mitigate side-channel attacks.
-		res := time.Duration(clockResolutionNs)
-		minSleep = (minSleep + res - 1) / res * res
-
 		time.Sleep(minSleep)
 		for _, pc := range pendingClocks {
 			// Include any clock event that should have fired by now.
