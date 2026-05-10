@@ -25,6 +25,9 @@ type function struct {
 	// the position of the instruction after the matching 'else' (or 'end' if no
 	// else).
 	jumpElseCache map[uint32]uint32
+	// defaultLocals contains the initial values of all non-parameter locals.
+	// It is nil if the function does not contain any reference type locals.
+	defaultLocals []value
 }
 
 type exportIndexKind int
