@@ -136,10 +136,10 @@ func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 		return nil, err
 	}
 	return &WasiModule{
-		fs:                    fs,
-		args:                  b.args,
-		env:                   b.env,
-		monotonicClockStart:   time.Now(),
+		fs:                  fs,
+		args:                b.args,
+		env:                 b.env,
+		monotonicClockStart: time.Now(),
 	}, nil
 }
 
