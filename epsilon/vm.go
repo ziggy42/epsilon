@@ -26,6 +26,7 @@ var (
 	errFuelExhausted            = errors.New("fuel exhausted")
 	errUnknownFunctionType      = errors.New("unknown function type")
 	errIndirectCallTypeMismatch = errors.New("indirect call type mismatch")
+	errHostResultCountMismatch  = errors.New("host func result count mismatch")
 )
 
 const (
@@ -1929,6 +1930,10 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 
 	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
 	res := fun.hostCode(fun.module, args...)
+	if len(res) != len(fun.GetType().ResultTypes) {
+		return errHostResultCountMismatch
+	}
+
 	vm.stack.pushAll(res)
 	return err
 }

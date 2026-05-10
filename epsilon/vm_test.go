@@ -819,6 +819,36 @@ func TestFunctionImport(t *testing.T) {
 	}
 }
 
+func TestHostFunctionResultCountMismatch(t *testing.T) {
+	wat := `(module
+		(import "env" "leak" (func $leak (result i32)))
+		(func (export "exploit")
+			call $leak
+			drop
+		)
+	)`
+	imports := map[string]map[string]any{
+		"env": {
+			"leak": func(m *ModuleInstance, args ...any) []any {
+				// Returns nothing, but signature expects i32.
+				// This should fail at runtime due to the result count mismatch.
+				return []any{}
+			},
+		},
+	}
+
+	moduleInstance, err := instantiate(wat, imports, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("exploit")
+
+	if !errors.Is(err, errHostResultCountMismatch) {
+		t.Fatalf("expected errHostResultCountMismatch, got: %v", err)
+	}
+}
+
 func TestGlobalGet(t *testing.T) {
 	wat := `(module
 		(import "module" "global" (global $g i32))
