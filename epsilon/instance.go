@@ -21,6 +21,8 @@ import (
 )
 
 var errExportNotFound = errors.New("export not found")
+var errRefTypeMismatch = errors.New("ref type expected to be int32")
+var errArgCountMismatch = errors.New("arg count mismatch")
 
 // exportInstance represents the runtime representation of an export.
 type exportInstance struct {
@@ -45,6 +47,7 @@ type ModuleInstance struct {
 //
 // Args can be int32, int64, float32, or float64. The function returns a slice
 // of results as []any, which can be type-asserted to the appropriate types.
+// References must be represented as int32, with NullReference for nulls.
 func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
 	function, err := m.GetFunction(name)
 	if err != nil {
@@ -60,14 +63,28 @@ func (m *ModuleInstance) validateRefArgs(
 	funcType *FunctionType,
 	args []any,
 ) error {
+	if len(args) != len(funcType.ParamTypes) {
+		return errArgCountMismatch
+	}
+
 	for i, paramType := range funcType.ParamTypes {
-		if paramType != FuncRefType {
+		if paramType != FuncRefType && paramType != ExternRefType {
 			continue
 		}
 		idx, ok := args[i].(int32)
-		if !ok || idx == NullReference {
+		if !ok {
+			return errRefTypeMismatch
+		}
+
+		if idx == NullReference {
 			continue
 		}
+
+		if paramType == ExternRefType {
+			// It is up to the host to validate the externref.
+			continue
+		}
+
 		// BinarySearch is safe here because funcAddrs is strictly increasing by
 		// construction as functions are sequentially appended during instantiation.
 		if _, found := slices.BinarySearch(m.funcAddrs, uint32(idx)); !found {
