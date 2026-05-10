@@ -16,7 +16,7 @@ package wasip1
 
 import "time"
 
-const clockResolutionNs = 100_000 // To mitigate side-channel attacks.
+const clockResolutionNs = 1 // High resolution for spec compliance.
 
 const (
 	clockRealtime         uint32 = 0 // The clock measuring real time.
@@ -24,6 +24,8 @@ const (
 	clockProcessCPUTimeID uint32 = 2 // The CPU-time clock for the process.
 	clockThreadCPUTimeID  uint32 = 3 // The CPU-time clock for the thread.
 )
+
+
 
 func getClockResolution(clockId uint32) (uint64, int32) {
 	switch clockId {

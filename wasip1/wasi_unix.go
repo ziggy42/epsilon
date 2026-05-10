@@ -37,10 +37,10 @@ type WasiModuleBuilder struct {
 }
 
 type WasiModule struct {
-	fs                    *wasiResourceTable
-	args                  []string
-	env                   map[string]string
-	monotonicClockStart   time.Time
+	fs                  *wasiResourceTable
+	args                []string
+	env                 map[string]string
+	monotonicClockStart time.Time
 }
 
 // NewWasiModuleBuilder creates a new WasiModuleBuilder with default values.
@@ -264,12 +264,12 @@ func (w *WasiModule) clockTimeGet(
 	memory *epsilon.Memory,
 	clockId, resPtr int32,
 ) int32 {
-	res, errCode := getTimestamp(w.monotonicClockStart, uint32(clockId))
+	ts, errCode := getTimestamp(w.monotonicClockStart, uint32(clockId))
 	if errCode != errnoSuccess {
 		return errCode
 	}
 
-	if err := memory.StoreUint64(0, uint32(resPtr), uint64(res)); err != nil {
+	if err := memory.StoreUint64(0, uint32(resPtr), uint64(ts)); err != nil {
 		return errnoFault
 	}
 	return errnoSuccess
