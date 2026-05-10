@@ -1173,7 +1173,8 @@ func TestUninitializedFuncrefLeak(t *testing.T) {
 
 	// Module B has a function that uses an uninitialized funcref local.
 	// It puts it into a table and then calls it via call_indirect.
-	// If the local is improperly initialized to 0, it will call Module A's secret function.
+	// If the local is improperly initialized to 0, it will call Module A's secret
+	// function.
 	watB := `(module
 	  (type $t0 (func (result i32)))
 	  (table 1 funcref)
