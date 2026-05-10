@@ -40,14 +40,18 @@ func getTimestamp(
 	monotonicClockStart time.Time,
 	clockId uint32,
 ) (int64, int32) {
+	var ts int64
 	switch clockId {
 	case clockRealtime:
-		return time.Now().UnixNano(), errnoSuccess
+		ts = time.Now().UnixNano()
 	case clockMonotonic:
-		return time.Since(monotonicClockStart).Nanoseconds(), errnoSuccess
+		ts = time.Since(monotonicClockStart).Nanoseconds()
 	case clockProcessCPUTimeID, clockThreadCPUTimeID:
 		return 0, errnoNotSup
 	default:
 		return 0, errnoInval
 	}
+
+	// Round down to the nearest multiple of clockResolutionNs to mitigate side-channel attacks.
+	return ts - (ts % int64(clockResolutionNs)), errnoSuccess
 }
