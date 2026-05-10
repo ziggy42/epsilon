@@ -249,10 +249,17 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		// Clear non-parameter locals to their zero values. WASM allows reading
 		// uninitialized locals, so we must zero them to avoid reusing stale values
 		// from previous invocations. Parameters are overwritten below.
-		clear(locals[numParams:])
+		if function.code.defaultLocals != nil {
+			copy(locals[numParams:], function.code.defaultLocals)
+		} else {
+			clear(locals[numParams:])
+		}
 	} else {
 		// Beyond preallocation or too many locals: heap allocate.
 		locals = make([]value, numLocals)
+		if function.code.defaultLocals != nil {
+			copy(locals[numParams:], function.code.defaultLocals)
+		}
 	}
 
 	// Copy params and shrink stack by operating on the underlying slice directly.

@@ -1161,3 +1161,62 @@ func TestBlockParamUnwind(t *testing.T) {
 		t.Errorf("expected 10, got %d", observedValue)
 	}
 }
+
+func TestUninitializedFuncrefLeak(t *testing.T) {
+	// Module A has a secret function that it DOES NOT export.
+	// We want this function to be at store index 0.
+	watA := `(module
+	  (func (result i32)
+	    i32.const 42
+	  )
+	)`
+
+	// Module B has a function that uses an uninitialized funcref local.
+	// It puts it into a table and then calls it via call_indirect.
+	// If the local is improperly initialized to 0, it will call Module A's secret function.
+	watB := `(module
+	  (type $t0 (func (result i32)))
+	  (table 1 funcref)
+	  (func (export "exploit") (result i32)
+	    (local $ref funcref)
+	    i32.const 0
+	    local.get $ref
+	    table.set 0
+	    i32.const 0
+	    call_indirect (type $t0)
+	  )
+	)`
+
+	runtime := NewRuntime()
+
+	wasmA, err := wabt.Wat2Wasm(watA)
+	if err != nil {
+		t.Fatalf("wat2wasm A failed: %v", err)
+	}
+
+	wasmB, err := wabt.Wat2Wasm(watB)
+	if err != nil {
+		t.Fatalf("wat2wasm B failed: %v", err)
+	}
+
+	// Instantiate Module A first so its function gets index 0.
+	_, err = runtime.InstantiateModule(bytes.NewReader(wasmA))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module A: %v", err)
+	}
+
+	// Instantiate Module B.
+	instanceB, err := runtime.InstantiateModule(bytes.NewReader(wasmB))
+	if err != nil {
+		t.Fatalf("failed to instantiate Module B: %v", err)
+	}
+
+	// Invoke "exploit" from Module B.
+	// If the vulnerability exists, it will return 42 (Module A's secret).
+	results, err := instanceB.Invoke("exploit")
+	if err != nil {
+		t.Logf("Invoke failed (this is good if it was a trap): %v", err)
+	} else if len(results) > 0 && results[0] == int32(42) {
+		t.Errorf("Vulnerability confirmed! Module B successfully called Module A's private function.")
+	}
+}

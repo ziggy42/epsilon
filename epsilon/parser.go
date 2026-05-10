@@ -313,11 +313,29 @@ func (p *parser) parseFunction() (function, error) {
 
 	body := result.bytecode
 
+	var defaultLocals []value
+	var hasRef bool
+	for _, typ := range locals {
+		if typ == FuncRefType || typ == ExternRefType {
+			hasRef = true
+			break
+		}
+	}
+	if hasRef {
+		defaultLocals = make([]value, len(locals))
+		for i, typ := range locals {
+			if typ == FuncRefType || typ == ExternRefType {
+				defaultLocals[i] = i32(NullReference)
+			}
+		}
+	}
+
 	return function{
 		locals:        locals,
 		body:          body,
 		jumpCache:     result.jumpCache,
 		jumpElseCache: result.jumpElseCache,
+		defaultLocals: defaultLocals,
 	}, nil
 }
 
