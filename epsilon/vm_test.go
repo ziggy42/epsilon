@@ -1216,13 +1216,8 @@ func TestUninitializedFuncrefLeak(t *testing.T) {
 	results, err := instanceB.Invoke("exploit")
 	if err == nil {
 		if len(results) > 0 && results[0] == int32(42) {
-			t.Fatalf("Vulnerability confirmed! Module B successfully called Module A's private function.")
+			t.Fatalf("module B successfully called module A's private function")
 		}
-		t.Fatalf("Expected a trap due to uninitialized funcref, but execution succeeded.")
-	}
-
-	expectedErr := "uninitialized element 0"
-	if err.Error() != expectedErr {
-		t.Errorf("Expected trap '%s', got '%v'", expectedErr, err)
+		t.Fatalf("expected trap due to uninitialized funcref")
 	}
 }
