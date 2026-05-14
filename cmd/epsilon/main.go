@@ -144,8 +144,7 @@ func run(opts *options) error {
 		config.Fuel = opts.fuel
 	}
 
-	instance, err := epsilon.NewRuntime().
-		WithConfig(config).
+	instance, err := epsilon.NewRuntimeWithConfig(config).
 		InstantiateModuleWithImports(moduleReader, wasiModule.ToImports())
 	if err != nil {
 		return err

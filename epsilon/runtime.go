@@ -27,16 +27,14 @@ type Runtime struct {
 	config Config
 }
 
-// NewRuntime creates a new Runtime with default settings.
+// NewRuntime creates a new Runtime with default configuration.
 func NewRuntime() *Runtime {
-	return &Runtime{config: DefaultConfig()}
+	return NewRuntimeWithConfig(DefaultConfig())
 }
 
-// WithConfig sets the configuration for the runtime. Must be called before
-// instantiating any modules.
-func (r *Runtime) WithConfig(config Config) *Runtime {
-	r.config = config
-	return r
+// NewRuntimeWithConfig creates a new Runtime with the given configuration.
+func NewRuntimeWithConfig(config Config) *Runtime {
+	return &Runtime{config: config, vm: newVm(config)}
 }
 
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
@@ -50,7 +48,6 @@ func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
 	imports ...map[string]map[string]any,
 ) (*ModuleInstance, error) {
-	r.ensureVm()
 	module, err := newParser(wasm).parse()
 	if err != nil {
 		return nil, err
@@ -75,12 +72,6 @@ func (r *Runtime) InstantiateModuleFromBytes(
 	data []byte,
 ) (*ModuleInstance, error) {
 	return r.InstantiateModule(bytes.NewReader(data))
-}
-
-func (r *Runtime) ensureVm() {
-	if r.vm == nil {
-		r.vm = newVm(r.config)
-	}
 }
 
 // ModuleImportBuilder provides a fluent, type-safe API for building import
