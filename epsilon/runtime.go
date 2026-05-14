@@ -16,7 +16,6 @@ package epsilon
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 )
 
@@ -98,9 +97,6 @@ func (r *Runtime) InstantiateModuleWithImports(
 			merged[mi.moduleName] = make(map[string]any)
 		}
 		for name, obj := range mi.imports {
-			if err := r.checkOwner(obj, mi.moduleName, name); err != nil {
-				return nil, err
-			}
 			merged[mi.moduleName][name] = obj
 		}
 	}
@@ -114,30 +110,6 @@ func (r *Runtime) InstantiateModuleFromBytes(
 	data []byte,
 ) (*ModuleInstance, error) {
 	return r.InstantiateModule(bytes.NewReader(data))
-}
-
-// checkOwner rejects imports that belong to a different Runtime, as mixing
-// objects across Runtimes breaks isolation.
-func (r *Runtime) checkOwner(obj any, mod, name string) error {
-	var owner *vm
-	switch t := obj.(type) {
-	case *Memory:
-		owner = t.owner
-	case *Table:
-		owner = t.owner
-	case *Global:
-		owner = t.owner
-	case *wasmFunction:
-		owner = t.module.vm
-	default:
-		// Host functions and other unowned types are always safe to import.
-		return nil
-	}
-
-	if owner != r.vm {
-		return fmt.Errorf("cross-runtime import of %s.%s is forbidden", mod, name)
-	}
-	return nil
 }
 
 // ModuleImports provides a fluent, type-safe API for building import

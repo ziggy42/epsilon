@@ -50,19 +50,19 @@ func resolveImports(
 			}
 			functions = append(functions, function)
 		case GlobalType:
-			global, err := resolveGlobalImport(obj, t, imp)
+			global, err := resolveGlobalImport(instance, obj, t, imp)
 			if err != nil {
 				return nil, err
 			}
 			globals = append(globals, global)
 		case MemoryType:
-			memory, err := resolveMemoryImport(obj, t, imp)
+			memory, err := resolveMemoryImport(instance, obj, t, imp)
 			if err != nil {
 				return nil, err
 			}
 			memories = append(memories, memory)
 		case TableType:
-			table, err := resolveTableImport(obj, t, imp)
+			table, err := resolveTableImport(instance, obj, t, imp)
 			if err != nil {
 				return nil, err
 			}
@@ -96,6 +96,20 @@ func resolveFunctionImport(
 	imp moduleImport,
 ) (FunctionInstance, error) {
 	if f, ok := obj.(FunctionInstance); ok {
+		var owner *vm
+		switch t := f.(type) {
+		case *wasmFunction:
+			owner = t.module.vm
+		case *hostFunction:
+			owner = t.module.vm
+		}
+
+		if owner != moduleInstance.vm {
+			return nil, fmt.Errorf(
+				"cross-runtime import of %s.%s is forbidden", imp.moduleName, imp.name,
+			)
+		}
+
 		if !f.GetType().Equal(functionType) {
 			return nil, fmt.Errorf(
 				"type mismatch for %s.%s", imp.moduleName, imp.name,
@@ -117,6 +131,7 @@ func resolveFunctionImport(
 }
 
 func resolveGlobalImport(
+	instance *ModuleInstance,
 	obj any,
 	globalType GlobalType,
 	imp moduleImport,
@@ -124,6 +139,12 @@ func resolveGlobalImport(
 	global, ok := obj.(*Global)
 	if !ok {
 		return nil, fmt.Errorf("%s.%s not a global", imp.moduleName, imp.name)
+	}
+
+	if global.owner != instance.vm {
+		return nil, fmt.Errorf(
+			"cross-runtime import of %s.%s is forbidden", imp.moduleName, imp.name,
+		)
 	}
 
 	if global.Mutable != globalType.IsMutable {
@@ -140,6 +161,7 @@ func resolveGlobalImport(
 }
 
 func resolveMemoryImport(
+	instance *ModuleInstance,
 	obj any,
 	memoryType MemoryType,
 	imp moduleImport,
@@ -147,6 +169,12 @@ func resolveMemoryImport(
 	memory, ok := obj.(*Memory)
 	if !ok {
 		return nil, fmt.Errorf("%s.%s not a memory", imp.moduleName, imp.name)
+	}
+
+	if memory.owner != instance.vm {
+		return nil, fmt.Errorf(
+			"cross-runtime import of %s.%s is forbidden", imp.moduleName, imp.name,
+		)
 	}
 
 	provided := Limits{Min: uint32(memory.Size()), Max: memory.Limits.Max}
@@ -157,6 +185,7 @@ func resolveMemoryImport(
 }
 
 func resolveTableImport(
+	instance *ModuleInstance,
 	obj any,
 	tableType TableType,
 	imp moduleImport,
@@ -164,6 +193,12 @@ func resolveTableImport(
 	table, ok := obj.(*Table)
 	if !ok {
 		return nil, fmt.Errorf("%s.%s not a table", imp.moduleName, imp.name)
+	}
+
+	if table.owner != instance.vm {
+		return nil, fmt.Errorf(
+			"cross-runtime import of %s.%s is forbidden", imp.moduleName, imp.name,
+		)
 	}
 
 	if table.Type.ReferenceType != tableType.ReferenceType {
