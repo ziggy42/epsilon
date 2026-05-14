@@ -19,6 +19,8 @@ package wasip1
 import (
 	"errors"
 	"os"
+
+	"github.com/ziggy42/epsilon/epsilon"
 )
 
 // WasiModuleBuilder is a builder for creating WasiModule instances.
@@ -96,6 +98,8 @@ func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
 	return nil, errors.New("WASI is not supported on this platform")
 }
 
-func (w *WasiModule) ToImports() map[string]map[string]any { return nil }
+func (w *WasiModule) ToImports() *epsilon.ModuleImports {
+	return epsilon.NewModuleImports(ModuleName)
+}
 
 func (w *WasiModule) Close() {}

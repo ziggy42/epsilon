@@ -314,8 +314,8 @@ func bindMem(
 	}
 }
 
-func (w *WasiModule) ToImports() map[string]map[string]any {
-	return epsilon.NewModuleImportBuilder(ModuleName).
+func (w *WasiModule) ToImports() *epsilon.ModuleImports {
+	return epsilon.NewModuleImports(ModuleName).
 		AddHostFunc("args_get", bindMem(func(m *epsilon.Memory, args []any) int32 {
 			return w.argsGet(m, args[0].(int32), args[1].(int32))
 		})).
@@ -687,8 +687,7 @@ func (w *WasiModule) ToImports() map[string]map[string]any {
 		})).
 		AddHostFunc("sock_shutdown", bind(func(args []any) int32 {
 			return w.fs.sockShutdown(args[0].(int32), args[1].(int32))
-		})).
-		Build()
+		}))
 }
 
 // Close releases all resources held by the WasiModule, including file

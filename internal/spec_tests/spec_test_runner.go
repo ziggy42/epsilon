@@ -34,7 +34,7 @@ type specTestRunner struct {
 	runtime            *epsilon.Runtime
 	moduleInstanceMap  map[string]*epsilon.ModuleInstance
 	lastModuleInstance *epsilon.ModuleInstance
-	spectestImports    map[string]map[string]any
+	spectestImports    *epsilon.ModuleImports
 }
 
 func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
@@ -42,7 +42,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	tableLimitMax := uint32(20)
 
 	runtime := epsilon.NewRuntime()
-	spectestImports := epsilon.NewModuleImportBuilder("spectest").
+	spectestImports := epsilon.NewModuleImports("spectest").
 		AddGlobal("global_i32", runtime.NewGlobalI32(666, false)).
 		AddGlobal("global_i64", runtime.NewGlobalI64(666, false)).
 		AddGlobal("global_f32", runtime.NewGlobalF32(666.6, false)).
@@ -108,8 +108,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 		AddHostFunc("print", func(m *epsilon.ModuleInstance, args ...any) []any {
 			fmt.Printf("Print called!")
 			return nil
-		}).
-		Build()
+		})
 
 	return &specTestRunner{
 		t:                 t,
@@ -168,12 +167,11 @@ func (r *specTestRunner) handleRegister(cmd wabt.Command) {
 	r.moduleInstanceMap[cmd.As] = r.lastModuleInstance
 }
 
-func (r *specTestRunner) buildImports() []map[string]map[string]any {
-	imports := []map[string]map[string]any{r.spectestImports}
+func (r *specTestRunner) buildImports() []*epsilon.ModuleImports {
+	imports := []*epsilon.ModuleImports{r.spectestImports}
 	for regName, moduleInstance := range r.moduleInstanceMap {
-		moduleImport := epsilon.NewModuleImportBuilder(regName).
-			AddModuleExports(moduleInstance).
-			Build()
+		moduleImport := epsilon.NewModuleImports(regName).
+			AddModuleExports(moduleInstance)
 		imports = append(imports, moduleImport)
 	}
 	return imports

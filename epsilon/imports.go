@@ -102,18 +102,6 @@ func resolveFunctionImport(
 			)
 		}
 
-		// Prevent cross-runtime function sharing. The WebAssembly spec assumes a
-		// single Store per abstract machine. Mixing objects across Runtimes breaks
-		// isolation and is forbidden.
-		if wasmFn, isWasm := f.(*wasmFunction); isWasm {
-			if wasmFn.module.vm != moduleInstance.vm {
-				return nil, fmt.Errorf(
-					"cross-runtime function import of %s.%s is forbidden",
-					imp.moduleName, imp.name,
-				)
-			}
-		}
-
 		return f, nil
 	}
 
