@@ -133,30 +133,22 @@ func resolveGlobalImport(
 	globalType GlobalType,
 	imp moduleImport,
 ) (*Global, error) {
-	if global, ok := obj.(*Global); ok {
-		if global.Mutable != globalType.IsMutable {
-			return nil, fmt.Errorf(
-				"mutability mismatch for %s.%s", imp.moduleName, imp.name,
-			)
-		}
-		if global.Type != nil && global.Type != globalType.ValueType {
-			return nil, fmt.Errorf(
-				"value type mismatch for %s.%s", imp.moduleName, imp.name,
-			)
-		}
-		return global, nil
+	global, ok := obj.(*Global)
+	if !ok {
+		return nil, fmt.Errorf("%s.%s not a global", imp.moduleName, imp.name)
 	}
 
-	if !valueMatchesType(obj, globalType.ValueType) {
+	if global.Mutable != globalType.IsMutable {
+		return nil, fmt.Errorf(
+			"mutability mismatch for %s.%s", imp.moduleName, imp.name,
+		)
+	}
+	if global.Type != nil && global.Type != globalType.ValueType {
 		return nil, fmt.Errorf(
 			"value type mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
-	return &Global{
-		value:   newValue(obj),
-		Mutable: globalType.IsMutable,
-		Type:    globalType.ValueType,
-	}, nil
+	return global, nil
 }
 
 func resolveMemoryImport(
@@ -199,28 +191,6 @@ func resolveTableImport(
 		)
 	}
 	return table, nil
-}
-
-func valueMatchesType(val any, valueType ValueType) bool {
-	switch valueType {
-	case I32:
-		_, ok := val.(int32)
-		return ok
-	case I64:
-		_, ok := val.(int64)
-		return ok
-	case F32:
-		_, ok := val.(float32)
-		return ok
-	case F64:
-		_, ok := val.(float64)
-		return ok
-	case V128:
-		_, ok := val.(V128Value)
-		return ok
-	default:
-		return false
-	}
 }
 
 func limitsMatch(provided, required Limits) bool {

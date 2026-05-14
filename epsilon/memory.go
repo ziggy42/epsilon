@@ -32,15 +32,17 @@ var errMemoryOutOfBounds = errors.New("out of bounds memory access")
 type Memory struct {
 	Limits Limits
 	data   []byte
+
+	// owner identifies which vm and therefore which runtime this instance
+	// belongs to.
+	owner *vm
 }
 
-// NewMemory creates a new Memory instance from a MemoryType.
-func NewMemory(memType MemoryType) *Memory {
+// newMemory creates a new Memory instance from a MemoryType.
+func newMemory(owner *vm, memType MemoryType) *Memory {
 	size := uint64(memType.Limits.Min) * pageSize
-	return &Memory{
-		Limits: memType.Limits,
-		data:   make([]byte, size),
-	}
+	data := make([]byte, size)
+	return &Memory{owner: owner, Limits: memType.Limits, data: data}
 }
 
 // Grow extends the memory by the given number of pages.

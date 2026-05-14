@@ -64,7 +64,8 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 	}
 	defer f.Close()
 
-	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewRuntime().
+		NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	rt := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
@@ -132,7 +133,8 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 	}
 	defer file.Close()
 
-	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewRuntime().
+		NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 
 	// Define a custom right to see if it's NOT inherited if not in
 	// rightsInheriting.
@@ -166,7 +168,8 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 }
 
 func TestPollOneoff_ClockOverflow(t *testing.T) {
-	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewRuntime().
+		NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	w := &WasiModule{
 		monotonicClockStart: time.Now(), // now - start = now - 1
 	}

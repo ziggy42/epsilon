@@ -37,6 +37,45 @@ func NewRuntimeWithConfig(config Config) *Runtime {
 	return &Runtime{config: config, vm: newVm(config)}
 }
 
+// NewMemory creates a new Memory instance from a MemoryType.
+func (r *Runtime) NewMemory(memType MemoryType) *Memory {
+	return newMemory(r.vm, memType)
+}
+
+// NewTable creates a new Table instance from a TableType.
+func (r *Runtime) NewTable(tt TableType) *Table {
+	return newTable(r.vm, tt)
+}
+
+// NewGlobal creates a new Global instance.
+func (r *Runtime) NewGlobal(
+	value any,
+	mutable bool,
+	valueType ValueType,
+) *Global {
+	return newGlobal(r.vm, value, mutable, valueType)
+}
+
+// NewGlobalI32 creates a new I32 Global instance.
+func (r *Runtime) NewGlobalI32(value int32, mutable bool) *Global {
+	return r.NewGlobal(value, mutable, I32)
+}
+
+// NewGlobalI64 creates a new I64 Global instance.
+func (r *Runtime) NewGlobalI64(value int64, mutable bool) *Global {
+	return r.NewGlobal(value, mutable, I64)
+}
+
+// NewGlobalF32 creates a new F32 Global instance.
+func (r *Runtime) NewGlobalF32(value float32, mutable bool) *Global {
+	return r.NewGlobal(value, mutable, F32)
+}
+
+// NewGlobalF64 creates a new F64 Global instance.
+func (r *Runtime) NewGlobalF64(value float64, mutable bool) *Global {
+	return r.NewGlobal(value, mutable, F64)
+}
+
 // InstantiateModule parses and instantiates a WASM module from an io.Reader.
 func (r *Runtime) InstantiateModule(wasm io.Reader) (*ModuleInstance, error) {
 	return r.InstantiateModuleWithImports(wasm, map[string]map[string]any{})
@@ -79,15 +118,16 @@ func (r *Runtime) InstantiateModuleFromBytes(
 //
 // Example:
 //
+//	runtime := epsilon.NewRuntime()
 //	imports := epsilon.NewModuleImportBuilder("env").
 //	    AddHostFunc("log", func(m *epsilon.ModuleInstance, args ...any) []any {
 //	        fmt.Println("WASM says:", args[0])
 //	        return nil
 //	    }).
-//	    AddMemory("memory", epsilon.NewMemory(epsilon.MemoryType{
+//	    AddMemory("memory", runtime.NewMemory(epsilon.MemoryType{
 //	        Limits: epsilon.Limits{Min: 1},
 //	    })).
-//	    AddGlobal("offset", int32(1024), false, epsilon.I32).
+//	    AddGlobal("offset", runtime.NewGlobal(int32(1024), false, epsilon.I32)).
 //	    Build()
 //
 //	instance, err := runtime.InstantiateModuleWithImports(wasmReader, imports)
@@ -129,15 +169,9 @@ func (b *ModuleImportBuilder) AddTable(
 
 func (b *ModuleImportBuilder) AddGlobal(
 	name string,
-	value any,
-	mutable bool,
-	valueType ValueType,
+	global *Global,
 ) *ModuleImportBuilder {
-	b.imports[name] = &Global{
-		value:   newValue(value),
-		Mutable: mutable,
-		Type:    valueType,
-	}
+	b.imports[name] = global
 	return b
 }
 

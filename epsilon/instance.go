@@ -185,14 +185,3 @@ type hostFunction struct {
 }
 
 func (hf *hostFunction) GetType() *FunctionType { return &hf.functionType }
-
-// Global is a global variable.
-type Global struct {
-	value   value
-	Mutable bool
-	Type    ValueType
-}
-
-func (g *Global) Get() any {
-	return g.value.any(g.Type)
-}

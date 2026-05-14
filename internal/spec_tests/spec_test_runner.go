@@ -41,16 +41,17 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
 	tableLimitMax := uint32(20)
 
+	runtime := epsilon.NewRuntime()
 	spectestImports := epsilon.NewModuleImportBuilder("spectest").
-		AddGlobal("global_i32", int32(666), false, epsilon.I32).
-		AddGlobal("global_i64", int64(666), false, epsilon.I64).
-		AddGlobal("global_f32", float32(666.6), false, epsilon.F32).
-		AddGlobal("global_f64", float64(666.6), false, epsilon.F64).
-		AddTable("table", epsilon.NewTable(epsilon.TableType{
+		AddGlobal("global_i32", runtime.NewGlobalI32(666, false)).
+		AddGlobal("global_i64", runtime.NewGlobalI64(666, false)).
+		AddGlobal("global_f32", runtime.NewGlobalF32(666.6, false)).
+		AddGlobal("global_f64", runtime.NewGlobalF64(666.6, false)).
+		AddTable("table", runtime.NewTable(epsilon.TableType{
 			Limits:        epsilon.Limits{Min: 10, Max: &tableLimitMax},
 			ReferenceType: epsilon.FuncRefType,
 		})).
-		AddMemory("memory", epsilon.NewMemory(
+		AddMemory("memory", runtime.NewMemory(
 			epsilon.MemoryType{
 				Limits: epsilon.Limits{Min: 1, Max: &importMemoryLimitMax},
 			},
@@ -113,7 +114,7 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	return &specTestRunner{
 		t:                 t,
 		wasmDict:          wasmDict,
-		runtime:           epsilon.NewRuntime(),
+		runtime:           runtime,
 		moduleInstanceMap: make(map[string]*epsilon.ModuleInstance),
 		spectestImports:   spectestImports,
 	}

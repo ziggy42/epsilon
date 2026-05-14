@@ -47,7 +47,8 @@ func TestClocks_Consistency(t *testing.T) {
 }
 
 func TestClocks_TimeGetConsistency(t *testing.T) {
-	mem := epsilon.NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
+	mem := epsilon.NewRuntime().
+		NewMemory(epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}})
 	w := &WasiModule{monotonicClockStart: time.Now()}
 
 	// Verify clock_res_get consistency with clock_time_get for CPU clocks

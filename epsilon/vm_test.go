@@ -851,18 +851,13 @@ func TestHostFunctionResultCountMismatch(t *testing.T) {
 
 func TestGlobalGet(t *testing.T) {
 	wat := `(module
-		(import "module" "global" (global $g i32))
+		(global $g i32 (i32.const 42))
 
 		(func (export "test") (result i32)
 			global.get $g
 		)
 	)`
-	imports := map[string]map[string]any{
-		"module": {
-			"global": int32(42),
-		},
-	}
-	moduleInstance, err := instantiate(wat, imports, nil)
+	moduleInstance, err := instantiate(wat, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
 	}

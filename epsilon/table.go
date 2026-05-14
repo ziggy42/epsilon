@@ -22,16 +22,20 @@ var errTableOutOfBounds = errors.New("out of bounds table access")
 type Table struct {
 	Type     TableType
 	elements []int32
+
+	// owner identifies which vm and therefore which runtime this instance
+	// belongs to.
+	owner *vm
 }
 
-// NewTable creates a new Table instance from a TableType.
+// newTable creates a new Table instance from a TableType.
 // The table is initialized with 'NullReference' elements up to the min size.
-func NewTable(tt TableType) *Table {
+func newTable(owner *vm, tt TableType) *Table {
 	elements := make([]int32, tt.Limits.Min)
 	for i := range elements {
 		elements[i] = NullReference
 	}
-	return &Table{Type: tt, elements: elements}
+	return &Table{owner: owner, Type: tt, elements: elements}
 }
 
 // Get returns the element at the given index.

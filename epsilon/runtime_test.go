@@ -89,7 +89,8 @@ func TestRuntimeImportedMemory(t *testing.T) {
 			i32.load)
 	)`)
 
-	memory := NewMemory(MemoryType{Limits: Limits{Min: 1}})
+	runtime := NewRuntime()
+	memory := runtime.NewMemory(MemoryType{Limits: Limits{Min: 1}})
 	testData := binary.LittleEndian.AppendUint32(nil, 42)
 	err := memory.Set(0, 100, testData)
 	if err != nil {
@@ -100,7 +101,7 @@ func TestRuntimeImportedMemory(t *testing.T) {
 		AddMemory("memory", memory).
 		Build()
 
-	instance, err := NewRuntime().
+	instance, err := runtime.
 		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
@@ -140,11 +141,12 @@ func TestRuntimeImportedGlobal(t *testing.T) {
 			i32.add)
 	)`)
 
+	runtime := NewRuntime()
 	imports := NewModuleImportBuilder("env").
-		AddGlobal("offset", int32(100), false, I32).
+		AddGlobal("offset", runtime.NewGlobal(int32(100), false, I32)).
 		Build()
 
-	instance, err := NewRuntime().
+	instance, err := runtime.
 		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)
@@ -180,18 +182,19 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 			call_indirect (type $op))
 	)`)
 
+	runtime := NewRuntime()
 	imports := NewModuleImportBuilder("env").
 		AddHostFunc("host_sub", func(module *ModuleInstance, args ...any) []any {
 			x := args[0].(int32)
 			return []any{x - 1}
 		}).
-		AddTable("table", NewTable(TableType{
+		AddTable("table", runtime.NewTable(TableType{
 			ReferenceType: FuncRefType,
 			Limits:        Limits{Min: 2},
 		})).
 		Build()
 
-	instance, err := NewRuntime().
+	instance, err := runtime.
 		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
 	if err != nil {
 		t.Fatalf("failed to instantiate module: %v", err)

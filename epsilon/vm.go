@@ -135,7 +135,7 @@ func (vm *vm) instantiate(
 
 	for _, tableType := range module.tables {
 		storeIndex := uint32(len(vm.store.tables))
-		table := NewTable(tableType)
+		table := newTable(vm, tableType)
 		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
 		vm.store.tables = append(vm.store.tables, table)
 	}
@@ -148,7 +148,7 @@ func (vm *vm) instantiate(
 
 	for _, memoryType := range module.memories {
 		storeIndex := uint32(len(vm.store.memories))
-		memory := NewMemory(memoryType)
+		memory := newMemory(vm, memoryType)
 		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
 		vm.store.memories = append(vm.store.memories, memory)
 	}
@@ -171,11 +171,9 @@ func (vm *vm) instantiate(
 
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
-		vm.store.globals = append(vm.store.globals, &Global{
-			value:   val,
-			Mutable: global.globalType.IsMutable,
-			Type:    global.globalType.ValueType,
-		})
+		isMutable := global.globalType.IsMutable
+		global := newGlobal(vm, val, isMutable, global.globalType.ValueType)
+		vm.store.globals = append(vm.store.globals, global)
 	}
 
 	// TODO: elements and data segments should at the very least be copied, but we
