@@ -144,7 +144,7 @@ func resolveGlobalImport(
 			"mutability mismatch for %s.%s", imp.moduleName, imp.name,
 		)
 	}
-	if global.Type != nil && global.Type != globalType.ValueType {
+	if global.Type != globalType.ValueType {
 		return nil, fmt.Errorf(
 			"value type mismatch for %s.%s", imp.moduleName, imp.name,
 		)
