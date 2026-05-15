@@ -283,14 +283,14 @@ func (w *WasiModule) randomGet(
 		return errnoInval
 	}
 
-	randBytes := make([]byte, bufLen)
-	_, err := rand.Read(randBytes)
+	dst, err := memory.Get(0, uint32(bufPtr), uint32(bufLen))
 	if err != nil {
-		return errnoIO
+		return errnoFault
 	}
 
-	if err := memory.Set(0, uint32(bufPtr), randBytes); err != nil {
-		return errnoFault
+	_, err = rand.Read(dst)
+	if err != nil {
+		return errnoIO
 	}
 
 	return errnoSuccess

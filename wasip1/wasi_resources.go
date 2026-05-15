@@ -1057,14 +1057,14 @@ func iterIovec(
 		ptr := binary.LittleEndian.Uint32(iovec[0:4])
 		length := binary.LittleEndian.Uint32(iovec[4:8])
 
-		buf := make([]byte, length)
-		n, err := readBytes(buf, int64(totalRead))
-		if err != nil && err != io.EOF {
-			return mapError(err)
+		dst, err := memory.Get(0, ptr, length)
+		if err != nil {
+			return errnoFault
 		}
 
-		if err := memory.Set(0, ptr, buf[:n]); err != nil {
-			return errnoFault
+		n, err := readBytes(dst, int64(totalRead))
+		if err != nil && err != io.EOF {
+			return mapError(err)
 		}
 
 		totalRead += uint32(n)
