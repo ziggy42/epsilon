@@ -163,7 +163,14 @@ func (w *WasiModule) handleClockSubscription(
 func (w *WasiModule) handleFdSubscription(sub subscription) *event {
 	fdSub := parseSubscriptionFdReadwrite(sub.body)
 
-	fd, errCode := w.fs.getFileOrDir(int32(fdSub.fd), RightsPollFdReadwrite)
+	eventRights := RightsPollFdReadwrite
+	if sub.subscriptionType == eventTypeFdRead {
+		eventRights |= RightsFdRead
+	} else {
+		eventRights |= RightsFdWrite
+	}
+
+	fd, errCode := w.fs.getFileOrDir(int32(fdSub.fd), eventRights)
 	if errCode != errnoSuccess {
 		return &event{
 			userData:  sub.userData,
@@ -184,7 +191,7 @@ func (w *WasiModule) handleFdSubscription(sub subscription) *event {
 	}
 
 	var nbytes uint64
-	if fd.fileType == fileTypeRegularFile {
+	if fd.fileType == fileTypeRegularFile && fd.rights&RightsFdFilestatGet != 0 {
 		if info, err := fd.file.Stat(); err == nil {
 			nbytes = uint64(info.Size())
 		}

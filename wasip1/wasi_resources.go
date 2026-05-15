@@ -304,7 +304,7 @@ func (w *wasiResourceTable) pread(
 	offset int64,
 	nPtr int32,
 ) int32 {
-	fd, errCode := w.getFile(fdIndex, RightsFdRead)
+	fd, errCode := w.getFile(fdIndex, RightsFdRead|RightsFdSeek)
 	if errCode != errnoSuccess {
 		return errCode
 	}
@@ -368,7 +368,7 @@ func (w *wasiResourceTable) pwrite(
 	offset int64,
 	nPtr int32,
 ) int32 {
-	fd, errCode := w.getFile(fdIndex, RightsFdWrite)
+	fd, errCode := w.getFile(fdIndex, RightsFdWrite|RightsFdSeek)
 	if errCode != errnoSuccess {
 		return errCode
 	}
