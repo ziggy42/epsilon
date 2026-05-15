@@ -107,7 +107,9 @@ following limitations:
 
 ### Polling
 
-- **`poll_oneoff`**: Does not use true async I/O polling 
-  (`select`/`poll`/`epoll`). Regular files and directories are always reported 
-	as ready. Clock subscriptions use `time.Sleep`. Hangup detection 
-	(`FD_READWRITE_HANGUP`) for sockets is not implemented.
+- **`poll_oneoff`**: Does not use true async I/O polling
+  (`select`/`poll`/`epoll`). All file descriptors — including sockets — are
+  always reported as immediately ready regardless of actual I/O readiness.
+  Modules that poll a socket waiting for data will busy-loop with no sleep,
+  causing 100% CPU usage. Clock subscriptions use `time.Sleep`. Hangup
+  detection (`FD_READWRITE_HANGUP`) for sockets is not implemented.
