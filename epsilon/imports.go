@@ -96,15 +96,7 @@ func resolveFunctionImport(
 	imp moduleImport,
 ) (FunctionInstance, error) {
 	if f, ok := obj.(FunctionInstance); ok {
-		var owner *vm
-		switch t := f.(type) {
-		case *wasmFunction:
-			owner = t.module.vm
-		case *hostFunction:
-			owner = t.module.vm
-		}
-
-		if owner != moduleInstance.vm {
+		if f.owner() != moduleInstance.vm {
 			return nil, fmt.Errorf(
 				"cross-runtime import of %s.%s is forbidden", imp.moduleName, imp.name,
 			)

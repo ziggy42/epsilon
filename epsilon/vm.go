@@ -159,20 +159,17 @@ func (vm *vm) instantiate(
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
-	for _, global := range module.globalVariables {
-		val, err := vm.invokeExpression(
-			global.initExpression,
-			global.globalType.ValueType,
-			moduleInstance,
-		)
+	for _, variable := range module.globalVariables {
+		valueType := variable.globalType.ValueType
+		initExpression := variable.initExpression
+		val, err := vm.invokeExpression(initExpression, valueType, moduleInstance)
 		if err != nil {
 			return nil, err
 		}
 
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
-		isMutable := global.globalType.IsMutable
-		global := newGlobal(vm, val, isMutable, global.globalType.ValueType)
+		global := newGlobal(vm, val, variable.globalType.IsMutable, valueType)
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
