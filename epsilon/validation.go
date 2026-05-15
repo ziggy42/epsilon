@@ -1114,8 +1114,12 @@ func (v *validator) validateRefNull() error {
 }
 
 func (v *validator) validateRefIsNull() error {
-	if _, err := v.popValue(); err != nil {
+	val, err := v.popValue()
+	if err != nil {
 		return err
+	}
+	if _, ok := val.(ReferenceType); !ok && val != bottom {
+		return errTypeMismatch
 	}
 	v.pushValue(I32)
 	return nil
@@ -1326,14 +1330,17 @@ func (v *validator) validateVectorScalar(scalar ValueType) error {
 }
 
 func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
-	align, _, _ := v.nextMemArg()
-	laneIndex := uint32(v.next())
-	if err := v.validateMemoryExists(0); err != nil {
+	align, memoryIndex, _ := v.nextMemArg()
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
+		return errMultipleMemoriesNotEnabled
+	}
+	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
 	}
 	if err := v.validateMemArg(align, sizeBytes); err != nil {
 		return err
 	}
+	laneIndex := uint32(v.next())
 	if laneIndex >= 16/sizeBytes {
 		return errSimdLaneIndexOutOfBounds
 	}
@@ -1348,13 +1355,19 @@ func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
 }
 
 func (v *validator) validateSimdStoreLane(sizeBytes uint32) error {
-	align, _, _ := v.nextMemArg()
-	v.next() // laneIndex
-	if err := v.validateMemoryExists(0); err != nil {
+	align, memoryIndex, _ := v.nextMemArg()
+	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
+		return errMultipleMemoriesNotEnabled
+	}
+	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
 	}
 	if err := v.validateMemArg(align, sizeBytes); err != nil {
 		return err
+	}
+	laneIndex := uint32(v.next())
+	if laneIndex >= 16/sizeBytes {
+		return errSimdLaneIndexOutOfBounds
 	}
 	if _, err := v.popExpectedValue(V128); err != nil {
 		return err
