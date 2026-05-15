@@ -311,6 +311,13 @@ func (p *parser) parseFunction() (function, error) {
 		return function{}, err
 	}
 
+	// Drain any bytes the bufio.Reader pre-fetched but the parser didn't consume.
+	// Without this, the outer reader resumes at the wrong offset when bufio has
+	// buffered past what was actually parsed (e.g., early end opcode).
+	if _, err := io.Copy(io.Discard, p.reader); err != nil {
+		return function{}, err
+	}
+
 	body := result.bytecode
 
 	var defaultLocals []value
