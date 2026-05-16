@@ -266,11 +266,13 @@ func (p *parser) parseCustomSection(payloadLen uint32) error {
 		return errIntegerTooLarge
 	}
 
-	nameBytes := make([]byte, nameLength)
-	if _, err := io.ReadFull(p.reader, nameBytes); err != nil {
+	nameBytes := bytes.NewBuffer(
+		make([]byte, 0, min(nameLength, initialVectorCapacity)),
+	)
+	if _, err := io.CopyN(nameBytes, p.reader, int64(nameLength)); err != nil {
 		return err
 	}
-	if !utf8.Valid(nameBytes) {
+	if !utf8.Valid(nameBytes.Bytes()) {
 		return errInvalidUTF8
 	}
 
@@ -798,11 +800,11 @@ func (p *parser) parseUtf8String() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	buf := make([]byte, length)
-	if _, err := io.ReadFull(p.reader, buf); err != nil {
+	buf := bytes.NewBuffer(make([]byte, 0, min(length, initialVectorCapacity)))
+	if _, err := io.CopyN(buf, p.reader, int64(length)); err != nil {
 		return "", fmt.Errorf("failed to read string bytes: %w", err)
 	}
-	return string(buf), nil
+	return buf.String(), nil
 }
 
 func uint64SliceToInt32(slice []uint64) []int32 {
@@ -1154,13 +1156,13 @@ func (p *parser) readImmediateVector() ([]uint64, error) {
 		return nil, err
 	}
 
-	immediates := make([]uint64, size)
-	for i := range size {
+	immediates := make([]uint64, 0, min(size, initialVectorCapacity))
+	for range size {
 		val, err := p.readUint32()
 		if err != nil {
 			return nil, err
 		}
-		immediates[i] = val
+		immediates = append(immediates, val)
 	}
 	return immediates, nil
 }
