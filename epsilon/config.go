@@ -41,6 +41,25 @@ type Config struct {
 	// One unit of fuel equals one WASM instruction.
 	// Only used if EnableFuel is true.
 	Fuel uint64
+
+	// MaxTableElements is the upper bound on a declared table's Limits.Min
+	// (and Limits.Max, if present). A module declaring a table above this
+	// ceiling is rejected during validation. The spec permits up to 2^32-1
+	// elements, but each element is reference-sized, so hosts almost always
+	// want a much smaller cap. Default: 10_000_000.
+	MaxTableElements uint32
+
+	// MaxMemoryPages is the upper bound on a declared memory's Limits.Min
+	// (and Limits.Max, if present), expressed in 64 KiB WebAssembly pages.
+	// A module declaring a memory above this ceiling is rejected during
+	// validation. Default: 65536 (= 4 GiB, the WebAssembly 32-bit maximum).
+	MaxMemoryPages uint32
+
+	// MaxLocalsPerFunction is the upper bound on the total number of declared
+	// locals (sum of all local entry counts) for a single function body.
+	// Function parameters are not counted. A function exceeding this ceiling
+	// is rejected during parsing. Default: 50_000.
+	MaxLocalsPerFunction uint32
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -48,5 +67,8 @@ func DefaultConfig() Config {
 	return Config{
 		MaxCallStackDepth:          1000,
 		CallStackPreallocationSize: 1000,
+		MaxTableElements:           10_000_000,
+		MaxMemoryPages:             65536,
+		MaxLocalsPerFunction:       50_000,
 	}
 }

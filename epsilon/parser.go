@@ -87,10 +87,15 @@ type localEntry struct {
 // parser is a parser for WASM modules.
 type parser struct {
 	reader *bufio.Reader
+	config Config
 }
 
 func newParser(reader io.Reader) *parser {
-	return &parser{reader: bufio.NewReader(reader)}
+	return newParserWithConfig(reader, DefaultConfig())
+}
+
+func newParserWithConfig(reader io.Reader, config Config) *parser {
+	return &parser{reader: bufio.NewReader(reader), config: config}
 }
 
 // parse takes a byte slice and returns a Module.
@@ -304,8 +309,9 @@ func (p *parser) parseFunction() (function, error) {
 	for _, entry := range localEntries {
 		totalLocalsCount += entry.count
 	}
-	if totalLocalsCount > math.MaxInt32 {
-		return function{}, fmt.Errorf("too many locals: %d", totalLocalsCount)
+	if totalLocalsCount > uint64(p.config.MaxLocalsPerFunction) {
+		return function{}, fmt.Errorf("too many locals: %d exceeds configured limit %d",
+			totalLocalsCount, p.config.MaxLocalsPerFunction)
 	}
 
 	locals := make([]ValueType, 0, min(totalLocalsCount, initialVectorCapacity))

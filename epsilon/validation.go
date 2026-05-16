@@ -17,7 +17,6 @@ package epsilon
 import (
 	"errors"
 	"fmt"
-	"math"
 )
 
 var (
@@ -145,14 +144,14 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 	}
 
 	for _, table := range module.tables {
-		if err := validateLimits(table.Limits, math.MaxUint32); err != nil {
+		if err := validateLimits(table.Limits, v.config.MaxTableElements); err != nil {
 			return err
 		}
 		v.tableTypes = append(v.tableTypes, table)
 	}
 
 	for _, memoryType := range module.memories {
-		if err := validateLimits(memoryType.Limits, uint32(1)<<16); err != nil {
+		if err := validateLimits(memoryType.Limits, v.config.MaxMemoryPages); err != nil {
 			return err
 		}
 		v.memTypes = append(v.memTypes, memoryType)
@@ -1556,7 +1555,8 @@ func toValueType(code uint64) ValueType {
 
 func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
-		return errInvalidLimits
+		return fmt.Errorf("%w: min %d exceeds configured limit %d",
+			errInvalidLimits, limits.Min, maximumRange)
 	}
 
 	if limits.Max == nil {
@@ -1564,7 +1564,8 @@ func validateLimits(limits Limits, maximumRange uint32) error {
 	}
 
 	if *limits.Max > maximumRange {
-		return errInvalidLimits
+		return fmt.Errorf("%w: max %d exceeds configured limit %d",
+			errInvalidLimits, *limits.Max, maximumRange)
 	}
 
 	if limits.Min > *limits.Max {

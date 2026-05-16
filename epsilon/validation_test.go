@@ -16,6 +16,8 @@ package epsilon
 
 import (
 	"bytes"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ziggy42/epsilon/internal/wabt"
@@ -39,7 +41,7 @@ func TestInvalidDataUnknownGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(Config{})
+	validator := newValidator(DefaultConfig())
 
 	err = validator.validateModule(module)
 
@@ -54,7 +56,7 @@ func TestInvalidDataUnknownMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(Config{})
+	validator := newValidator(DefaultConfig())
 
 	err = validator.validateModule(module)
 
@@ -69,7 +71,7 @@ func TestValidDataMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(Config{})
+	validator := newValidator(DefaultConfig())
 
 	err = validator.validateModule(module)
 
@@ -94,7 +96,7 @@ func TestVuln06(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
-	validator := newValidator(Config{})
+	validator := newValidator(DefaultConfig())
 
 	err = validator.validateModule(module)
 	if err == nil {
@@ -127,7 +129,7 @@ func TestNonCanonicalBlockType(t *testing.T) {
 		t.Fatalf("failed to parse module: %v", err)
 	}
 
-	err = newValidator(Config{}).validateModule(module)
+	err = newValidator(DefaultConfig()).validateModule(module)
 	if err == nil {
 		t.Fatalf("expected validation error for non-canonical block type, got nil")
 	}
@@ -151,9 +153,114 @@ func TestMemoryIndexValidation(t *testing.T) {
 		t.Fatalf("failed to parse module: %v", err)
 	}
 
-	validator := newValidator(Config{ExperimentalMultipleMemories: true})
+	config := DefaultConfig()
+	config.ExperimentalMultipleMemories = true
+	validator := newValidator(config)
 	err = validator.validateModule(module)
 	if err == nil {
 		t.Errorf("expected validation error for OOB memory index, got nil")
+	}
+}
+
+func TestMaxTableElementsRejectsOversizedTable(t *testing.T) {
+	module, err := getModule(`(module (table 1001 funcref))`)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxTableElements: 1000}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
+	}
+
+	err = newValidator(Config{MaxTableElements: 2000}).validateModule(module)
+	if err != nil {
+		t.Fatalf("expected success with raised limit, got %v", err)
+	}
+}
+
+func TestMaxTableElementsRejectsOversizedTableMax(t *testing.T) {
+	module, err := getModule(`(module (table 1 2000 funcref))`)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxTableElements: 1000}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
+	}
+
+	err = newValidator(Config{MaxTableElements: 5000}).validateModule(module)
+	if err != nil {
+		t.Fatalf("expected success with raised limit, got %v", err)
+	}
+}
+
+func TestMaxMemoryPagesRejectsOversizedMemory(t *testing.T) {
+	module, err := getModule(`(module (memory 101))`)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxMemoryPages: 100}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
+	}
+
+	err = newValidator(Config{MaxMemoryPages: 200}).validateModule(module)
+	if err != nil {
+		t.Fatalf("expected success with raised limit, got %v", err)
+	}
+}
+
+func TestMaxMemoryPagesRejectsOversizedMemoryMax(t *testing.T) {
+	module, err := getModule(`(module (memory 1 200))`)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxMemoryPages: 100}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
+	}
+
+	err = newValidator(Config{MaxMemoryPages: 300}).validateModule(module)
+	if err != nil {
+		t.Fatalf("expected success with raised limit, got %v", err)
+	}
+}
+
+func TestMaxLocalsPerFunctionRejectsOversizedFunction(t *testing.T) {
+	var watBuilder strings.Builder
+	watBuilder.WriteString("(module (func (local")
+	const localCount = 101
+	for i := 0; i < localCount; i++ {
+		watBuilder.WriteString(" i32")
+	}
+	watBuilder.WriteString(")))")
+
+	wasm, err := wabt.Wat2Wasm(watBuilder.String())
+	if err != nil {
+		t.Fatalf("failed to assemble wat: %v", err)
+	}
+
+	_, err = newParserWithConfig(
+		bytes.NewReader(wasm),
+		Config{MaxLocalsPerFunction: 100},
+	).parse()
+	if err == nil || !strings.Contains(err.Error(), "too many locals") {
+		t.Fatalf("expected too-many-locals error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "101") ||
+		!strings.Contains(err.Error(), "100") {
+		t.Fatalf("expected error to mention actual count and configured limit, got %v", err)
+	}
+
+	_, err = newParserWithConfig(
+		bytes.NewReader(wasm),
+		Config{MaxLocalsPerFunction: 200},
+	).parse()
+	if err != nil {
+		t.Fatalf("expected success with raised limit, got %v", err)
 	}
 }

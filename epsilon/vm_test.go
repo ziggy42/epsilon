@@ -31,15 +31,16 @@ func instantiate(
 	if err != nil {
 		return nil, err
 	}
-	module, err := newParser(bytes.NewReader(wasm)).parse()
-	if err != nil {
-		return nil, err
-	}
 
 	cfg := DefaultConfig()
 	if config != nil {
 		cfg = *config
 	}
+	module, err := newParserWithConfig(bytes.NewReader(wasm), cfg).parse()
+	if err != nil {
+		return nil, err
+	}
+
 	vm := newVm(cfg)
 
 	return vm.instantiate(module, imports)
@@ -881,11 +882,9 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem0) (i32.const 0) "hello")
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
-	config := &Config{
-		MaxCallStackDepth:            1000,
-		CallStackPreallocationSize:   1000,
-		ExperimentalMultipleMemories: true,
-	}
+	cfg := DefaultConfig()
+	cfg.ExperimentalMultipleMemories = true
+	config := &cfg
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -931,11 +930,9 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 			i32.load8_u $mem1
 		)
 	)`
-	config := &Config{
-		MaxCallStackDepth:            1000,
-		CallStackPreallocationSize:   1000,
-		ExperimentalMultipleMemories: true,
-	}
+	cfg := DefaultConfig()
+	cfg.ExperimentalMultipleMemories = true
+	config := &cfg
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -973,11 +970,9 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 			i32x4.extract_lane 0
 		)
 	)`
-	config := &Config{
-		MaxCallStackDepth:            1000,
-		CallStackPreallocationSize:   1000,
-		ExperimentalMultipleMemories: true,
-	}
+	cfg := DefaultConfig()
+	cfg.ExperimentalMultipleMemories = true
+	config := &cfg
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -1012,11 +1007,9 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 			i32.load $mem2
 		)
 	)`
-	config := &Config{
-		MaxCallStackDepth:            1000,
-		CallStackPreallocationSize:   1000,
-		ExperimentalMultipleMemories: true,
-	}
+	cfg := DefaultConfig()
+	cfg.ExperimentalMultipleMemories = true
+	config := &cfg
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
