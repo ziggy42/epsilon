@@ -1032,6 +1032,233 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 	}
 }
 
+// table.init against an active segment must behave as if the segment were
+// dropped: a zero-length copy succeeds rather than trapping.
+func TestTableInitActiveZeroSucceeds(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem (i32.const 0) $f)
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 0
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	if _, err := moduleInstance.Invoke("test"); err != nil {
+		t.Fatalf("expected no trap, got: %v", err)
+	}
+}
+
+// A non-zero table.init against an active (already-dropped) segment traps.
+func TestTableInitActiveNonZeroTraps(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem (i32.const 0) $f)
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 1
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("test")
+	if err == nil {
+		t.Fatalf("expected trap")
+	}
+	expectedTrap := "out of bounds table access"
+	if err.Error() != expectedTrap {
+		t.Fatalf("expected trap '%s', got '%s'", expectedTrap, err.Error())
+	}
+}
+
+// table.init against a declarative segment must succeed for n=0,s=0.
+func TestTableInitDeclarativeZeroSucceeds(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem declare func $f)
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 0
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	if _, err := moduleInstance.Invoke("test"); err != nil {
+		t.Fatalf("expected no trap, got: %v", err)
+	}
+}
+
+// A non-zero table.init against a declarative segment traps.
+func TestTableInitDeclarativeNonZeroTraps(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem declare func $f)
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 1
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("test")
+	if err == nil {
+		t.Fatalf("expected trap")
+	}
+	expectedTrap := "out of bounds table access"
+	if err.Error() != expectedTrap {
+		t.Fatalf("expected trap '%s', got '%s'", expectedTrap, err.Error())
+	}
+}
+
+// Passive segments copy their entries and the table can then be called via
+// call_indirect.
+func TestTableInitPassive(t *testing.T) {
+	wat := `(module
+		(type $t0 (func (result i32)))
+		(table 1 funcref)
+		(func $f (type $t0) i32.const 42)
+		(elem func $f)
+		(func (export "test") (result i32)
+			i32.const 0
+			i32.const 0
+			i32.const 1
+			table.init 0 0
+			i32.const 0
+			call_indirect (type $t0)
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := moduleInstance.Invoke("test")
+	if err != nil {
+		t.Fatalf("failed to execute function: %v", err)
+	}
+	if got := result[0]; got != int32(42) {
+		t.Fatalf("expected %d, got %d", 42, got)
+	}
+}
+
+// After elem.drop, a zero-length table.init still succeeds.
+func TestTableInitPassiveAfterDropZeroSucceeds(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem func $f)
+		(func (export "test")
+			elem.drop 0
+			i32.const 0
+			i32.const 0
+			i32.const 0
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	if _, err := moduleInstance.Invoke("test"); err != nil {
+		t.Fatalf("expected no trap, got: %v", err)
+	}
+}
+
+// A passive segment containing a ref.null entry forces wabt to use the
+// expression-form (case-5) encoding. table.init must still populate the table
+// from those expressions.
+func TestTableInitPassiveExpressionForm(t *testing.T) {
+	wat := `(module
+		(type $t0 (func (result i32)))
+		(table 3 funcref)
+		(func $f (type $t0) i32.const 7)
+		(elem funcref (ref.func $f) (ref.null func) (ref.func $f))
+		(func (export "call") (param i32) (result i32)
+			i32.const 0
+			i32.const 0
+			i32.const 3
+			table.init 0 0
+			local.get 0
+			call_indirect (type $t0)
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	result, err := moduleInstance.Invoke("call", int32(0))
+	if err != nil {
+		t.Fatalf("invoke(0) failed: %v", err)
+	}
+	if got := result[0]; got != int32(7) {
+		t.Fatalf("entry 0: expected 7, got %d", got)
+	}
+
+	_, err = moduleInstance.Invoke("call", int32(1))
+	if err == nil {
+		t.Fatalf("entry 1: expected uninitialized-element trap")
+	}
+	if err.Error() != "uninitialized element 1" {
+		t.Fatalf("expected 'uninitialized element 1', got '%s'", err.Error())
+	}
+}
+
+// After elem.drop, a non-zero table.init traps.
+func TestTableInitPassiveAfterDropNonZeroTraps(t *testing.T) {
+	wat := `(module
+		(table 1 funcref)
+		(func $f)
+		(elem func $f)
+		(func (export "test")
+			elem.drop 0
+			i32.const 0
+			i32.const 0
+			i32.const 1
+			table.init 0 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("test")
+	if err == nil {
+		t.Fatalf("expected trap")
+	}
+	expectedTrap := "out of bounds table access"
+	if err.Error() != expectedTrap {
+		t.Fatalf("expected trap '%s', got '%s'", expectedTrap, err.Error())
+	}
+}
+
 func TestFuelExhaustion(t *testing.T) {
 	wat := `(module
 		(func (export "test") (param i32 i32) (result i32)

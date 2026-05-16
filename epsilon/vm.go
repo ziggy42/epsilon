@@ -181,13 +181,36 @@ func (vm *vm) instantiate(
 		vm.store.elements = append(vm.store.elements, elem)
 	}
 
+	// Resolve element entries once. After this, each store-local element
+	// segment's functionIndexes holds store-resolved references, regardless of
+	// whether the binary encoded it as funcidx or as constant expressions.
+	for _, addr := range moduleInstance.elemAddrs {
+		elem := &vm.store.elements[addr]
+		switch {
+		case len(elem.functionIndexes) > 0:
+			storeIndexes := toStoreFuncIndexes(moduleInstance, elem.functionIndexes)
+			elem.functionIndexes = storeIndexes
+		case len(elem.functionIndexesExpressions) > 0:
+			resolved := make([]int32, len(elem.functionIndexesExpressions))
+			for i, expr := range elem.functionIndexesExpressions {
+				refVal, err := vm.invokeExpression(expr, elem.kind, moduleInstance)
+				if err != nil {
+					return nil, err
+				}
+				resolved[i] = refVal.int32()
+			}
+			elem.functionIndexes = resolved
+			elem.functionIndexesExpressions = nil
+		}
+	}
+
 	for _, data := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
 		vm.store.datas = append(vm.store.datas, data)
 	}
 
-	if err := vm.initActiveElements(module, moduleInstance); err != nil {
+	if err := vm.applyActiveElementSegments(moduleInstance); err != nil {
 		return nil, err
 	}
 
@@ -1478,21 +1501,14 @@ func (vm *vm) handleTableInit(frame *callFrame) error {
 	table := vm.getTable(frame, frame.next())
 	n, s, d := vm.stack.pop3Int32()
 
-	switch element.mode {
-	case activeElementMode:
-		// Trap if using an active, non-dropped element segment.
-		// A dropped segment has its FuncIndexes slice set to nil.
-		if element.functionIndexes != nil {
-			return errTableOutOfBounds
-		}
-		return table.Init(n, d, s, element.functionIndexes)
-	case passiveElementMode:
-		moduleInstance := frame.module
-		storeIndexes := toStoreFuncIndexes(moduleInstance, element.functionIndexes)
-		return table.Init(n, d, s, storeIndexes)
-	default:
-		return errTableOutOfBounds
+	// Active and declarative segments are dropped after instantiation, so they
+	// are treated as empty at runtime. Only passive segments expose their entries
+	// until elem.drop nils them out.
+	var indexes []int32
+	if element.mode == passiveElementMode {
+		indexes = element.functionIndexes
 	}
+	return table.Init(n, d, s, indexes)
 }
 
 func (vm *vm) handleElemDrop(frame *callFrame) {
@@ -1816,49 +1832,22 @@ func (vm *vm) popControlFrame(frame *callFrame) controlFrame {
 	return controlFrame
 }
 
-func (vm *vm) initActiveElements(
-	module *moduleDefinition,
-	moduleInstance *ModuleInstance,
-) error {
-	for _, element := range module.elementSegments {
-		if element.mode != activeElementMode {
+func (vm *vm) applyActiveElementSegments(moduleInstance *ModuleInstance) error {
+	for _, addr := range moduleInstance.elemAddrs {
+		elem := &vm.store.elements[addr]
+		if elem.mode != activeElementMode {
 			continue
 		}
 
-		expression := element.offsetExpression
-		offsetVal, err := vm.invokeExpression(expression, I32, moduleInstance)
+		offsetExpression := elem.offsetExpression
+		offsetVal, err := vm.invokeExpression(offsetExpression, I32, moduleInstance)
 		if err != nil {
 			return err
 		}
 		offset := offsetVal.int32()
 
-		storeTableIndex := moduleInstance.tableAddrs[element.tableIndex]
-		table := vm.store.tables[storeTableIndex]
-		if uint32(offset) > table.Size() {
-			return errTableOutOfBounds
-		}
-
-		if len(element.functionIndexes) > 0 {
-			indexes := toStoreFuncIndexes(moduleInstance, element.functionIndexes)
-			if err := table.InitFromSlice(offset, indexes); err != nil {
-				return err
-			}
-		}
-
-		if len(element.functionIndexesExpressions) == 0 {
-			continue
-		}
-
-		values := make([]int32, len(element.functionIndexesExpressions))
-		for i, expr := range element.functionIndexesExpressions {
-			refVal, err := vm.invokeExpression(expr, element.kind, moduleInstance)
-			if err != nil {
-				return err
-			}
-			values[i] = refVal.int32()
-		}
-
-		if err := table.InitFromSlice(offset, values); err != nil {
+		table := vm.store.tables[moduleInstance.tableAddrs[elem.tableIndex]]
+		if err := table.InitFromSlice(offset, elem.functionIndexes); err != nil {
 			return err
 		}
 	}
