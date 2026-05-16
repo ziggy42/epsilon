@@ -16,7 +16,11 @@
 # Git & Commits
 
 - **Commit Messages**: Do not use conventional commit prefixes (e.g., `chore:`, `feat:`, `fix:`, `docs:`). Use plain, descriptive language.
-- **Commit Authors**: Do not mark any commit as co-authored by agents. Commits should only include human authors.
+- **Commit Authors**: Do not mark any commit as co-authored by agents.
+  Commits should only include human authors. In particular, do not add
+  `Co-Authored-By: Claude …` (or any other agent) trailers — this project
+  is under Google's CLA, and any non-human co-author fails the `cla/google`
+  check on the PR.
 
 # Project Specifics
 
