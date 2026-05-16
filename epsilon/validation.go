@@ -893,8 +893,13 @@ func (v *validator) validateSelect(t ValueType) error {
 
 func (v *validator) validateSelectT() error {
 	size := v.next()
+	if size != 1 {
+		return errTypeMismatch
+	}
 	t := toValueType(v.next())
-	v.pc += uint(size - 1)
+	if t == bottom {
+		return errTypeMismatch
+	}
 	return v.validateSelect(t)
 }
 
