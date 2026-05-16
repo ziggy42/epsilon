@@ -21,6 +21,12 @@ import (
 
 // Runtime provides the main API for instantiating and interacting with WASM
 // modules.
+//
+// Runtime is not safe for concurrent use. Execution state is shared across
+// instances created from the same Runtime, so calling Invoke from multiple
+// goroutines — even on different instances — will result in race conditions
+// and undefined behavior. Use one Runtime per goroutine, or serialize calls
+// with your own lock.
 type Runtime struct {
 	vm     *vm
 	config Config

@@ -48,6 +48,9 @@ type ModuleInstance struct {
 // Args can be int32, int64, float32, or float64. The function returns a slice
 // of results as []any, which can be type-asserted to the appropriate types.
 // References must be represented as int32, with NullReference for nulls.
+//
+// Invoke is not safe for concurrent use. See the Runtime documentation for
+// the full concurrency contract.
 func (m *ModuleInstance) Invoke(name string, args ...any) ([]any, error) {
 	function, err := m.GetFunction(name)
 	if err != nil {
