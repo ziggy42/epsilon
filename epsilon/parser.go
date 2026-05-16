@@ -52,6 +52,13 @@ const (
 	sixthBitMask         = uint64(1 << 6)
 )
 
+// initialVectorCapacity caps the up-front allocation parseVector and similar
+// callers perform from an attacker-controlled count. Real modules rarely
+// exceed a few thousand items per vector, so this is the common-case exact
+// size; pathological counts grow via append+EOF instead of OOMing on a
+// pre-allocation.
+const initialVectorCapacity = 4096
+
 // sectionId represents the different sections of a WebAssembly module.
 // See https://webassembly.github.io/spec/core/binary/modules.html#sections
 type sectionId byte
@@ -753,13 +760,6 @@ func (p *parser) parseLimits() (Limits, error) {
 		return Limits{}, errInvalidLimitsFormat
 	}
 }
-
-// initialVectorCapacity caps the up-front allocation parseVector and similar
-// callers perform from an attacker-controlled count. Real modules rarely
-// exceed a few thousand items per vector, so this is the common-case exact
-// size; pathological counts grow via append+EOF instead of OOMing on a
-// pre-allocation.
-const initialVectorCapacity = 1 << 12
 
 func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 	count, err := parser.parseUint32()
