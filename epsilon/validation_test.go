@@ -153,9 +153,14 @@ func TestMemoryIndexValidation(t *testing.T) {
 		t.Fatalf("failed to parse module: %v", err)
 	}
 
-	config := DefaultConfig()
-	config.ExperimentalMultipleMemories = true
-	validator := newValidator(config)
+	validator := newValidator(Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	})
 	err = validator.validateModule(module)
 	if err == nil {
 		t.Errorf("expected validation error for OOB memory index, got nil")
@@ -253,7 +258,10 @@ func TestMaxLocalsPerFunctionRejectsOversizedFunction(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "101") ||
 		!strings.Contains(err.Error(), "100") {
-		t.Fatalf("expected error to mention actual count and configured limit, got %v", err)
+		t.Fatalf(
+			"expected error to mention actual count and limit, got %v",
+			err,
+		)
 	}
 
 	_, err = newParserWithConfig(

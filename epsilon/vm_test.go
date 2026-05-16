@@ -882,9 +882,14 @@ func TestInstantiateMultipleMemories(t *testing.T) {
 		(data (memory $mem0) (i32.const 0) "hello")
 		(data (memory $mem1) (i32.const 0) "world")
 	)`
-	cfg := DefaultConfig()
-	cfg.ExperimentalMultipleMemories = true
-	config := &cfg
+	config := &Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	}
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -930,9 +935,14 @@ func TestStoreLoadMultipleMemories(t *testing.T) {
 			i32.load8_u $mem1
 		)
 	)`
-	cfg := DefaultConfig()
-	cfg.ExperimentalMultipleMemories = true
-	config := &cfg
+	config := &Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	}
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -970,9 +980,14 @@ func TestV128StoreLoadMultipleMemories(t *testing.T) {
 			i32x4.extract_lane 0
 		)
 	)`
-	cfg := DefaultConfig()
-	cfg.ExperimentalMultipleMemories = true
-	config := &cfg
+	config := &Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	}
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)
@@ -1007,9 +1022,14 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 			i32.load $mem2
 		)
 	)`
-	cfg := DefaultConfig()
-	cfg.ExperimentalMultipleMemories = true
-	config := &cfg
+	config := &Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	}
 	moduleInstance, err := instantiate(wat, nil, config)
 	if err != nil {
 		t.Fatalf("failed to create vm: %v", err)

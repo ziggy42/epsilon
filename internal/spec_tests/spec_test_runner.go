@@ -42,13 +42,17 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	tableLimitMax := uint32(20)
 
 	// Spec tests intentionally declare resources at the WebAssembly spec
-	// maxima (e.g. tables with Max=2^32-1) to exercise edge cases. Raise the
-	// configured ceilings to the spec maxima so the runner reflects what the
-	// engine validator must accept by spec, not what hosts ship by default.
-	config := epsilon.DefaultConfig()
-	config.MaxTableElements = math.MaxUint32
-	config.MaxMemoryPages = uint32(1) << 16
-	runtime := epsilon.NewRuntimeWithConfig(config)
+	// maxima (e.g. tables with Max=2^32-1) to exercise edge cases. Set the
+	// configured ceilings to the spec maxima so the runner reflects what
+	// the engine validator must accept by spec, not what hosts ship by
+	// default.
+	runtime := epsilon.NewRuntimeWithConfig(epsilon.Config{
+		MaxCallStackDepth:          epsilon.DefaultMaxCallStackDepth,
+		CallStackPreallocationSize: epsilon.DefaultCallStackPreallocationSize,
+		MaxTableElements:           math.MaxUint32,
+		MaxMemoryPages:             uint32(1) << 16,
+		MaxLocalsPerFunction:       epsilon.DefaultMaxLocalsPerFunction,
+	})
 	spectestImports := epsilon.NewModuleImports("spectest").
 		AddGlobal("global_i32", runtime.NewGlobalI32(666, false)).
 		AddGlobal("global_i64", runtime.NewGlobalI64(666, false)).

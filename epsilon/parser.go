@@ -310,8 +310,10 @@ func (p *parser) parseFunction() (function, error) {
 		totalLocalsCount += entry.count
 	}
 	if totalLocalsCount > uint64(p.config.MaxLocalsPerFunction) {
-		return function{}, fmt.Errorf("too many locals: %d exceeds configured limit %d",
-			totalLocalsCount, p.config.MaxLocalsPerFunction)
+		return function{}, fmt.Errorf(
+			"too many locals: %d exceeds configured limit %d",
+			totalLocalsCount, p.config.MaxLocalsPerFunction,
+		)
 	}
 
 	locals := make([]ValueType, 0, min(totalLocalsCount, initialVectorCapacity))
