@@ -28,7 +28,7 @@ func parseModule(wat string) (moduleDefinition, error) {
 	if err != nil {
 		return moduleDefinition{}, err
 	}
-	module, err := newParser(bytes.NewReader(wasm)).parse()
+	module, err := newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
 	if err != nil {
 		return moduleDefinition{}, err
 	}
@@ -479,7 +479,7 @@ func TestParseTruncatedFunctionBody(t *testing.T) {
 		0x0a, 0x05, 0x01, 0x03, 0x00, 0x41, 0x0b, // i32.const 0x0B (truncated)
 	}
 
-	p := newParser(bytes.NewReader(wasm))
+	p := newParser(bytes.NewReader(wasm), DefaultConfig())
 	_, err := p.parse()
 	if err == nil {
 		t.Fatal("expected parse error for truncated function body, got nil")

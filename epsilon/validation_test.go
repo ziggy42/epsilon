@@ -28,7 +28,7 @@ func getModule(wat string) (*moduleDefinition, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newParser(bytes.NewReader(wasm)).parse()
+	return newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
 }
 
 func TestInvalidDataUnknownGlobal(t *testing.T) {
@@ -92,7 +92,7 @@ func TestVuln06(t *testing.T) {
 		0x0b, 0x0b, // end of block, end of function
 	}
 
-	module, err := newParser(bytes.NewReader(wasm)).parse()
+	module, err := newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestNonCanonicalBlockType(t *testing.T) {
 		0x0b, // end of function
 	}
 
-	module, err := newParser(bytes.NewReader(wasm)).parse()
+	module, err := newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestMemoryIndexValidation(t *testing.T) {
 		0x0b, // end
 	}
 
-	module, err := newParser(bytes.NewReader(wasm)).parse()
+	module, err := newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}
@@ -249,10 +249,8 @@ func TestMaxLocalsPerFunctionRejectsOversizedFunction(t *testing.T) {
 		t.Fatalf("failed to assemble wat: %v", err)
 	}
 
-	_, err = newParserWithConfig(
-		bytes.NewReader(wasm),
-		Config{MaxLocalsPerFunction: 100},
-	).parse()
+	config := Config{MaxLocalsPerFunction: 100}
+	_, err = newParser(bytes.NewReader(wasm), config).parse()
 	if err == nil || !strings.Contains(err.Error(), "too many locals") {
 		t.Fatalf("expected too-many-locals error, got %v", err)
 	}
@@ -264,10 +262,8 @@ func TestMaxLocalsPerFunctionRejectsOversizedFunction(t *testing.T) {
 		)
 	}
 
-	_, err = newParserWithConfig(
-		bytes.NewReader(wasm),
-		Config{MaxLocalsPerFunction: 200},
-	).parse()
+	config = Config{MaxLocalsPerFunction: 200}
+	_, err = newParser(bytes.NewReader(wasm), config).parse()
 	if err != nil {
 		t.Fatalf("expected success with raised limit, got %v", err)
 	}

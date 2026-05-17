@@ -1557,8 +1557,7 @@ func toValueType(code uint64) ValueType {
 
 func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
-		return fmt.Errorf("%w: min %d exceeds configured limit %d",
-			errInvalidLimits, limits.Min, maximumRange)
+		return errInvalidLimits
 	}
 
 	if limits.Max == nil {
@@ -1566,8 +1565,7 @@ func validateLimits(limits Limits, maximumRange uint32) error {
 	}
 
 	if *limits.Max > maximumRange {
-		return fmt.Errorf("%w: max %d exceeds configured limit %d",
-			errInvalidLimits, *limits.Max, maximumRange)
+		return errInvalidLimits
 	}
 
 	if limits.Min > *limits.Max {

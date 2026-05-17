@@ -36,7 +36,7 @@ func instantiate(
 	if config != nil {
 		cfg = *config
 	}
-	module, err := newParserWithConfig(bytes.NewReader(wasm), cfg).parse()
+	module, err := newParser(bytes.NewReader(wasm), cfg).parse()
 	if err != nil {
 		return nil, err
 	}

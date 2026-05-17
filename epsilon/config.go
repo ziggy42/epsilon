@@ -14,9 +14,7 @@
 
 package epsilon
 
-// Default values for each Config field. Exposed so callers can construct a
-// Config literal that names the defaults explicitly for the fields it does
-// not want to override.
+// Default values for each Config field.
 const (
 	DefaultMaxCallStackDepth          = 1000
 	DefaultCallStackPreallocationSize = 1000
@@ -42,10 +40,9 @@ type Config struct {
 	// See https://github.com/WebAssembly/wabt/issues/2648. Default: false.
 	ExperimentalMultipleMemories bool
 
-	// EnableFuel enables instruction fuel (gas) mechanism to prevent
-	// infinite loops and control execution time. When enabled, the VM will
-	// decrement the available fuel by 1 for every WASM instruction
-	// executed.
+	// EnableFuel enables instruction fuel (gas) mechanism to prevent infinite
+	// loops and control execution time. When enabled, the VM will decrement
+	// the available fuel by 1 for every WASM instruction executed.
 	// NOTE: Enabling fuel has a non-trivial performance impact on the VM.
 	// Default: false.
 	EnableFuel bool
@@ -57,23 +54,21 @@ type Config struct {
 
 	// MaxTableElements is the upper bound on a declared table's Limits.Min
 	// (and Limits.Max, if present). A module declaring a table above this
-	// ceiling is rejected during validation. The spec permits up to 2^32-1
-	// elements, but each element is reference-sized, so hosts almost
-	// always want a much smaller cap. Default: DefaultMaxTableElements.
+	// ceiling is rejected. Default: DefaultMaxTableElements.
 	MaxTableElements uint32
 
 	// MaxMemoryPages is the upper bound on a declared memory's Limits.Min
 	// (and Limits.Max, if present), expressed in 64 KiB WebAssembly pages.
-	// A module declaring a memory above this ceiling is rejected during
-	// validation. Default: DefaultMaxMemoryPages (= 4 GiB, the
-	// WebAssembly 32-bit maximum).
+	// A module declaring a memory above this ceiling is rejected.
+	// Default: DefaultMaxMemoryPages (= 4 GiB, the WebAssembly 32-bit
+	// maximum).
 	MaxMemoryPages uint32
 
 	// MaxLocalsPerFunction is the upper bound on the total number of
 	// declared locals (sum of all local entry counts) for a single
 	// function body. Function parameters are not counted. A function
-	// exceeding this ceiling is rejected during parsing. Default:
-	// DefaultMaxLocalsPerFunction.
+	// exceeding this ceiling is rejected.
+	// Default: DefaultMaxLocalsPerFunction.
 	MaxLocalsPerFunction uint32
 }
 

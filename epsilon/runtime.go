@@ -92,7 +92,7 @@ func (r *Runtime) InstantiateModuleWithImports(
 	wasm io.Reader,
 	imports ...*ModuleImports,
 ) (*ModuleInstance, error) {
-	module, err := newParserWithConfig(wasm, r.config).parse()
+	module, err := newParser(wasm, r.config).parse()
 	if err != nil {
 		return nil, err
 	}

@@ -90,11 +90,7 @@ type parser struct {
 	config Config
 }
 
-func newParser(reader io.Reader) *parser {
-	return newParserWithConfig(reader, DefaultConfig())
-}
-
-func newParserWithConfig(reader io.Reader, config Config) *parser {
+func newParser(reader io.Reader, config Config) *parser {
 	return &parser{reader: bufio.NewReader(reader), config: config}
 }
 
