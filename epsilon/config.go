@@ -14,7 +14,6 @@
 
 package epsilon
 
-// Default values for each Config field.
 const (
 	DefaultMaxCallStackDepth          = 1000
 	DefaultCallStackPreallocationSize = 1000
@@ -26,18 +25,20 @@ const (
 // Config controls the behavior and resource limits of the VM.
 type Config struct {
 	// MaxCallStackDepth is the hard limit on call stack depth to prevent
-	// infinite recursion. Default: DefaultMaxCallStackDepth.
+	// infinite recursion.
+	// Default: DefaultMaxCallStackDepth.
 	MaxCallStackDepth int
 
-	// CallStackPreallocationSize controls how many call frames to
-	// preallocate. Caches (controlStackCache, localsCache) are sized to
-	// this value. Beyond this depth, allocations fall back to heap.
+	// CallStackPreallocationSize controls how many call frames to preallocate.
+	// Caches (controlStackCache, localsCache) are sized to this value.
+	// Beyond this depth, allocations fall back to heap.
 	// Default: DefaultCallStackPreallocationSize.
 	CallStackPreallocationSize int
 
 	// ExperimentalMultipleMemories enables WASM 3.0 multiple memories.
 	// This feature has not yet been fully validated with spec tests.
-	// See https://github.com/WebAssembly/wabt/issues/2648. Default: false.
+	// See https://github.com/WebAssembly/wabt/issues/2648.
+	// Default: false.
 	ExperimentalMultipleMemories bool
 
 	// EnableFuel enables instruction fuel (gas) mechanism to prevent infinite
@@ -52,22 +53,22 @@ type Config struct {
 	// Only used if EnableFuel is true.
 	Fuel uint64
 
-	// MaxTableElements is the upper bound on a declared table's Limits.Min
-	// (and Limits.Max, if present). A module declaring a table above this
-	// ceiling is rejected. Default: DefaultMaxTableElements.
+	// MaxTableElements is the upper bound on a declared table's Limits.Min (and
+	// Limits.Max, if present). A module declaring a table above this ceiling is
+	// rejected.
+	// Default: DefaultMaxTableElements.
 	MaxTableElements uint32
 
-	// MaxMemoryPages is the upper bound on a declared memory's Limits.Min
-	// (and Limits.Max, if present), expressed in 64 KiB WebAssembly pages.
-	// A module declaring a memory above this ceiling is rejected.
-	// Default: DefaultMaxMemoryPages (= 4 GiB, the WebAssembly 32-bit
-	// maximum).
+	// MaxMemoryPages is the upper bound on a declared memory's Limits.Min (and
+	// Limits.Max, if present), expressed in 64 KiB WebAssembly pages. A module
+	// declaring a memory above this ceiling is rejected.
+	// Default: DefaultMaxMemoryPages (= 4 GiB, the WebAssembly 32-bit maximum).
 	MaxMemoryPages uint32
 
-	// MaxLocalsPerFunction is the upper bound on the total number of
-	// declared locals (sum of all local entry counts) for a single
-	// function body. Function parameters are not counted. A function
-	// exceeding this ceiling is rejected.
+	// MaxLocalsPerFunction is the upper bound on the total number of declared
+	// locals (sum of all local entry counts) for a single function body.
+	// Function parameters are not counted. A function exceeding this ceiling is
+	// rejected.
 	// Default: DefaultMaxLocalsPerFunction.
 	MaxLocalsPerFunction uint32
 }
