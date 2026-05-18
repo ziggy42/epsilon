@@ -1793,16 +1793,11 @@ func handleSimdReplaceLane[T wasmNumber](
 }
 
 func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
-	if blockType == -0x40 { // empty block type.
+	// Empty (-0x40) and value-type block types both consume no inputs.
+	if blockType < 0 {
 		return 0
 	}
-
-	if blockType >= 0 { // type index.
-		funcType := module.types[blockType]
-		return uint32(len(funcType.ParamTypes))
-	}
-
-	return 0 // value type.
+	return uint32(len(module.types[blockType].ParamTypes))
 }
 
 func (vm *vm) getOutputCount(module *ModuleInstance, blockType int32) uint32 {
