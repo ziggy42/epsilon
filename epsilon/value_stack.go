@@ -121,6 +121,11 @@ func (s *valueStack) popValueTypes(types []ValueType) []any {
 }
 
 func (s *valueStack) unwind(targetHeight, preserveCount uint32) {
+	// When the stack is already at the target size, the slice/append below is a
+	// no-op and we can skip it.
+	if uint32(len(s.data)) == targetHeight+preserveCount {
+		return
+	}
 	valuesToPreserve := s.data[s.size()-preserveCount:]
 	s.data = s.data[:targetHeight]
 	s.data = append(s.data, valuesToPreserve...)
