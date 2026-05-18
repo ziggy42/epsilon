@@ -1331,9 +1331,7 @@ func (vm *vm) handleElse(frame *callFrame) {
 }
 
 func (vm *vm) handleEnd(frame *callFrame) {
-	controlFrame := vm.popControlFrame(frame)
-	outputCount := vm.getOutputCount(frame.module, controlFrame.blockType)
-	vm.stack.unwind(controlFrame.stackHeight, outputCount)
+	frame.controlStack = frame.controlStack[:len(frame.controlStack)-1]
 }
 
 func (vm *vm) handleBrIf(frame *callFrame) {
