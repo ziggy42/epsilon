@@ -25,3 +25,4 @@ cpu.prof
 __pycache__/
 .venv/
 *.pyc
+.antigravitycli
