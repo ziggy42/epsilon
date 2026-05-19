@@ -146,37 +146,37 @@ func (m *Memory) LoadByte(offset, index uint32) (byte, error) {
 }
 
 func (m *Memory) LoadUint16(offset, index uint32) (uint16, error) {
-	buf, err := m.Get(offset, index, 2)
-	if err != nil {
-		return 0, err
+	addr := uint64(index) + uint64(offset)
+	if addr+2 > uint64(len(m.data)) {
+		return 0, errMemoryOutOfBounds
 	}
-	return binary.LittleEndian.Uint16(buf), nil
+	return binary.LittleEndian.Uint16(m.data[addr : addr+2]), nil
 }
 
 func (m *Memory) LoadUint32(offset, index uint32) (uint32, error) {
-	buf, err := m.Get(offset, index, 4)
-	if err != nil {
-		return 0, err
+	addr := uint64(index) + uint64(offset)
+	if addr+4 > uint64(len(m.data)) {
+		return 0, errMemoryOutOfBounds
 	}
-	return binary.LittleEndian.Uint32(buf), nil
+	return binary.LittleEndian.Uint32(m.data[addr : addr+4]), nil
 }
 
 func (m *Memory) LoadUint64(offset, index uint32) (uint64, error) {
-	buf, err := m.Get(offset, index, 8)
-	if err != nil {
-		return 0, err
+	addr := uint64(index) + uint64(offset)
+	if addr+8 > uint64(len(m.data)) {
+		return 0, errMemoryOutOfBounds
 	}
-	return binary.LittleEndian.Uint64(buf), nil
+	return binary.LittleEndian.Uint64(m.data[addr : addr+8]), nil
 }
 
 func (m *Memory) LoadV128(offset, index uint32) (V128Value, error) {
-	buf, err := m.Get(offset, index, 16)
-	if err != nil {
-		return V128Value{}, err
+	addr := uint64(index) + uint64(offset)
+	if addr+16 > uint64(len(m.data)) {
+		return V128Value{}, errMemoryOutOfBounds
 	}
 	return V128Value{
-		Low:  binary.LittleEndian.Uint64(buf[:8]),
-		High: binary.LittleEndian.Uint64(buf[8:]),
+		Low:  binary.LittleEndian.Uint64(m.data[addr : addr+8]),
+		High: binary.LittleEndian.Uint64(m.data[addr+8 : addr+16]),
 	}, nil
 }
 
@@ -190,38 +190,38 @@ func (m *Memory) StoreByte(offset, index uint32, val byte) error {
 }
 
 func (m *Memory) StoreUint16(offset, index uint32, val uint16) error {
-	buf, err := m.Get(offset, index, 2)
-	if err != nil {
-		return err
+	addr := uint64(index) + uint64(offset)
+	if addr+2 > uint64(len(m.data)) {
+		return errMemoryOutOfBounds
 	}
-	binary.LittleEndian.PutUint16(buf, val)
+	binary.LittleEndian.PutUint16(m.data[addr:addr+2], val)
 	return nil
 }
 
 func (m *Memory) StoreUint32(offset, index uint32, val uint32) error {
-	buf, err := m.Get(offset, index, 4)
-	if err != nil {
-		return err
+	addr := uint64(index) + uint64(offset)
+	if addr+4 > uint64(len(m.data)) {
+		return errMemoryOutOfBounds
 	}
-	binary.LittleEndian.PutUint32(buf, val)
+	binary.LittleEndian.PutUint32(m.data[addr:addr+4], val)
 	return nil
 }
 
 func (m *Memory) StoreUint64(offset, index uint32, val uint64) error {
-	buf, err := m.Get(offset, index, 8)
-	if err != nil {
-		return err
+	addr := uint64(index) + uint64(offset)
+	if addr+8 > uint64(len(m.data)) {
+		return errMemoryOutOfBounds
 	}
-	binary.LittleEndian.PutUint64(buf, val)
+	binary.LittleEndian.PutUint64(m.data[addr:addr+8], val)
 	return nil
 }
 
 func (m *Memory) StoreV128(offset, index uint32, val V128Value) error {
-	buf, err := m.Get(offset, index, 16)
-	if err != nil {
-		return err
+	addr := uint64(index) + uint64(offset)
+	if addr+16 > uint64(len(m.data)) {
+		return errMemoryOutOfBounds
 	}
-	binary.LittleEndian.PutUint64(buf[:8], val.Low)
-	binary.LittleEndian.PutUint64(buf[8:], val.High)
+	binary.LittleEndian.PutUint64(m.data[addr:addr+8], val.Low)
+	binary.LittleEndian.PutUint64(m.data[addr+8:addr+16], val.High)
 	return nil
 }
