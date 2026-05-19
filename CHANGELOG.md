@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 This release fixes a significant number of security and correctness issues
 throughout the runtime. Background on several of the vulnerabilities is
-available at https://andreapivetta.com/posts/all-the-bugs-they-found.html.
+available in this [article](https://andreapivetta.com/posts/all-the-bugs-they-found.html).
 Overall performance is roughly unchanged from 0.0.4; one microbenchmark
 exercising `call_indirect` is about 10% slower due to the additional safety
 checks.
