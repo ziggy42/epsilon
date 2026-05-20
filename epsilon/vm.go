@@ -43,8 +43,25 @@ type store struct {
 	tables   []*Table
 	memories []*Memory
 	globals  []*Global
-	elements []elementSegment
-	datas    []dataSegment
+	elements []elementInstance
+	datas    []dataInstance
+}
+
+// elementInstance is the runtime representation of an element segment.
+// See https://webassembly.github.io/spec/core/exec/runtime.html#element-instances.
+// functionIndexes holds store-resolved function references; it is nil when the
+// segment has been dropped (by elem.drop, or implicitly for active/declarative
+// segments after instantiation).
+type elementInstance struct {
+	functionIndexes []int32
+}
+
+// dataInstance is the runtime representation of a data segment.
+// See https://webassembly.github.io/spec/core/exec/runtime.html#data-instances.
+// content is nil when the segment has been dropped (by data.drop, or implicitly
+// for active segments after instantiation).
+type dataInstance struct {
+	content []byte
 }
 
 type callFrame struct {
@@ -173,49 +190,77 @@ func (vm *vm) instantiate(
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
-	// TODO: elements and data segments should at the very least be copied, but we
-	// should probably have some runtime representation for them.
-	for _, elem := range module.elementSegments {
-		storeIndex := uint32(len(vm.store.elements))
-		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
-		vm.store.elements = append(vm.store.elements, elem)
-	}
-
-	// Resolve element entries once. After this, each store-local element
-	// segment's functionIndexes holds store-resolved references, regardless of
-	// whether the binary encoded it as funcidx or as constant expressions.
-	for _, addr := range moduleInstance.elemAddrs {
-		elem := &vm.store.elements[addr]
+	// Allocate runtime element instances. Function indexes are resolved to
+	// store-wide indexes (either from the funcidx encoding or by evaluating the
+	// constant expressions) so the resulting slice is independent of the parsed
+	// elementSegment in moduleDefinition.
+	for _, segment := range module.elementSegments {
+		var indexes []int32
 		switch {
-		case len(elem.functionIndexes) > 0:
-			storeIndexes := toStoreFuncIndexes(moduleInstance, elem.functionIndexes)
-			elem.functionIndexes = storeIndexes
-		case len(elem.functionIndexesExpressions) > 0:
-			resolved := make([]int32, len(elem.functionIndexesExpressions))
-			for i, expr := range elem.functionIndexesExpressions {
-				refVal, err := vm.invokeExpression(expr, elem.kind, moduleInstance)
+		case len(segment.functionIndexes) > 0:
+			indexes = toStoreFuncIndexes(moduleInstance, segment.functionIndexes)
+		case len(segment.functionIndexesExpressions) > 0:
+			indexes = make([]int32, len(segment.functionIndexesExpressions))
+			for i, expr := range segment.functionIndexesExpressions {
+				refVal, err := vm.invokeExpression(expr, segment.kind, moduleInstance)
 				if err != nil {
 					return nil, err
 				}
-				resolved[i] = refVal.int32()
+				indexes[i] = refVal.int32()
 			}
-			elem.functionIndexes = resolved
-			elem.functionIndexesExpressions = nil
 		}
+		storeIndex := uint32(len(vm.store.elements))
+		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
+		vm.store.elements = append(vm.store.elements, elementInstance{functionIndexes: indexes})
 	}
 
-	for _, data := range module.dataSegments {
+	// Apply active element segments to their target tables, then drop them.
+	// Declarative segments are also dropped immediately. See spec §4.5.4.
+	for i, segment := range module.elementSegments {
+		if segment.mode == passiveElementMode {
+			continue
+		}
+		elem := &vm.store.elements[moduleInstance.elemAddrs[i]]
+		if segment.mode == activeElementMode {
+			offsetVal, err := vm.invokeExpression(segment.offsetExpression, I32, moduleInstance)
+			if err != nil {
+				return nil, err
+			}
+			table := vm.store.tables[moduleInstance.tableAddrs[segment.tableIndex]]
+			if err := table.InitFromSlice(offsetVal.int32(), elem.functionIndexes); err != nil {
+				return nil, err
+			}
+		}
+		elem.functionIndexes = nil
+	}
+
+	// Allocate runtime data instances. The byte slice is shared with the
+	// parsed dataSegment: the runtime only ever reads it (memory.init copies
+	// out) and data.drop nils the instance's slice header, never the backing
+	// array, so the moduleDefinition is left untouched and can be reinstantiated.
+	for _, segment := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
-		vm.store.datas = append(vm.store.datas, data)
+		vm.store.datas = append(vm.store.datas, dataInstance{content: segment.content})
 	}
 
-	if err := vm.applyActiveElementSegments(moduleInstance); err != nil {
-		return nil, err
-	}
-
-	if err := vm.initActiveDatas(module, moduleInstance); err != nil {
-		return nil, err
+	// Apply active data segments to their target memories, then drop them per
+	// spec §4.5.4. After this, memory.init against an active segment sees an
+	// empty content and traps for any non-zero size.
+	for i, segment := range module.dataSegments {
+		if segment.mode != activeDataMode {
+			continue
+		}
+		offsetVal, err := vm.invokeExpression(segment.offsetExpression, I32, moduleInstance)
+		if err != nil {
+			return nil, err
+		}
+		memory := vm.store.memories[moduleInstance.memAddrs[segment.memoryIndex]]
+		data := &vm.store.datas[moduleInstance.dataAddrs[i]]
+		if err := memory.Set(uint32(offsetVal.int32()), 0, data.content); err != nil {
+			return nil, err
+		}
+		data.content = nil
 	}
 
 	if module.startIndex != nil {
@@ -1498,21 +1543,14 @@ func (vm *vm) handleTableInit(frame *callFrame) error {
 	element := vm.getElement(frame, frame.next())
 	table := vm.getTable(frame, frame.next())
 	n, s, d := vm.stack.pop3Int32()
-
-	// Active and declarative segments are dropped after instantiation, so they
-	// are treated as empty at runtime. Only passive segments expose their entries
-	// until elem.drop nils them out.
-	var indexes []int32
-	if element.mode == passiveElementMode {
-		indexes = element.functionIndexes
-	}
-	return table.Init(n, d, s, indexes)
+	// element.functionIndexes is nil for dropped, active, and declarative
+	// segments; only passive segments retain their entries until elem.drop.
+	return table.Init(n, d, s, element.functionIndexes)
 }
 
 func (vm *vm) handleElemDrop(frame *callFrame) {
 	element := vm.getElement(frame, frame.next())
 	element.functionIndexes = nil
-	element.functionIndexesExpressions = nil
 }
 
 func (vm *vm) handleTableCopy(frame *callFrame) error {
@@ -1825,53 +1863,6 @@ func (vm *vm) popControlFrame(frame *callFrame) controlFrame {
 	return controlFrame
 }
 
-func (vm *vm) applyActiveElementSegments(moduleInstance *ModuleInstance) error {
-	for _, addr := range moduleInstance.elemAddrs {
-		elem := &vm.store.elements[addr]
-		if elem.mode != activeElementMode {
-			continue
-		}
-
-		offsetExpression := elem.offsetExpression
-		offsetVal, err := vm.invokeExpression(offsetExpression, I32, moduleInstance)
-		if err != nil {
-			return err
-		}
-		offset := offsetVal.int32()
-
-		table := vm.store.tables[moduleInstance.tableAddrs[elem.tableIndex]]
-		if err := table.InitFromSlice(offset, elem.functionIndexes); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (vm *vm) initActiveDatas(
-	module *moduleDefinition,
-	moduleInstance *ModuleInstance,
-) error {
-	for _, segment := range module.dataSegments {
-		if segment.mode != activeDataMode {
-			continue
-		}
-
-		expression := segment.offsetExpression
-		offsetVal, err := vm.invokeExpression(expression, I32, moduleInstance)
-		if err != nil {
-			return err
-		}
-		offset := offsetVal.int32()
-		storeMemoryIndex := moduleInstance.memAddrs[segment.memoryIndex]
-		memory := vm.store.memories[storeMemoryIndex]
-		if err := memory.Set(uint32(offset), 0, segment.content); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (vm *vm) resolveExports(
 	module *moduleDefinition,
 	instance *ModuleInstance,
@@ -1972,12 +1963,12 @@ func (vm *vm) getGlobal(frame *callFrame, localIndex uint64) *Global {
 	return vm.store.globals[globalIndex]
 }
 
-func (vm *vm) getElement(frame *callFrame, localIndex uint64) *elementSegment {
+func (vm *vm) getElement(frame *callFrame, localIndex uint64) *elementInstance {
 	elementIndex := frame.module.elemAddrs[localIndex]
 	return &vm.store.elements[elementIndex]
 }
 
-func (vm *vm) getData(frame *callFrame, localIndex uint64) *dataSegment {
+func (vm *vm) getData(frame *callFrame, localIndex uint64) *dataInstance {
 	dataIndex := frame.module.dataAddrs[localIndex]
 	return &vm.store.datas[dataIndex]
 }
