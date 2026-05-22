@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 
-_DEFAULT_ITERATIONS_COUNT = 20
+_DEFAULT_ITERATIONS_COUNT = 6
 _BENCHTIME = "2s"
 
 

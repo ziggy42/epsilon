@@ -115,6 +115,15 @@ adherence to project standards.
     - Data races or concurrency issues.
     - Off-by-one errors.
 
+    **Security & Sandboxing**: Treat untrusted Wasm and host inputs as hostile.
+    The bullets below are a floor, not a ceiling — hunt for classes of flaw they
+    don't name.
+    - Validator is the boundary: the VM trusts it, so any skipped or weakened
+      check there is exploitable.
+    - Untrusted Wasm or invalid host inputs must never panic — failures surface
+      as standard Go errors.
+    - Sandbox escapes: untrusted code reaching host state it shouldn't see.
+
     **Performance** (especially in hot paths like the VM loop):
     - Unnecessary heap allocations.
     - Inefficient algorithms.
