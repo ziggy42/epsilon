@@ -1045,6 +1045,58 @@ func TestMemoryInitCopyMultipleMemories(t *testing.T) {
 	}
 }
 
+// memory.init against an active data segment must behave as if the segment
+// were dropped: a zero-length copy succeeds rather than reading the original
+// content.
+func TestMemoryInitActiveZeroSucceeds(t *testing.T) {
+	wat := `(module
+		(memory 1)
+		(data (i32.const 0) "\2a")
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 0
+			memory.init 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	if _, err := moduleInstance.Invoke("test"); err != nil {
+		t.Fatalf("expected no trap, got: %v", err)
+	}
+}
+
+// A non-zero memory.init against an active (already-dropped) data segment
+// traps.
+func TestMemoryInitActiveNonZeroTraps(t *testing.T) {
+	wat := `(module
+		(memory 1)
+		(data (i32.const 0) "\2a")
+		(func (export "test")
+			i32.const 0
+			i32.const 0
+			i32.const 1
+			memory.init 0
+		)
+	)`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	_, err = moduleInstance.Invoke("test")
+	if err == nil {
+		t.Fatalf("expected trap")
+	}
+	expectedTrap := "out of bounds memory access"
+	if err.Error() != expectedTrap {
+		t.Fatalf("expected trap '%s', got '%s'", expectedTrap, err.Error())
+	}
+}
+
 // table.init against an active segment must behave as if the segment were
 // dropped: a zero-length copy succeeds rather than trapping.
 func TestTableInitActiveZeroSucceeds(t *testing.T) {
