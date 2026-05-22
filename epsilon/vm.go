@@ -48,7 +48,7 @@ type store struct {
 }
 
 // elementInstance is the runtime representation of an element segment.
-// See https://webassembly.github.io/spec/core/exec/runtime.html#element-instances.
+// https://webassembly.github.io/spec/core/exec/runtime.html#element-instances.
 // functionIndexes holds store-resolved function references; it is nil when the
 // segment has been dropped (by elem.drop, or implicitly for active/declarative
 // segments after instantiation).
@@ -57,7 +57,7 @@ type elementInstance struct {
 }
 
 // dataInstance is the runtime representation of a data segment.
-// See https://webassembly.github.io/spec/core/exec/runtime.html#data-instances.
+// https://webassembly.github.io/spec/core/exec/runtime.html#data-instances.
 // content is nil when the segment has been dropped (by data.drop, or implicitly
 // for active segments after instantiation).
 type dataInstance struct {
@@ -190,44 +190,26 @@ func (vm *vm) instantiate(
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
-	// Allocate runtime element instances. Function indexes are resolved to
-	// store-wide indexes (either from the funcidx encoding or by evaluating the
-	// constant expressions) so the resulting slice is independent of the parsed
-	// elementSegment in moduleDefinition.
 	for _, segment := range module.elementSegments {
-		var indexes []int32
-		switch {
-		case len(segment.functionIndexes) > 0:
-			indexes = toStoreFuncIndexes(moduleInstance, segment.functionIndexes)
-		case len(segment.functionIndexesExpressions) > 0:
-			indexes = make([]int32, len(segment.functionIndexesExpressions))
-			for i, expr := range segment.functionIndexesExpressions {
-				refVal, err := vm.invokeExpression(expr, segment.kind, moduleInstance)
-				if err != nil {
-					return nil, err
-				}
-				indexes[i] = refVal.int32()
-			}
+		instance, err := vm.newElementInstance(segment, moduleInstance)
+		if err != nil {
+			return nil, err
 		}
 		storeIndex := uint32(len(vm.store.elements))
 		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
-		vm.store.elements = append(vm.store.elements, elementInstance{functionIndexes: indexes})
+		vm.store.elements = append(vm.store.elements, instance)
 	}
 
 	// Apply active element segments to their target tables, then drop them.
-	// Declarative segments are also dropped immediately. See spec §4.5.4.
+	// Declarative segments are also dropped immediately.
 	for i, segment := range module.elementSegments {
 		if segment.mode == passiveElementMode {
 			continue
 		}
 		elem := &vm.store.elements[moduleInstance.elemAddrs[i]]
 		if segment.mode == activeElementMode {
-			offsetVal, err := vm.invokeExpression(segment.offsetExpression, I32, moduleInstance)
+			err := vm.applyActiveElementSegment(segment, elem, moduleInstance)
 			if err != nil {
-				return nil, err
-			}
-			table := vm.store.tables[moduleInstance.tableAddrs[segment.tableIndex]]
-			if err := table.InitFromSlice(offsetVal.int32(), elem.functionIndexes); err != nil {
 				return nil, err
 			}
 		}
@@ -241,23 +223,20 @@ func (vm *vm) instantiate(
 	for _, segment := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
-		vm.store.datas = append(vm.store.datas, dataInstance{content: segment.content})
+		data := dataInstance{content: segment.content}
+		vm.store.datas = append(vm.store.datas, data)
 	}
 
-	// Apply active data segments to their target memories, then drop them per
-	// spec §4.5.4. After this, memory.init against an active segment sees an
-	// empty content and traps for any non-zero size.
+	// Apply active data segments to their target memories, then drop them. After
+	// this, memory.init against an active segment sees an empty content and
+	// traps for any non-zero size.
 	for i, segment := range module.dataSegments {
 		if segment.mode != activeDataMode {
 			continue
 		}
-		offsetVal, err := vm.invokeExpression(segment.offsetExpression, I32, moduleInstance)
-		if err != nil {
-			return nil, err
-		}
-		memory := vm.store.memories[moduleInstance.memAddrs[segment.memoryIndex]]
 		data := &vm.store.datas[moduleInstance.dataAddrs[i]]
-		if err := memory.Set(uint32(offsetVal.int32()), 0, data.content); err != nil {
+		err := vm.applyActiveDataSegment(segment, data, moduleInstance)
+		if err != nil {
 			return nil, err
 		}
 		data.content = nil
@@ -1935,6 +1914,55 @@ func (vm *vm) invokeExpression(
 		return value{}, err
 	}
 	return vm.stack.pop(), nil
+}
+
+func (vm *vm) applyActiveElementSegment(
+	segment elementSegment,
+	elem *elementInstance,
+	moduleInstance *ModuleInstance,
+) error {
+	offsetExpression := segment.offsetExpression
+	offsetVal, err := vm.invokeExpression(offsetExpression, I32, moduleInstance)
+	if err != nil {
+		return err
+	}
+	table := vm.store.tables[moduleInstance.tableAddrs[segment.tableIndex]]
+	return table.InitFromSlice(offsetVal.int32(), elem.functionIndexes)
+}
+
+func (vm *vm) applyActiveDataSegment(
+	segment dataSegment,
+	data *dataInstance,
+	moduleInstance *ModuleInstance,
+) error {
+	offsetExpression := segment.offsetExpression
+	offsetVal, err := vm.invokeExpression(offsetExpression, I32, moduleInstance)
+	if err != nil {
+		return err
+	}
+	memory := vm.store.memories[moduleInstance.memAddrs[segment.memoryIndex]]
+	return memory.Set(uint32(offsetVal.int32()), 0, data.content)
+}
+
+func (vm *vm) newElementInstance(
+	segment elementSegment,
+	moduleInstance *ModuleInstance,
+) (elementInstance, error) {
+	var indexes []int32
+	switch {
+	case len(segment.functionIndexes) > 0:
+		indexes = toStoreFuncIndexes(moduleInstance, segment.functionIndexes)
+	case len(segment.functionIndexesExpressions) > 0:
+		indexes = make([]int32, len(segment.functionIndexesExpressions))
+		for i, expr := range segment.functionIndexesExpressions {
+			refVal, err := vm.invokeExpression(expr, segment.kind, moduleInstance)
+			if err != nil {
+				return elementInstance{}, err
+			}
+			indexes[i] = refVal.int32()
+		}
+	}
+	return elementInstance{functionIndexes: indexes}, nil
 }
 
 func toStoreFuncIndexes(
