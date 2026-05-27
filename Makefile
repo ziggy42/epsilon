@@ -91,9 +91,6 @@ build-all: build ## Cross-compile the CLI for Linux, Darwin, and Windows
 	GOOS=darwin go build -o epsilon-darwin ./cmd/epsilon
 	GOOS=windows go build -o epsilon.exe ./cmd/epsilon
 
-test: setup-wabt ## Run all Go tests (unit + spec)
-	go test ./...
-
 run-example: ## Run the basic example (smoke check)
 	go run ./example/hello
 
@@ -115,7 +112,10 @@ clean: ## Remove built artifacts (keeps the wasi-sdk toolchain)
 distclean: clean ## Remove built artifacts AND the wasi-sdk toolchain
 	rm -rf .toolchain
 
-# ----- specialized test suites ------------------------------------------------
+# ----- tests ------------------------------------------------------------------
+
+test: setup-wabt ## Run all Go tests (unit + spec)
+	go test ./...
 
 test-spec: internal/spec_tests/testsuite/.git setup-wabt ## Run wasm spec tests
 	go test ./internal/spec_tests/...
@@ -202,7 +202,6 @@ internal/spec_tests/testsuite/.git wasip1/wasi-testsuite/.git:
 
 # ----- phony declarations -----------------------------------------------------
 
-.PHONY: help build build-all test run-example fmt vet clean distclean \
-        test-spec test-wasi test-all \
-        bench bench-compare \
+.PHONY: help build build-all run-example fmt vet clean distclean \
+        test test-spec test-wasi test-all bench bench-compare \
         build-wasm setup-wasi-sdk setup-wabt
