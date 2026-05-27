@@ -122,41 +122,42 @@ $ epsilon https://github.com/mdn/webassembly-examples/raw/refs/heads/main/unders
 
 ## Development
 
-### Building from Source
+A complete set of development targets is defined in the `Makefile`. Run `make` (or `make help`) to view the available targets:
 
-To build the CLI from source:
+```text
+Usage: make <target>
 
-```bash
-git clone https://github.com/ziggy42/epsilon.git
-cd epsilon
-go build -o bin/epsilon ./cmd/epsilon
+Targets:
+  help                  Show this help
+  build                 Compile all Go packages
+  build-all             Cross-compile the CLI for Darwin and Windows (mirrors CI)
+  test                  Run all Go tests (unit + spec)
+  run-example           Run the basic example (smoke check)
+  fmt                   Run gofmt across the tree
+  vet                   Run go vet across the tree
+  clean                 Remove built artifacts (keeps the wasi-sdk toolchain)
+  distclean             Remove built artifacts AND the wasi-sdk toolchain
+  test-spec             Run the wasm spec tests
+  test-wasi             Run the WASI testsuite (needs uv)
+  test-all              Run all tests (Go tests + WASI spec tests)
+  bench                 Run benchmarks (vars: BENCH_PATTERN, etc.)
+  bench-compare         Compare benchmarks across refs; TARGET=<ref> required
+  build-wasm            Rebuild benchmark .wasm files (auto-installs wasi-sdk)
+  setup-wasi-sdk        Install wasi-sdk locally (~600 MB, one-time)
+
+Common overrides:
+  BENCH_PATTERN=<pat>   go test -bench filter (default: .)
+  BENCH_TIME=<dur>      go test -benchtime (default: 1s)
+  BENCH_COUNT=<n>       iterations (default: 3)
+  WASI_SDK_DIR=<p>      wasi-sdk path (default: .toolchain/wasi-sdk)
 ```
 
-### Testing & Benchmarks
+### Prerequisites
 
-#### Prerequisites
+To run all specialized tests and compilation locally, ensure you have the following:
 
-* Install [WABT](https://github.com/WebAssembly/wabt), which is required to compile WASM code defined in text format to binary.
-* Fetch the spec tests submodule:
-```bash
-git submodule update --init --recursive
-```
-
-#### Running Tests
-
-```bash
-# Run unit tests
-go test ./epsilon/...
-
-# Run spec tests (requires git submodule)
-go test ./internal/spec_tests/...
-
-# Run WASI spec tests
-uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py
-
-# Run benchmarks
-go test -bench . ./internal/benchmarks
-```
+* [WABT](https://github.com/WebAssembly/wabt) — required to assemble raw `.wat` files to binary `.wasm`.
+* [uv](https://docs.astral.sh/uv/) — Python packaging tool required to run the WASI spec testsuite.
 
 
 ## Contributing

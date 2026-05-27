@@ -14,18 +14,8 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc memory_access.c -o memory_access.wasm -s \
-  EXPORTED_FUNCTIONS="['_run_memcpy']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry \
-  -s INITIAL_MEMORY=39321600
-```
- *
- * NOTE: The `-s INITIAL_MEMORY=39321600` flag allocates 32MB of memory
- * for the module, which is necessary for the two 16MB buffers.
+/* NOTE: Linked with `--initial-memory=39321600` (~37.5 MiB) to accommodate
+ * the two 16 MiB buffers below.
  */
 
 #include <stdint.h>
@@ -37,6 +27,7 @@ emcc memory_access.c -o memory_access.wasm -s \
 uint8_t source_buffer[BUFFER_SIZE];
 uint8_t destination_buffer[BUFFER_SIZE];
 
+__attribute__((export_name("run_memcpy")))
 uint32_t run_memcpy(int iterations) {
   // Initialize source buffer.
   for (size_t i = 0; i < BUFFER_SIZE; ++i) {

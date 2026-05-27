@@ -14,18 +14,8 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc vector_math.c -o vector_math.wasm -s \
-  EXPORTED_FUNCTIONS='["_compute_vector_math"]' \
-  -s STANDALONE_WASM \
-  -msimd128 \
-  -O3 \
-  --no-entry
-```
- *
- * NOTE: The `-msimd128` flag is ESSENTIAL. It enables the WebAssembly
- * SIMD feature and allows the compiler to auto-vectorize the loops.
+/* NOTE: Compiled with `-msimd128`. SIMD auto-vectorization is essential —
+ * without it the inner loops run scalar.
  */
 
 #include <math.h>
@@ -33,6 +23,7 @@ emcc vector_math.c -o vector_math.wasm -s \
 
 #define VECTOR_SIZE 128
 
+__attribute__((export_name("compute_vector_math")))
 float compute_vector_math(int iterations) {
   float input[VECTOR_SIZE];
   float output[VECTOR_SIZE];

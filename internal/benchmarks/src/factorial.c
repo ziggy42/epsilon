@@ -14,44 +14,21 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc fibonacci.c -o fibonacci.wasm -s \
-  EXPORTED_FUNCTIONS="['_fib_recursive', '_fib_iterative']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry
-```
- */
+#include <stdint.h>
 
-
-int fib_recursive(int n) {
+__attribute__((export_name("fac_recursive")))
+int64_t fac_recursive(int64_t n) {
   if (n == 0) {
-    return 0;
-  }
-
-  if (n == 1) {
     return 1;
   }
-
-  return fib_recursive(n - 1) + fib_recursive(n - 2);
+  return n * fac_recursive(n - 1);
 }
 
-int fib_iterative(int n) {
-  if (n == 0) {
-    return 0;
-  }
-
-  if (n == 1) {
-    return 1;
-  }
-
-  int a = 0;
-  int b = 1;
-  for (int i = 2; i <= n; i++) {
-    int next = a + b;
-    a = b;
-    b = next;
-  }
-  return b;
+__attribute__((export_name("fac_iterative")))
+int64_t fac_iterative(int64_t n) {
+  int64_t fac = 1;
+  for (int i = 2; i <=n; i++) {
+    fac *= i;
+  } 
+  return fac;
 }

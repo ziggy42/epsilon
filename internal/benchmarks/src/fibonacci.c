@@ -14,17 +14,35 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc trigonometry.c -o trigonometry.wasm -s \
-  EXPORTED_FUNCTIONS="['_compute_sin']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry
-```
- */
-#include <math.h>
+__attribute__((export_name("fib_recursive")))
+int fib_recursive(int n) {
+  if (n == 0) {
+    return 0;
+  }
 
-float compute_sin(float n) {
-  return sin(n);
+  if (n == 1) {
+    return 1;
+  }
+
+  return fib_recursive(n - 1) + fib_recursive(n - 2);
+}
+
+__attribute__((export_name("fib_iterative")))
+int fib_iterative(int n) {
+  if (n == 0) {
+    return 0;
+  }
+
+  if (n == 1) {
+    return 1;
+  }
+
+  int a = 0;
+  int b = 1;
+  for (int i = 2; i <= n; i++) {
+    int next = a + b;
+    a = b;
+    b = next;
+  }
+  return b;
 }
