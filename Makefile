@@ -19,50 +19,33 @@ UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
 
 ifeq ($(UNAME_S),Darwin)
-  WASI_SDK_OS := macos
-endif
-ifeq ($(UNAME_S),Linux)
-  WASI_SDK_OS := linux
+  OS := macos
+else ifeq ($(UNAME_S),Linux)
+  OS := linux
 endif
 
-ifeq ($(UNAME_M),arm64)
-  WASI_SDK_ARCH := arm64
-else ifeq ($(UNAME_M),aarch64)
-  WASI_SDK_ARCH := arm64
+ifneq (,$(filter $(UNAME_M),arm64 aarch64))
+  ARCH := arm64
 else
-  WASI_SDK_ARCH := x86_64
+  ARCH := x86_64
 endif
 
-# WABT platform detection (prebuilt binaries for macos-arm64, linux-arm64/x64)
-ifeq ($(UNAME_S),Darwin)
-  ifeq ($(UNAME_M),arm64)
-    WABT_NAME := wabt-$(WABT_VERSION)-macos-arm64
-  endif
-endif
-ifeq ($(UNAME_S),Linux)
-  ifeq ($(UNAME_M),arm64)
-    WABT_NAME := wabt-$(WABT_VERSION)-linux-arm64
-  else ifeq ($(UNAME_M),aarch64)
-    WABT_NAME := wabt-$(WABT_VERSION)-linux-arm64
-  else
-    WABT_NAME := wabt-$(WABT_VERSION)-linux-x64
-  endif
+# WABT uses x64 (not x86_64) and ships no prebuilt for macos-x86_64.
+ifneq ($(OS)-$(ARCH),macos-x86_64)
+  WABT_ARCH := $(if $(filter arm64,$(ARCH)),arm64,x64)
+  WABT_NAME := wabt-$(WABT_VERSION)-$(OS)-$(WABT_ARCH)
 endif
 
 # ----- variables --------------------------------------------------------------
 
 WASI_SDK_DIR ?= .toolchain/wasi-sdk
 WASI_SDK_CLANG := $(WASI_SDK_DIR)/bin/clang
-WASI_SDK_NAME := wasi-sdk-$(WASI_SDK_VERSION).0-$(WASI_SDK_ARCH)-$(WASI_SDK_OS)
-WASI_SDK_H := https://github.com/WebAssembly/wasi-sdk/releases/download
-WASI_SDK_P := wasi-sdk-$(WASI_SDK_VERSION)/$(WASI_SDK_NAME).tar.gz
-WASI_SDK_URL := $(WASI_SDK_H)/$(WASI_SDK_P)
+WASI_SDK_NAME := wasi-sdk-$(WASI_SDK_VERSION).0-$(ARCH)-$(OS)
+WASI_SDK_URL := https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-$(WASI_SDK_VERSION)/$(WASI_SDK_NAME).tar.gz
 
 WABT_DIR ?= .toolchain/wabt
 WABT_WAT2WASM := $(WABT_DIR)/bin/wat2wasm
-WABT_H := https://github.com/WebAssembly/wabt/releases/download
-WABT_P := $(WABT_VERSION)/$(WABT_NAME).tar.gz
-WABT_URL := $(WABT_H)/$(WABT_P)
+WABT_URL := https://github.com/WebAssembly/wabt/releases/download/$(WABT_VERSION)/$(WABT_NAME).tar.gz
 
 BENCH_PATTERN  ?= .
 BENCH_TIME     ?= 1s
@@ -126,6 +109,8 @@ vet: ## Run go vet across the tree
 clean: ## Remove built artifacts (keeps the wasi-sdk toolchain)
 	go clean ./...
 	rm -f epsilon-linux epsilon-darwin epsilon.exe cpu.prof
+	@# Guarded: `epsilon/` (the Go package dir) lives at the repo root, and
+	@# `rm -f` errors on a directory. Only fire when it's actually a file.
 	@if [ -f epsilon ]; then rm -f epsilon; fi
 	rm -f internal/benchmarks/benchmarks.test
 	rm -rf $(WASM_OUT_DIR)
@@ -177,22 +162,34 @@ $(WASM_OUT_DIR):
 
 # ----- toolchain --------------------------------------------------------------
 
+# $(1) = archive basename, $(2) = URL, $(3) = dest dir,
+# $(4) = directory name inside the extracted tarball.
+# $(strip ...) absorbs whitespace introduced by `\` line continuation at
+# the call site.
+define install-toolchain
+	$(eval N := $(strip $(1)))
+	$(eval U := $(strip $(2)))
+	$(eval D := $(strip $(3)))
+	$(eval I := $(strip $(4)))
+	@echo "==> Downloading $(N)"
+	@mkdir -p .toolchain
+	@curl -fL --progress-bar -o .toolchain/$(N).tar.gz $(U)
+	@tar -xzf .toolchain/$(N).tar.gz -C .toolchain
+	@rm -rf $(D)
+	@mv .toolchain/$(I) $(D)
+	@rm -f .toolchain/$(N).tar.gz
+	@echo "==> $(N) installed at $(D)"
+endef
+
 setup-wasi-sdk: ## Install wasi-sdk locally (~600 MB, one-time)
 setup-wasi-sdk: $(WASI_SDK_CLANG)
 
 $(WASI_SDK_CLANG):
-ifndef WASI_SDK_OS
+ifndef OS
 	$(error Unsupported OS '$(UNAME_S)'. Only macOS and Linux are supported)
 endif
-	@echo "==> Downloading $(WASI_SDK_NAME)"
-	@mkdir -p .toolchain
-	@curl -fL --progress-bar -o .toolchain/$(WASI_SDK_NAME).tar.gz \
-	  $(WASI_SDK_URL)
-	@tar -xzf .toolchain/$(WASI_SDK_NAME).tar.gz -C .toolchain
-	@rm -rf $(WASI_SDK_DIR)
-	@mv .toolchain/$(WASI_SDK_NAME) $(WASI_SDK_DIR)
-	@rm -f .toolchain/$(WASI_SDK_NAME).tar.gz
-	@echo "==> wasi-sdk installed at $(WASI_SDK_DIR)"
+	$(call install-toolchain,$(WASI_SDK_NAME),$(WASI_SDK_URL),\
+	    $(WASI_SDK_DIR),$(WASI_SDK_NAME))
 
 setup-wabt: ## Install WABT locally (one-time)
 setup-wabt: $(WABT_WAT2WASM)
@@ -201,15 +198,8 @@ $(WABT_WAT2WASM):
 ifndef WABT_NAME
 	$(error Prebuilt WABT is not available on $(UNAME_S)-$(UNAME_M))
 endif
-	@echo "==> Downloading WABT $(WABT_VERSION)"
-	@mkdir -p .toolchain
-	@curl -fL --progress-bar -o .toolchain/$(WABT_NAME).tar.gz \
-	  $(WABT_URL)
-	@tar -xzf .toolchain/$(WABT_NAME).tar.gz -C .toolchain
-	@rm -rf $(WABT_DIR)
-	@mv .toolchain/wabt-$(WABT_VERSION) $(WABT_DIR)
-	@rm -f .toolchain/$(WABT_NAME).tar.gz
-	@echo "==> WABT installed at $(WABT_DIR)"
+	$(call install-toolchain,$(WABT_NAME),$(WABT_URL),\
+	    $(WABT_DIR),wabt-$(WABT_VERSION))
 
 # ----- submodule init ---------------------------------------------------------
 
