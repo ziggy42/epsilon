@@ -106,7 +106,8 @@ help: ## Show this help
 build: ## Compile all Go packages
 	go build ./...
 
-build-all: build ## Cross-compile the CLI for Darwin and Windows (mirrors CI)
+build-all: build ## Cross-compile the CLI for Linux, Darwin, and Windows
+	GOOS=linux go build -o epsilon-linux ./cmd/epsilon
 	GOOS=darwin go build -o epsilon-darwin ./cmd/epsilon
 	GOOS=windows go build -o epsilon.exe ./cmd/epsilon
 
@@ -124,7 +125,7 @@ vet: ## Run go vet across the tree
 
 clean: ## Remove built artifacts (keeps the wasi-sdk toolchain)
 	go clean ./...
-	rm -f epsilon-darwin epsilon.exe cpu.prof
+	rm -f epsilon-linux epsilon-darwin epsilon.exe cpu.prof
 	@if [ -f epsilon ]; then rm -f epsilon; fi
 	rm -f internal/benchmarks/benchmarks.test
 	rm -rf $(WASM_OUT_DIR)

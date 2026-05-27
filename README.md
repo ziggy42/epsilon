@@ -137,13 +137,14 @@ Targets:
   vet                   Run go vet across the tree
   clean                 Remove built artifacts (keeps the wasi-sdk toolchain)
   distclean             Remove built artifacts AND the wasi-sdk toolchain
-  test-spec             Run the wasm spec tests
+  test-spec             Run wasm spec tests
   test-wasi             Run the WASI testsuite (needs uv)
   test-all              Run all tests (Go tests + WASI spec tests)
   bench                 Run benchmarks (vars: BENCH_PATTERN, etc.)
   bench-compare         Compare benchmarks across refs; TARGET=<ref> required
   build-wasm            Rebuild benchmark .wasm files (auto-installs wasi-sdk)
   setup-wasi-sdk        Install wasi-sdk locally (~600 MB, one-time)
+  setup-wabt            Install WABT locally (one-time)
 
 Common overrides:
   BENCH_PATTERN=<pat>   go test -bench filter (default: .)
@@ -152,7 +153,10 @@ Common overrides:
   WASI_SDK_DIR=<p>      wasi-sdk path (default: .toolchain/wasi-sdk)
 ```
 
-
+Targets that need external toolchains (`wasi-sdk` for `build-wasm`, `wabt`
+for the spec tests) auto-install them into `.toolchain/` on first run.
+`test-wasi` additionally needs [`uv`](https://docs.astral.sh/uv/) installed
+on the host.
 
 ## Contributing
 

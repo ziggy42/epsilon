@@ -29,30 +29,25 @@ adherence to project standards.
 ### 2. Build & Test Verification
 
 1.  **Build for All Platforms**:
-    - Run `GOOS=linux go build -o epsilon-linux ./cmd/epsilon`
-    - Run `GOOS=darwin go build -o epsilon-darwin ./cmd/epsilon`
-    - Run `GOOS=windows go build -o epsilon.exe ./cmd/epsilon`
-    - Run `rm -f epsilon-linux epsilon-darwin epsilon.exe` to clean up.
+    - Run `make build-all` (covers Linux, Darwin, and Windows cross-compile,
+      regardless of host OS).
+    - Cleanup afterwards: `make clean`.
     - **If any build fails, stop and report the error.**
 2.  **Lint & Format**:
-    - Run `go fmt ./...`. If any files are modified, **stop and report the
-      error**.
-    - Run `go vet ./...`. **If any issues are found, stop and report the
-      error.**
+    - Run `make fmt`. If any files are modified, **stop and report the error**.
+    - Run `make vet`. **If any issues are found, stop and report the error.**
 3.  **Run All Tests**:
-    - Run `go test ./...` to execute all tests.
+    - Run `make test` to execute Go tests (unit + spec).
     - **If tests fail, stop and report the errors.**
 4.  **Run WASI Tests**:
-    - Run `uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py`
-      to verify WASI implementation.
+    - Run `make test-wasi` to verify the WASI Preview 1 implementation.
     - **If WASI tests fail, stop and report the errors.**
 
 ### 3. Performance Verification
 
-1.  **Compare Benchmarks**: Run
-    `./internal/benchmarks/compare.py --base main --target .` to compare
-    performance against the main branch. **NOTE**: This can take several minutes
-    as it runs the benchmark suite twice.
+1.  **Compare Benchmarks**: Run `make bench-compare TARGET=.` to compare
+    performance against the `main` branch (the default base). **NOTE**: This
+    can take several minutes as it runs the benchmark suite twice.
 2.  **Review Results**: Present the benchmark results to the user. Flag any
     regressions where:
     - Time (ns/op) increased by more than 5%.
