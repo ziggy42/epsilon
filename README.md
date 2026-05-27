@@ -152,11 +152,6 @@ Common overrides:
   WASI_SDK_DIR=<p>      wasi-sdk path (default: .toolchain/wasi-sdk)
 ```
 
-### Prerequisites
-
-To run all specialized tests and compilation locally, ensure you have the following:
-
-* [uv](https://docs.astral.sh/uv/) — Python packaging tool required to run the WASI spec testsuite.
 
 
 ## Contributing
@@ -172,4 +167,3 @@ Apache 2.0; see [`LICENSE`](LICENSE) for details.
 This is not an officially supported Google product. This project is not
 eligible for the [Google Open Source Software Vulnerability Rewards
 Program](https://bughunters.google.com/open-source-security).
-
