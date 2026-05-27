@@ -73,16 +73,10 @@ This implementation is tested against the official
 
 ### Running WASI Spec Tests
 
-From the repository root, you can run the tests using `make`:
+From the repository root:
 
 ```bash
 make test-wasi
-```
-
-Or run the underlying command directly:
-
-```bash
-uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py
 ```
 
 ## Limitations

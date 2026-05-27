@@ -15,27 +15,15 @@
 package wabt
 
 import (
-	"os"
 	"path/filepath"
+	"runtime"
 )
 
-// resolveBinary returns the path to the WABT binary strictly in the project's
-// local `.toolchain` directory. It does not fall back to the host system path.
+// resolveBinary returns the path to a WABT binary in the project's local
+// `.toolchain` directory. The path is anchored to this source file's
+// location so resolution works from any test's working directory.
 func resolveBinary(name string) string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return filepath.Join(".toolchain", "wabt", "bin", name)
-	}
-	// Traverse up to find the project root (where go.mod lives)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return filepath.Join(dir, ".toolchain", "wabt", "bin", name)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return filepath.Join(".toolchain", "wabt", "bin", name)
+	_, thisFile, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	return filepath.Join(root, ".toolchain", "wabt", "bin", name)
 }
