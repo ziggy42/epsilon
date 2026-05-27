@@ -192,6 +192,7 @@ int partition(int *array, int left, int right) {
   return i + 1;
 }
 
+__attribute__((noinline, disable_tail_calls))
 void quick_sort_internal(int *array, int left, int right) {
   if (left >= right) {
     return;

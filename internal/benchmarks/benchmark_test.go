@@ -16,6 +16,7 @@
 package benchmarks
 
 import (
+	"bytes"
 	"os"
 	"testing"
 
@@ -29,7 +30,7 @@ func BenchmarkFactorialRecursive(b *testing.B) {
 	}
 
 	for b.Loop() {
-		_, err := instance.Invoke("fac_recursive", int64(25))
+		_, err := instance.Invoke("fac_recursive", int32(1000), int64(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -43,7 +44,7 @@ func BenchmarkFactorialIterative(b *testing.B) {
 	}
 
 	for b.Loop() {
-		_, err := instance.Invoke("fac_iterative", int64(25))
+		_, err := instance.Invoke("fac_iterative", int32(10000), int64(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -57,7 +58,7 @@ func BenchmarkFibonacciRecursive(b *testing.B) {
 	}
 
 	for b.Loop() {
-		_, err := instance.Invoke("fib_recursive", int32(25))
+		_, err := instance.Invoke("fib_recursive", int32(1), int32(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -71,7 +72,7 @@ func BenchmarkFibonacciIterative(b *testing.B) {
 	}
 
 	for b.Loop() {
-		_, err := instance.Invoke("fib_iterative", int32(25))
+		_, err := instance.Invoke("fib_iterative", int32(10000), int32(25))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -85,7 +86,7 @@ func BenchmarkIndirect(b *testing.B) {
 	}
 
 	for b.Loop() {
-		_, err := instance.Invoke("run_indirect_calls", int32(100))
+		_, err := instance.Invoke("run_indirect_calls", int32(10000))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}
@@ -184,6 +185,69 @@ func BenchmarkSortingQuickSort(b *testing.B) {
 
 	for b.Loop() {
 		_, err := instance.Invoke("quick_sort")
+		if err != nil {
+			b.Fatalf("failed to execute benchmark: %v", err)
+		}
+	}
+}
+
+func BenchmarkHostCall(b *testing.B) {
+	wasm, err := os.ReadFile("wasm/host_call.wasm")
+	if err != nil {
+		b.Fatalf("failed to read wasm: %v", err)
+	}
+	imports := epsilon.NewModuleImports("env").
+		AddHostFunc("noop", func(_ *epsilon.ModuleInstance, args ...any) []any {
+			return []any{args[0]}
+		})
+	instance, err := epsilon.NewRuntime().
+		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+	if err != nil {
+		b.Fatalf("failed to instantiate: %v", err)
+	}
+
+	for b.Loop() {
+		_, err := instance.Invoke("run_host_calls", int32(10000))
+		if err != nil {
+			b.Fatalf("failed to execute benchmark: %v", err)
+		}
+	}
+}
+
+func BenchmarkInstantiateSmall(b *testing.B) {
+	wasm, err := os.ReadFile("wasm/factorial.wasm")
+	if err != nil {
+		b.Fatalf("failed to read wasm: %v", err)
+	}
+	for b.Loop() {
+		_, err := epsilon.NewRuntime().InstantiateModuleFromBytes(wasm)
+		if err != nil {
+			b.Fatalf("failed to instantiate: %v", err)
+		}
+	}
+}
+
+func BenchmarkInstantiateLarge(b *testing.B) {
+	wasm, err := os.ReadFile("wasm/sorting.wasm")
+	if err != nil {
+		b.Fatalf("failed to read wasm: %v", err)
+	}
+	for b.Loop() {
+		_, err := epsilon.NewRuntime().InstantiateModuleFromBytes(wasm)
+		if err != nil {
+			b.Fatalf("failed to instantiate: %v", err)
+		}
+	}
+}
+
+func BenchmarkSHA256(b *testing.B) {
+	instance, err := instantiate("wasm/sha256.wasm")
+	if err != nil {
+		b.Fatalf("failed to initialize test: %v", err)
+	}
+
+	for b.Loop() {
+		_, err := instance.Invoke("run_sha256", int32(64))
 		if err != nil {
 			b.Fatalf("failed to execute benchmark: %v", err)
 		}

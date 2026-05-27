@@ -16,19 +16,37 @@
 
 #include <stdint.h>
 
-__attribute__((export_name("fac_recursive")))
-int64_t fac_recursive(int64_t n) {
+__attribute__((noinline))
+static int64_t fac_recursive_impl(int64_t n) {
   if (n == 0) {
     return 1;
   }
-  return n * fac_recursive(n - 1);
+  // `volatile` blocks LLVM's scalar-evolution pass from rewriting the
+  // accumulator into an iterative loop, so the recursion survives -O3.
+  volatile int64_t sub = fac_recursive_impl(n - 1);
+  return n * sub;
+}
+
+// `n` is passed in (rather than hardcoded) so LLVM can't fold the inner
+// loop into a closed-form expression.
+__attribute__((export_name("fac_recursive")))
+int64_t fac_recursive(int32_t iterations, int64_t n) {
+  int64_t total = 0;
+  for (int32_t i = 0; i < iterations; i++) {
+    total += fac_recursive_impl(n);
+  }
+  return total;
 }
 
 __attribute__((export_name("fac_iterative")))
-int64_t fac_iterative(int64_t n) {
-  int64_t fac = 1;
-  for (int i = 2; i <=n; i++) {
-    fac *= i;
-  } 
-  return fac;
+int64_t fac_iterative(int32_t iterations, int64_t n) {
+  int64_t total = 0;
+  for (int32_t iter = 0; iter < iterations; iter++) {
+    int64_t fac = 1;
+    for (int64_t i = 2; i <= n; i++) {
+      fac *= i;
+    }
+    total += fac;
+  }
+  return total;
 }

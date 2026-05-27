@@ -14,35 +14,46 @@
  * limitations under the License.
  */
 
-__attribute__((export_name("fib_recursive")))
-int fib_recursive(int n) {
+#include <stdint.h>
+
+__attribute__((noinline))
+static int fib_recursive_impl(int n) {
   if (n == 0) {
     return 0;
   }
-
   if (n == 1) {
     return 1;
   }
+  // `volatile` prevents LLVM from rewriting one recursive call into a loop,
+  // so both branches of the tree recursion survive -O3.
+  volatile int a = fib_recursive_impl(n - 1);
+  volatile int b = fib_recursive_impl(n - 2);
+  return a + b;
+}
 
-  return fib_recursive(n - 1) + fib_recursive(n - 2);
+// `n` is passed in (rather than hardcoded) so LLVM can't fold the inner
+// loop into a closed-form expression.
+__attribute__((export_name("fib_recursive")))
+int fib_recursive(int32_t iterations, int32_t n) {
+  int total = 0;
+  for (int32_t i = 0; i < iterations; i++) {
+    total += fib_recursive_impl(n);
+  }
+  return total;
 }
 
 __attribute__((export_name("fib_iterative")))
-int fib_iterative(int n) {
-  if (n == 0) {
-    return 0;
+int fib_iterative(int32_t iterations, int32_t n) {
+  int total = 0;
+  for (int32_t iter = 0; iter < iterations; iter++) {
+    int a = 0;
+    int b = 1;
+    for (int32_t i = 2; i <= n; i++) {
+      int next = a + b;
+      a = b;
+      b = next;
+    }
+    total += b;
   }
-
-  if (n == 1) {
-    return 1;
-  }
-
-  int a = 0;
-  int b = 1;
-  for (int i = 2; i <= n; i++) {
-    int next = a + b;
-    a = b;
-    b = next;
-  }
-  return b;
+  return total;
 }

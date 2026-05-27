@@ -26,6 +26,7 @@ float matrix_a[DIM][DIM];
 float matrix_b[DIM][DIM];
 float result_matrix[DIM][DIM];
 
+__attribute__((noinline))
 void multiply() {
   for (int i = 0; i < DIM; i++) {
     for (int j = 0; j < DIM; j++) {
