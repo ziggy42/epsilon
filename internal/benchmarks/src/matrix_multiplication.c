@@ -14,18 +14,8 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc matrix_multiplication.c -o matrix_multiplication.wasm -s \
-  EXPORTED_FUNCTIONS="['_run_matrix_multiplication']" \
-  -s STANDALONE_WASM \
-  -msimd128 \
-  -O3 \
-  --no-entry
-```
- *
- * NOTE: The `-msimd128` flag is ESSENTIAL. It enables the WebAssembly
- * SIMD feature and allows the compiler to auto-vectorize the loops.
+/* NOTE: Compiled with `-msimd128`. SIMD auto-vectorization is essential —
+ * without it the inner loop runs scalar.
  */
 
 // Use a matrix size that is a multiple of 4 to be friendly to
@@ -48,6 +38,7 @@ void multiply() {
   }
 }
 
+__attribute__((export_name("run_matrix_multiplication")))
 float run_matrix_multiplication(int iterations) {
   // Initialize matrices with some values.
   for (int i = 0; i < DIM; i++) {

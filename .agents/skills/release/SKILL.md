@@ -42,17 +42,17 @@ updates, and git tagging.
 
 ### 2. Verification
 
-1.  **Build**: Run `go build ./...`. If the build fails, stop and report the
-    error.
-2.  **Run Tests**: Run `go test ./...`. If tests fail, stop and report the
+1.  **Build**: Run `make build-all` (native + Darwin + Windows cross-compile).
+    If any build fails, stop and report the error.
+2.  **Run Tests**: Run `make test`. If tests fail, stop and report the
     errors.
 3.  **Compare Benchmarks**: Find the previous release tag using
     `git describe --tags --abbrev=0`. Then run
-    `./internal/benchmarks/compare.py --base <last_tag> --target .` to compare
-    performance against the last release. Present the results to the user and
-    flag any significant regressions. **NOTE**: This process can take several
-    minutes as it runs the full benchmark suite twice; ensure a reasonable
-    timeout (e.g., 10m) is applied.
+    `make bench-compare TARGET=. BASE=<last_tag>` to compare performance
+    against the last release. Present the results to the user and flag any
+    significant regressions. **NOTE**: This process can take several minutes
+    as it runs the full benchmark suite twice; ensure a reasonable timeout
+    (e.g., 10m) is applied.
 
 ### 3. Changelog Generation
 

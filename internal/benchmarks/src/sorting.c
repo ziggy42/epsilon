@@ -14,15 +14,6 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc sorting.c -o sorting.wasm -s \
-  EXPORTED_FUNCTIONS="['_bubble_sort', '_merge_sort', '_quick_sort']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry
-```
- */
 #include <stdlib.h>
 #include <string.h>
 
@@ -118,6 +109,7 @@ int data_buffer[BUFFER_LENGTH];
 
 void init_data() { memcpy(data_buffer, original_data, sizeof(original_data)); }
 
+__attribute__((export_name("bubble_sort")))
 void bubble_sort() {
   init_data();
   for (int i = 0; i < BUFFER_LENGTH; i++) {
@@ -174,6 +166,7 @@ void merge_sort_internal(int *array, int left, int right) {
   free(right_array);
 }
 
+__attribute__((export_name("merge_sort")))
 void merge_sort() {
   init_data();
   merge_sort_internal(data_buffer, 0, BUFFER_LENGTH - 1);
@@ -208,6 +201,7 @@ void quick_sort_internal(int *array, int left, int right) {
   quick_sort_internal(array, pivot_index + 1, right);
 }
 
+__attribute__((export_name("quick_sort")))
 void quick_sort() {
   init_data();
   quick_sort_internal(data_buffer, 0, BUFFER_LENGTH - 1);

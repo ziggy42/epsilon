@@ -14,16 +14,6 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc indirect.c -o indirect.wasm -s \
-  EXPORTED_FUNCTIONS="['_run_indirect_calls']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry
-```
- */
-
 int add(int a, int b) { return a + b; }
 int sub(int a, int b) { return a - b; }
 int mul(int a, int b) { return a * b; }
@@ -35,6 +25,7 @@ binary_op operations[] = {&add, &sub, &mul, &xor_op};
 
 #define NUM_OPS 4
 
+__attribute__((export_name("run_indirect_calls")))
 int run_indirect_calls(int iterations) {
   int result = 0;
   for (int i = 0; i < iterations; i++) {

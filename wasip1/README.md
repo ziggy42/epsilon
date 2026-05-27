@@ -76,7 +76,7 @@ This implementation is tested against the official
 From the repository root:
 
 ```bash
-uv run --with-requirements requirements.txt wasip1/wasi_testsuite.py
+make test-wasi
 ```
 
 ## Limitations

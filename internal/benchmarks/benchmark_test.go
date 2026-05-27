@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The .wasm files loaded below are built from src/*.c via `make build-wasm`.
 package benchmarks
 
 import (
@@ -22,7 +23,7 @@ import (
 )
 
 func BenchmarkFactorialRecursive(b *testing.B) {
-	instance, err := instantiate("code/factorial.wasm")
+	instance, err := instantiate("wasm/factorial.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -36,7 +37,7 @@ func BenchmarkFactorialRecursive(b *testing.B) {
 }
 
 func BenchmarkFactorialIterative(b *testing.B) {
-	instance, err := instantiate("code/factorial.wasm")
+	instance, err := instantiate("wasm/factorial.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -50,7 +51,7 @@ func BenchmarkFactorialIterative(b *testing.B) {
 }
 
 func BenchmarkFibonacciRecursive(b *testing.B) {
-	instance, err := instantiate("code/fibonacci.wasm")
+	instance, err := instantiate("wasm/fibonacci.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -64,7 +65,7 @@ func BenchmarkFibonacciRecursive(b *testing.B) {
 }
 
 func BenchmarkFibonacciIterative(b *testing.B) {
-	instance, err := instantiate("code/fibonacci.wasm")
+	instance, err := instantiate("wasm/fibonacci.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -78,7 +79,7 @@ func BenchmarkFibonacciIterative(b *testing.B) {
 }
 
 func BenchmarkIndirect(b *testing.B) {
-	instance, err := instantiate("code/indirect.wasm")
+	instance, err := instantiate("wasm/indirect.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -92,7 +93,7 @@ func BenchmarkIndirect(b *testing.B) {
 }
 
 func BenchmarkMatrixMultiplication(b *testing.B) {
-	instance, err := instantiate("code/matrix_multiplication.wasm")
+	instance, err := instantiate("wasm/matrix_multiplication.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -106,7 +107,7 @@ func BenchmarkMatrixMultiplication(b *testing.B) {
 }
 
 func BenchmarkVectorMath(b *testing.B) {
-	instance, err := instantiate("code/vector_math.wasm")
+	instance, err := instantiate("wasm/vector_math.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -120,7 +121,7 @@ func BenchmarkVectorMath(b *testing.B) {
 }
 
 func BenchmarkMemoryAccess(b *testing.B) {
-	instance, err := instantiate("code/memory_access.wasm")
+	instance, err := instantiate("wasm/memory_access.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -134,7 +135,7 @@ func BenchmarkMemoryAccess(b *testing.B) {
 }
 
 func BenchmarkTrigonometrySin(b *testing.B) {
-	instance, err := instantiate("code/trigonometry.wasm")
+	instance, err := instantiate("wasm/trigonometry.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -148,7 +149,7 @@ func BenchmarkTrigonometrySin(b *testing.B) {
 }
 
 func BenchmarkSortingBubbleSort(b *testing.B) {
-	instance, err := instantiate("code/sorting.wasm")
+	instance, err := instantiate("wasm/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -162,7 +163,7 @@ func BenchmarkSortingBubbleSort(b *testing.B) {
 }
 
 func BenchmarkSortingMergeSort(b *testing.B) {
-	instance, err := instantiate("code/sorting.wasm")
+	instance, err := instantiate("wasm/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}
@@ -176,7 +177,7 @@ func BenchmarkSortingMergeSort(b *testing.B) {
 }
 
 func BenchmarkSortingQuickSort(b *testing.B) {
-	instance, err := instantiate("code/sorting.wasm")
+	instance, err := instantiate("wasm/sorting.wasm")
 	if err != nil {
 		b.Fatalf("failed to initialize test: %v", err)
 	}

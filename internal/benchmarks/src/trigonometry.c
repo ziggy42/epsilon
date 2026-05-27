@@ -14,28 +14,9 @@
  * limitations under the License.
  */
 
-/** Compile with:
-```
-emcc factorial.c -o factorial.wasm -s \
-  EXPORTED_FUNCTIONS="['_fac_recursive', '_fac_iterative']" \
-  -s STANDALONE_WASM \
-  -O3 \
-  --no-entry
-```
- */
-#include <stdint.h>
+#include <math.h>
 
-int64_t fac_recursive(int64_t n) {
-  if (n == 0) {
-    return 1;
-  }
-  return n * fac_recursive(n - 1);
-}
-
-int64_t fac_iterative(int64_t n) {
-  int64_t fac = 1;
-  for (int i = 2; i <=n; i++) {
-    fac *= i;
-  } 
-  return fac;
+__attribute__((export_name("compute_sin")))
+float compute_sin(float n) {
+  return sin(n);
 }

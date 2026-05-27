@@ -24,9 +24,12 @@
 
 # Project Specifics
 
+- **Build & test**: Use the root `Makefile` as the entry point. `make help`
+  lists all targets. Common ones: `make test` (Go unit + spec tests),
+  `make bench` (benchmarks), `make test-wasi` (WASI integration suite).
 - **Testing**:
-  - Verify core logic changes against spec tests: `go test ./internal/spec_tests/...`
-  - Ensure performance regressions are checked: `go test -bench . ./internal/benchmarks`
+  - Verify core logic changes against spec tests: `make test-spec`
+  - Ensure performance regressions are checked: `make bench`
 - **Performance**:
   - Minimize heap allocations in the hot path (VM instruction loop).
   - Prefer reusing buffers/slices where possible.
