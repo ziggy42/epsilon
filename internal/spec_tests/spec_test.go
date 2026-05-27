@@ -23,19 +23,21 @@ import (
 	"github.com/ziggy42/epsilon/internal/wabt"
 )
 
-func testSpec(t *testing.T, dirPath string) {
-	files, err := os.ReadDir(dirPath)
+const testsuiteDir = "testsuite"
+
+func TestSpec(t *testing.T) {
+	entries, err := os.ReadDir(testsuiteDir)
 	if err != nil {
-		t.Fatalf("failed to read wast directory: %v", err)
+		t.Fatalf("failed to read testsuite directory: %v", err)
 	}
 
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".wast") {
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".wast") {
 			continue
 		}
-
-		wastFile := filepath.Join(dirPath, file.Name())
-		t.Run(file.Name(), func(t *testing.T) {
+		wastFile := filepath.Join(testsuiteDir, name)
+		t.Run(name, func(t *testing.T) {
 			jsonData, wasmDict, err := wabt.Wast2json(wastFile)
 			if err != nil {
 				t.Fatalf("failed to run wast2json: %v", err)
@@ -44,12 +46,4 @@ func testSpec(t *testing.T, dirPath string) {
 			runner.run(jsonData.Commands)
 		})
 	}
-}
-
-func TestCoreSpec(t *testing.T) {
-	testSpec(t, "spec/test/core")
-}
-
-func TestSimdSpec(t *testing.T) {
-	testSpec(t, "spec/test/core/simd")
 }
