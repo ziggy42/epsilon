@@ -62,7 +62,7 @@ func Wast2json(wastFile string) (*WastJSON, map[string][]byte, error) {
 	outputJson := filepath.Join(tempDir, outputName+".json")
 
 	cmd := exec.Command(
-		"wast2json",
+		resolveBinary("wast2json"),
 		wastFile,
 		"--no-check",
 		"--output="+outputJson,

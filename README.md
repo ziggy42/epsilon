@@ -156,7 +156,6 @@ Common overrides:
 
 To run all specialized tests and compilation locally, ensure you have the following:
 
-* [WABT](https://github.com/WebAssembly/wabt) — required to assemble raw `.wat` files to binary `.wasm`.
 * [uv](https://docs.astral.sh/uv/) — Python packaging tool required to run the WASI spec testsuite.
 
 

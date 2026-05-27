@@ -10,6 +10,9 @@
 
 .DEFAULT_GOAL := help
 
+WASI_SDK_VERSION ?= 33
+WABT_VERSION ?= 1.0.41
+
 # ----- platform detection -----------------------------------------------------
 
 UNAME_S := $(shell uname -s)
@@ -30,14 +33,36 @@ else
   WASI_SDK_ARCH := x86_64
 endif
 
+# WABT platform detection (prebuilt binaries for macos-arm64, linux-arm64/x64)
+ifeq ($(UNAME_S),Darwin)
+  ifeq ($(UNAME_M),arm64)
+    WABT_NAME := wabt-$(WABT_VERSION)-macos-arm64
+  endif
+endif
+ifeq ($(UNAME_S),Linux)
+  ifeq ($(UNAME_M),arm64)
+    WABT_NAME := wabt-$(WABT_VERSION)-linux-arm64
+  else ifeq ($(UNAME_M),aarch64)
+    WABT_NAME := wabt-$(WABT_VERSION)-linux-arm64
+  else
+    WABT_NAME := wabt-$(WABT_VERSION)-linux-x64
+  endif
+endif
+
 # ----- variables --------------------------------------------------------------
 
-WASI_SDK_VERSION ?= 33
 WASI_SDK_DIR ?= .toolchain/wasi-sdk
 WASI_SDK_CLANG := $(WASI_SDK_DIR)/bin/clang
 WASI_SDK_NAME := wasi-sdk-$(WASI_SDK_VERSION).0-$(WASI_SDK_ARCH)-$(WASI_SDK_OS)
-WASI_SDK_URL := https://github.com/WebAssembly/wasi-sdk/releases/download/\
-wasi-sdk-$(WASI_SDK_VERSION)/$(WASI_SDK_NAME).tar.gz
+WASI_SDK_H := https://github.com/WebAssembly/wasi-sdk/releases/download
+WASI_SDK_P := wasi-sdk-$(WASI_SDK_VERSION)/$(WASI_SDK_NAME).tar.gz
+WASI_SDK_URL := $(WASI_SDK_H)/$(WASI_SDK_P)
+
+WABT_DIR ?= .toolchain/wabt
+WABT_WAT2WASM := $(WABT_DIR)/bin/wat2wasm
+WABT_H := https://github.com/WebAssembly/wabt/releases/download
+WABT_P := $(WABT_VERSION)/$(WABT_NAME).tar.gz
+WABT_URL := $(WABT_H)/$(WABT_P)
 
 BENCH_PATTERN  ?= .
 BENCH_TIME     ?= 1s
@@ -85,7 +110,7 @@ build-all: build ## Cross-compile the CLI for Darwin and Windows (mirrors CI)
 	GOOS=darwin go build -o epsilon-darwin ./cmd/epsilon
 	GOOS=windows go build -o epsilon.exe ./cmd/epsilon
 
-test: ## Run all Go tests (unit + spec)
+test: setup-wabt ## Run all Go tests (unit + spec)
 	go test ./...
 
 run-example: ## Run the basic example (smoke check)
@@ -109,7 +134,7 @@ distclean: clean ## Remove built artifacts AND the wasi-sdk toolchain
 
 # ----- specialized test suites ------------------------------------------------
 
-test-spec: internal/spec_tests/testsuite/.git ## Run the wasm spec tests
+test-spec: internal/spec_tests/testsuite/.git setup-wabt ## Run wasm spec tests
 	go test ./internal/spec_tests/...
 
 test-wasi: wasip1/wasi-testsuite/.git ## Run the WASI testsuite (needs uv)
@@ -168,6 +193,23 @@ endif
 	@rm -f .toolchain/$(WASI_SDK_NAME).tar.gz
 	@echo "==> wasi-sdk installed at $(WASI_SDK_DIR)"
 
+setup-wabt: ## Install WABT locally (one-time)
+setup-wabt: $(WABT_WAT2WASM)
+
+$(WABT_WAT2WASM):
+ifndef WABT_NAME
+	$(error Prebuilt WABT is not available on $(UNAME_S)-$(UNAME_M))
+endif
+	@echo "==> Downloading WABT $(WABT_VERSION)"
+	@mkdir -p .toolchain
+	@curl -fL --progress-bar -o .toolchain/$(WABT_NAME).tar.gz \
+	  $(WABT_URL)
+	@tar -xzf .toolchain/$(WABT_NAME).tar.gz -C .toolchain
+	@rm -rf $(WABT_DIR)
+	@mv .toolchain/wabt-$(WABT_VERSION) $(WABT_DIR)
+	@rm -f .toolchain/$(WABT_NAME).tar.gz
+	@echo "==> WABT installed at $(WABT_DIR)"
+
 # ----- submodule init ---------------------------------------------------------
 
 internal/spec_tests/testsuite/.git wasip1/wasi-testsuite/.git:
@@ -178,4 +220,4 @@ internal/spec_tests/testsuite/.git wasip1/wasi-testsuite/.git:
 .PHONY: help build build-all test run-example fmt vet clean distclean \
         test-spec test-wasi test-all \
         bench bench-compare \
-        build-wasm setup-wasi-sdk
+        build-wasm setup-wasi-sdk setup-wabt
