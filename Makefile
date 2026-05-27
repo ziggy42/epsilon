@@ -1,12 +1,9 @@
-# Epsilon — single entry point for build, test, bench, and toolchain setup.
+# Epsilon — build, test, and bench entry point.
 #
-# Run `make` (or `make help`) to list available targets. Variables can be
-# overridden via the environment, e.g.:
+# `make` (or `make help`) lists targets. Override variables on the command
+# line, e.g.:
 #   make WASI_SDK_DIR=/opt/wasi-sdk-33 build-wasm
-#   make BENCHTIME=2s bench
-#
-# Every target carries a `## description` that `make help` extracts. No
-# interactive prompts. Errors point at the fix.
+#   make BENCH_TIME=2s bench
 
 .DEFAULT_GOAL := help
 
@@ -150,8 +147,7 @@ endif
 
 # ----- benchmark .wasm builds -------------------------------------------------
 
-build-wasm: ## Rebuild benchmark .wasm files (auto-installs wasi-sdk)
-build-wasm: $(WASM_OUTPUTS)
+build-wasm: $(WASM_OUTPUTS) ## Rebuild benchmark .wasm files (auto-installs wasi-sdk)
 
 $(WASM_OUTPUTS): $(WASM_OUT_DIR)/%.wasm: \
     $(WASM_SRC_DIR)/%.c $(WASI_SDK_CLANG) | $(WASM_OUT_DIR)
@@ -181,8 +177,7 @@ define install-toolchain
 	@echo "==> $(N) installed at $(D)"
 endef
 
-setup-wasi-sdk: ## Install wasi-sdk locally (~600 MB, one-time)
-setup-wasi-sdk: $(WASI_SDK_CLANG)
+setup-wasi-sdk: $(WASI_SDK_CLANG) ## Install wasi-sdk locally (~600 MB, one-time)
 
 $(WASI_SDK_CLANG):
 ifndef OS
@@ -191,8 +186,7 @@ endif
 	$(call install-toolchain,$(WASI_SDK_NAME),$(WASI_SDK_URL),\
 	    $(WASI_SDK_DIR),$(WASI_SDK_NAME))
 
-setup-wabt: ## Install WABT locally (one-time)
-setup-wabt: $(WABT_WAT2WASM)
+setup-wabt: $(WABT_WAT2WASM) ## Install WABT locally (one-time)
 
 $(WABT_WAT2WASM):
 ifndef WABT_NAME
