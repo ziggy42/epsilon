@@ -147,7 +147,7 @@ endif
 
 # ----- benchmark .wasm builds -------------------------------------------------
 
-build-wasm: $(WASM_OUTPUTS) ## Rebuild benchmark .wasm files (auto-installs wasi-sdk)
+build-wasm: $(WASM_OUTPUTS) ## Rebuild benchmark .wasm files
 
 $(WASM_OUTPUTS): $(WASM_OUT_DIR)/%.wasm: \
     $(WASM_SRC_DIR)/%.c $(WASI_SDK_CLANG) | $(WASM_OUT_DIR)
@@ -177,7 +177,7 @@ define install-toolchain
 	@echo "==> $(N) installed at $(D)"
 endef
 
-setup-wasi-sdk: $(WASI_SDK_CLANG) ## Install wasi-sdk locally (~600 MB, one-time)
+setup-wasi-sdk: $(WASI_SDK_CLANG) ## Install wasi-sdk locally
 
 $(WASI_SDK_CLANG):
 ifndef OS
