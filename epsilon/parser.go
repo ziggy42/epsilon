@@ -84,14 +84,58 @@ type localEntry struct {
 	typ   ValueType
 }
 
+// wasmReader is the combined reader interface the parser needs: single-byte
+// reads for LEB128 decoding plus bulk reads for section payloads.
+type wasmReader interface {
+	io.Reader
+	io.ByteReader
+}
+
+// limitedByteReader caps reads at rem bytes from an underlying wasmReader. It
+// is equivalent to wrapping an io.LimitReader in a bufio.Reader to regain
+// ByteReader, but reads from the source directly and so needs no buffer.
+type limitedByteReader struct {
+	r   wasmReader
+	rem int64
+}
+
+func (l *limitedByteReader) Read(p []byte) (int, error) {
+	if l.rem <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > l.rem {
+		p = p[:l.rem]
+	}
+	n, err := l.r.Read(p)
+	l.rem -= int64(n)
+	return n, err
+}
+
+func (l *limitedByteReader) ReadByte() (byte, error) {
+	if l.rem <= 0 {
+		return 0, io.EOF
+	}
+	b, err := l.r.ReadByte()
+	if err == nil {
+		l.rem--
+	}
+	return b, err
+}
+
 // parser is a parser for WASM modules.
 type parser struct {
-	reader *bufio.Reader
+	reader wasmReader
 	config Config
 }
 
 func newParser(reader io.Reader, config Config) *parser {
-	return &parser{reader: bufio.NewReader(reader), config: config}
+	var wr wasmReader
+	if r, ok := reader.(wasmReader); ok {
+		wr = r
+	} else {
+		wr = bufio.NewReader(reader)
+	}
+	return &parser{reader: wr, config: config}
 }
 
 // parse takes a byte slice and returns a Module.
@@ -267,13 +311,11 @@ func (p *parser) parseCustomSection(payloadLen uint32) error {
 		return errIntegerTooLarge
 	}
 
-	nameBytes := bytes.NewBuffer(
-		make([]byte, 0, min(nameLength, initialVectorCapacity)),
-	)
-	if _, err := io.CopyN(nameBytes, p.reader, int64(nameLength)); err != nil {
+	nameBytes, err := p.readN(nameLength)
+	if err != nil {
 		return err
 	}
-	if !utf8.Valid(nameBytes.Bytes()) {
+	if !utf8.Valid(nameBytes) {
 		return errInvalidUTF8
 	}
 
@@ -292,9 +334,8 @@ func (p *parser) parseFunction() (function, error) {
 	originalReader := p.reader
 	defer func() { p.reader = originalReader }()
 
-	// We create a new reader to limit how many bytes we can read to `size`.
-	limitedReader := io.LimitReader(originalReader, int64(size))
-	p.reader = bufio.NewReader(limitedReader)
+	// Limit reads to this function's body of `size` bytes.
+	p.reader = &limitedByteReader{r: originalReader, rem: int64(size)}
 
 	localEntries, err := parseVector(p, p.parseLocalVariables)
 	if err != nil {
@@ -324,9 +365,9 @@ func (p *parser) parseFunction() (function, error) {
 		return function{}, err
 	}
 
-	// Drain any bytes the bufio.Reader pre-fetched but the parser didn't consume.
-	// Without this, the outer reader resumes at the wrong offset when bufio has
-	// buffered past what was actually parsed (e.g., early end opcode).
+	// Discard any bytes of the function body the parser didn't consume (e.g.
+	// trailing bytes after an early end opcode) so the underlying reader is
+	// positioned at the start of the next function.
 	if _, err := io.Copy(io.Discard, p.reader); err != nil {
 		return function{}, err
 	}
@@ -804,11 +845,23 @@ func (p *parser) parseUtf8String() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	buf := bytes.NewBuffer(make([]byte, 0, min(length, initialVectorCapacity)))
-	if _, err := io.CopyN(buf, p.reader, int64(length)); err != nil {
+	stringBytes, err := p.readN(uint64(length))
+	if err != nil {
 		return "", fmt.Errorf("failed to read string bytes: %w", err)
 	}
-	return buf.String(), nil
+	return string(stringBytes), nil
+}
+
+// readN reads exactly length bytes from the reader. The initial buffer
+// capacity is capped at initialVectorCapacity so an attacker-controlled
+// length cannot force a huge up-front allocation; the buffer grows as needed
+// and a short read surfaces as an error.
+func (p *parser) readN(length uint64) ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, min(length, initialVectorCapacity)))
+	if _, err := io.CopyN(buf, p.reader, int64(length)); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func uint64SliceToInt32(slice []uint64) []int32 {
