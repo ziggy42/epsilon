@@ -360,7 +360,7 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	result, err := p.readCode(nil)
+	result, err := p.readCode(size, nil)
 	if err != nil {
 		return function{}, err
 	}
@@ -776,7 +776,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	result, err := p.readCode(func(instruction []uint64) bool {
+	result, err := p.readCode(0, func(instruction []uint64) bool {
 		return opcode(instruction[0]) == end
 	})
 	if err != nil {
@@ -918,10 +918,25 @@ type bytecodeResult struct {
 	jumpElseCache map[uint32]uint32
 }
 
-func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
-	bytecode := []uint64{}
-	jumpCache := map[uint32]uint32{}
-	jumpElseCache := map[uint32]uint32{}
+// readCode reads a sequence of instructions into the flat uint64 bytecode
+// slice. sizeHint is the body's byte length when known (0 otherwise), used only
+// to size the bytecode buffer up front and avoid repeated slice growth.
+//
+// It is an estimate, not an exact count: bytecode holds one uint64 per decoded
+// word, so a multi-byte LEB immediate (e.g. a wide i32.const) collapses several
+// bytes into one word, while a memory argument expands a couple of bytes into
+// several words. In practice most instructions map a byte to roughly a word, so
+// the hint is close; a miss in either direction just costs one more append.
+func (p *parser) readCode(
+	sizeHint uint32,
+	isEnd func([]uint64) bool,
+) (bytecodeResult, error) {
+	bytecode := make([]uint64, 0, sizeHint)
+	// The jump caches are allocated lazily: a function with no control flow
+	// never branches, so it needs neither map.
+	var jumpCache map[uint32]uint32
+	var jumpElseCache map[uint32]uint32
+
 	controlStack := []controlEntry{}
 	var lastOp opcode
 
@@ -940,6 +955,10 @@ func (p *parser) readCode(isEnd func([]uint64) bool) (bytecodeResult, error) {
 
 		switch opcodeVal {
 		case block, loop, ifOp:
+			if jumpCache == nil {
+				jumpCache = map[uint32]uint32{}
+				jumpElseCache = map[uint32]uint32{}
+			}
 			immediate, err := p.readBlockType()
 			if err != nil {
 				return bytecodeResult{}, err
