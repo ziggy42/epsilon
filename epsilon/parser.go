@@ -931,7 +931,11 @@ func (p *parser) readCode(
 	sizeHint uint32,
 	isEnd func([]uint64) bool,
 ) (bytecodeResult, error) {
-	bytecode := make([]uint64, 0, sizeHint)
+	// sizeHint is attacker-controlled (the function body's declared size), so cap
+	// the initial capacity at initialVectorCapacity. The buffer still grows via
+	// append as real bytes are decoded; a bogus huge size cannot force a large
+	// up-front allocation.
+	bytecode := make([]uint64, 0, min(sizeHint, initialVectorCapacity))
 	// The jump caches are allocated lazily: a function with no control flow
 	// never branches, so it needs neither map.
 	var jumpCache map[uint32]uint32
