@@ -29,9 +29,11 @@ type Config struct {
 	// Default: DefaultMaxCallStackDepth.
 	MaxCallStackDepth int
 
-	// CallStackPreallocationSize controls how many call frames to preallocate.
-	// Caches (controlStackCache, localsCache) are sized to this value.
-	// Beyond this depth, allocations fall back to heap.
+	// CallStackPreallocationSize is the number of call frames the VM preallocates
+	// buffers for. The control-stack cache reserves a fixed slot per frame up to
+	// this depth; deeper frames use the heap. The locals cache is a shared pool
+	// of this many frames' worth of locals; frames draw from it on demand and
+	// fall back to the heap when it is exhausted.
 	// Default: DefaultCallStackPreallocationSize.
 	CallStackPreallocationSize int
 

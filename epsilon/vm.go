@@ -93,8 +93,13 @@ type vm struct {
 	callStack         []callFrame
 	controlStackCache []controlFrame
 	localsCache       []value
-	config            Config
-	fuel              uint64
+	// localsTop is the bump-allocation cursor into localsCache: each wasm call
+	// carves its locals starting here, advances the cursor, and rewinds it when
+	// the call returns. This lets a frame with many locals use the shared cache
+	// rather than allocating them on the heap.
+	localsTop int
+	config    Config
+	fuel      uint64
 }
 
 func newVm(config Config) *vm {
@@ -279,25 +284,32 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	}
 
 	callDepth := len(vm.callStack)
-	withinPreallocation := callDepth < vm.config.CallStackPreallocationSize
+	// The control stack uses a fixed per-depth slot in controlStackCache, which
+	// only covers call depths within the preallocated range; deeper frames put
+	// their control stack on the heap.
+	useControlStackCache := callDepth < vm.config.CallStackPreallocationSize
 
 	numParams := len(function.functionType.ParamTypes)
 	numLocals := numParams + len(function.code.locals)
+
+	// Bump-allocate locals from the cache: take numLocals slots at localsTop and
+	// advance it (rewound after the call returns). Nested calls bump further, so
+	// frames never overlap. Only an exhausted cache falls back to the heap.
+	localsMark := vm.localsTop
 	var locals []value
-	if withinPreallocation && numLocals <= localsCacheSlotSize {
-		blockDepth := callDepth * localsCacheSlotSize
-		max := blockDepth + localsCacheSlotSize
-		locals = vm.localsCache[blockDepth : blockDepth+numLocals : max]
-		// Clear non-parameter locals to their zero values. WASM allows reading
-		// uninitialized locals, so we must zero them to avoid reusing stale values
-		// from previous invocations. Parameters are overwritten below.
+	if end := localsMark + numLocals; end <= len(vm.localsCache) {
+		locals = vm.localsCache[localsMark:end:end]
+		vm.localsTop = end
+		// Cache slots may hold stale values from earlier calls, and WASM allows
+		// reading uninitialized locals, so zero the non-parameter locals. The
+		// parameter slots are filled from the operand stack afterward.
 		if function.code.defaultLocals != nil {
 			copy(locals[numParams:], function.code.defaultLocals)
 		} else {
 			clear(locals[numParams:])
 		}
 	} else {
-		// Beyond preallocation or too many locals: heap allocate.
+		// Cache exhausted: heap allocate (make already zeroes the locals).
 		locals = make([]value, numLocals)
 		if function.code.defaultLocals != nil {
 			copy(locals[numParams:], function.code.defaultLocals)
@@ -310,7 +322,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	vm.stack.data = vm.stack.data[:newLen]
 
 	var controlStack []controlFrame
-	if withinPreallocation {
+	if useControlStackCache {
 		// Use part of the cache for the control stack to avoid allocations.
 		blockDepth := callDepth * controlStackCacheSlotSize
 		// Slice cap to prevent appending into the next slot.
@@ -335,10 +347,16 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	// To avoid the performance penalty of checking the fuel limit on every
 	// instruction when fuel is disabled, we provide two separate loop
 	// implementations.
+	var err error
 	if vm.config.EnableFuel {
-		return vm.runLoopWithFuel()
+		err = vm.runLoopWithFuel()
+	} else {
+		err = vm.runLoop()
 	}
-	return vm.runLoop()
+	// The run loop pops this frame before returning, so its locals slots are free
+	// to reuse. Rewinding the cursor here is a no-op for the heap case.
+	vm.localsTop = localsMark
+	return err
 }
 
 func (vm *vm) runLoop() error {
