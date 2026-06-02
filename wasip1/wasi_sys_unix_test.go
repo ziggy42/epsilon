@@ -85,6 +85,20 @@ func testFS(t *testing.T, entries ...fsEntry) (string, *os.File) {
 	return root, dirFd
 }
 
+// testHostFS creates a filesystem structure for testing and returns the root
+// path and a FileSystem rooted there, closed automatically when the test ends.
+func testHostFS(t *testing.T, entries ...fsEntry) (string, FileSystem) {
+	t.Helper()
+	root, dirFd := testFS(t, entries...)
+	dirFd.Close() // OpenHostFileSystem opens its own root handle.
+	fsys, err := OpenHostFileSystem(root)
+	if err != nil {
+		t.Fatalf("OpenHostFileSystem failed: %v", err)
+	}
+	t.Cleanup(func() { fsys.Close() })
+	return root, fsys
+}
+
 func TestOpenat_BasicFile(t *testing.T) {
 	_, dirFd := testFS(t, file("test.txt", "hello"))
 	defer dirFd.Close()
@@ -532,11 +546,11 @@ func TestStat_BasicFile(t *testing.T) {
 		t.Fatalf("stat failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeRegularFile) {
-		t.Errorf("expected regular file, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeRegularFile {
+		t.Errorf("expected regular file, got filetype %d", fs.FileType)
 	}
-	if fs.size != 5 {
-		t.Errorf("expected size 5, got %d", fs.size)
+	if fs.Size != 5 {
+		t.Errorf("expected size 5, got %d", fs.Size)
 	}
 }
 
@@ -549,8 +563,8 @@ func TestStat_Directory(t *testing.T) {
 		t.Fatalf("stat failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeDirectory) {
-		t.Errorf("expected directory, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeDirectory {
+		t.Errorf("expected directory, got filetype %d", fs.FileType)
 	}
 }
 
@@ -563,8 +577,8 @@ func TestStat_CurrentDir(t *testing.T) {
 		t.Fatalf("stat . failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeDirectory) {
-		t.Errorf("expected directory, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeDirectory {
+		t.Errorf("expected directory, got filetype %d", fs.FileType)
 	}
 }
 
@@ -577,8 +591,8 @@ func TestStat_NestedPath(t *testing.T) {
 		t.Fatalf("stat nested failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeRegularFile) {
-		t.Errorf("expected regular file, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeRegularFile {
+		t.Errorf("expected regular file, got filetype %d", fs.FileType)
 	}
 }
 
@@ -594,8 +608,8 @@ func TestStat_SymlinkNoFollow(t *testing.T) {
 		t.Fatalf("stat symlink failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeSymbolicLink) {
-		t.Errorf("expected symbolic link, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeSymbolicLink {
+		t.Errorf("expected symbolic link, got filetype %d", fs.FileType)
 	}
 }
 
@@ -611,11 +625,11 @@ func TestStat_SymlinkFollow(t *testing.T) {
 		t.Fatalf("stat symlink with follow failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeRegularFile) {
-		t.Errorf("expected regular file, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeRegularFile {
+		t.Errorf("expected regular file, got filetype %d", fs.FileType)
 	}
-	if fs.size != 7 {
-		t.Errorf("expected size 7, got %d", fs.size)
+	if fs.Size != 7 {
+		t.Errorf("expected size 7, got %d", fs.Size)
 	}
 }
 
@@ -745,8 +759,8 @@ func TestStat_IntermediateSymlinkAllowed(t *testing.T) {
 		t.Fatalf("stat through intermediate symlink failed: %v", err)
 	}
 
-	if fs.filetype != int8(fileTypeRegularFile) {
-		t.Errorf("expected regular file, got filetype %d", fs.filetype)
+	if fs.FileType != FileTypeRegularFile {
+		t.Errorf("expected regular file, got filetype %d", fs.FileType)
 	}
 }
 

@@ -202,12 +202,12 @@ func newWASIModule(opts options) (*wasip1.WasiModule, error) {
 		if !ok {
 			guestPath = hostPath
 		}
-		file, err := os.Open(hostPath)
+		fsys, err := wasip1.OpenHostFileSystem(hostPath)
 		if err != nil {
 			builder.Close()
 			return nil, fmt.Errorf("failed to open preopen %q: %w", hostPath, err)
 		}
-		builder = builder.WithDir(guestPath, file)
+		builder = builder.WithFS(guestPath, fsys)
 	}
 
 	return builder.Build()

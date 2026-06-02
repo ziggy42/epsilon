@@ -16,8 +16,11 @@ package wasip1
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"os"
+	"io"
+	"io/fs"
+	"syscall"
 )
 
 // ProcExitError is an error that signals that the process should exit with the
@@ -85,13 +88,13 @@ const (
 	RightsSockAccept           int64 = 1 << 29
 )
 
-// WasiPreopen represents a pre-opened os.File to be provided to WASI.
+// WasiPreopen represents a pre-opened FileSystem to be provided to WASI as a
+// directory capability mounted at GuestPath.
 //
-// If the WasiModule is successfully created, it takes ownership of the File and
-// will close it when appropriate. If creation fails, ownership stays with the
-// caller.
+// The WasiModule (or builder) takes ownership of FS and closes it when
+// appropriate.
 type WasiPreopen struct {
-	File             *os.File
+	FS               FileSystem
 	GuestPath        string
 	Rights           int64
 	RightsInheriting int64
@@ -122,15 +125,18 @@ const (
 	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
 )
 
+// FileType is a WASI Preview 1 filetype, as reported in FileStat and DirEntry.
+type FileType uint8
+
 const (
-	fileTypeUnknown         uint8 = 0
-	fileTypeBlockDevice     uint8 = 1
-	fileTypeCharacterDevice uint8 = 2
-	fileTypeDirectory       uint8 = 3
-	fileTypeRegularFile     uint8 = 4
-	fileTypeSocketDgram     uint8 = 5
-	fileTypeSocketStream    uint8 = 6
-	fileTypeSymbolicLink    uint8 = 7
+	FileTypeUnknown         FileType = 0
+	FileTypeBlockDevice     FileType = 1
+	FileTypeCharacterDevice FileType = 2
+	FileTypeDirectory       FileType = 3
+	FileTypeRegularFile     FileType = 4
+	FileTypeSocketDgram     FileType = 5
+	FileTypeSocketStream    FileType = 6
+	FileTypeSymbolicLink    FileType = 7
 )
 
 const preopenTypeDir uint8 = 0
@@ -171,49 +177,181 @@ const (
 
 const lookupFlagsSymlinkFollow int32 = 1 << 0
 
-// dirEntry represents a directory entry for fd_readdir.
-type dirEntry struct {
-	name     string
-	fileType int8
-	ino      uint64
+// DirEntry is a single directory entry returned by FileSystem.ReadDir, which is
+// expected to include the synthetic "." and ".." entries required by
+// fd_readdir.
+type DirEntry struct {
+	Name     string
+	FileType FileType
+	Ino      uint64
 }
 
-// bytes serializes the dirEntry to the WASI dirent layout.
+// bytes serializes the DirEntry to the WASI dirent layout.
 // The nextCookie parameter is the cookie for the next entry in the directory.
-func (d *dirEntry) bytes(nextCookie uint64) []byte {
-	nameLen := len(d.name)
+func (d *DirEntry) bytes(nextCookie uint64) []byte {
+	nameLen := len(d.Name)
 	buf := make([]byte, 24+nameLen)
 	binary.LittleEndian.PutUint64(buf[0:8], nextCookie)
-	binary.LittleEndian.PutUint64(buf[8:16], d.ino)
+	binary.LittleEndian.PutUint64(buf[8:16], d.Ino)
 	binary.LittleEndian.PutUint32(buf[16:20], uint32(nameLen))
-	buf[20] = uint8(d.fileType)
-	copy(buf[24:], d.name)
+	buf[20] = uint8(d.FileType)
+	copy(buf[24:], d.Name)
 	return buf
 }
 
-// filestat represents the WASI filestat structure (64 bytes total).
-type filestat struct {
-	dev      uint64 // offset 0:  device ID
-	ino      uint64 // offset 8:  inode
-	filetype int8   // offset 16: file type (1 byte, 7 padding)
-	nlink    uint64 // offset 24: number of hard links
-	size     uint64 // offset 32: file size in bytes
-	atim     uint64 // offset 40: access time (nanoseconds)
-	mtim     uint64 // offset 48: modification time (nanoseconds)
-	ctim     uint64 // offset 56: status change time (nanoseconds)
+// FileStat is the WASI FileStat structure (64 bytes when serialized). Times are
+// nanoseconds since the Unix epoch.
+type FileStat struct {
+	Dev      uint64   // device ID
+	Ino      uint64   // inode
+	FileType FileType // file type
+	Nlink    uint64   // number of hard links
+	Size     uint64   // file size in bytes
+	Atim     uint64   // access time
+	Mtim     uint64   // modification time
+	Ctim     uint64   // status change time
 }
 
-// bytes serializes the filestat to the WASI memory layout (64 bytes).
-func (fs *filestat) bytes() [64]byte {
+// bytes serializes the FileStat to the WASI memory layout (64 bytes).
+func (fs *FileStat) bytes() [64]byte {
 	var buf [64]byte
-	binary.LittleEndian.PutUint64(buf[0:8], fs.dev)
-	binary.LittleEndian.PutUint64(buf[8:16], fs.ino)
-	buf[16] = uint8(fs.filetype)
+	binary.LittleEndian.PutUint64(buf[0:8], fs.Dev)
+	binary.LittleEndian.PutUint64(buf[8:16], fs.Ino)
+	buf[16] = uint8(fs.FileType)
 	// buf[17:24] padding (already zero)
-	binary.LittleEndian.PutUint64(buf[24:32], fs.nlink)
-	binary.LittleEndian.PutUint64(buf[32:40], fs.size)
-	binary.LittleEndian.PutUint64(buf[40:48], fs.atim)
-	binary.LittleEndian.PutUint64(buf[48:56], fs.mtim)
-	binary.LittleEndian.PutUint64(buf[56:64], fs.ctim)
+	binary.LittleEndian.PutUint64(buf[24:32], fs.Nlink)
+	binary.LittleEndian.PutUint64(buf[32:40], fs.Size)
+	binary.LittleEndian.PutUint64(buf[40:48], fs.Atim)
+	binary.LittleEndian.PutUint64(buf[48:56], fs.Mtim)
+	binary.LittleEndian.PutUint64(buf[56:64], fs.Ctim)
 	return buf
+}
+
+// File is an open file, directory, or socket handle used by the WASI
+// implementation. It extends the read-only io/fs.File with the write, seek,
+// and metadata operations WASI requires. The default implementation
+// (hostFileSystem) is backed by *os.File; alternative backends may provide
+// virtualized or in-memory handles.
+type File interface {
+	fs.File // Stat() (fs.FileInfo, error); Read([]byte) (int, error); Close() error
+	io.Writer
+	io.Seeker
+	io.ReaderAt
+	io.WriterAt
+
+	Truncate(size int64) error
+	Sync() error
+
+	// FileStat returns the metadata of the open handle (fd_filestat_get).
+	FileStat() (FileStat, error)
+	// SetFlags updates the O_APPEND/O_NONBLOCK status flags of the open handle
+	// (fd_fdstat_set_flags).
+	SetFlags(appendFlag, nonblock bool) error
+	// SetTimes sets the access/modification times of the open handle
+	// (fd_filestat_set_times). atim and mtim are nanoseconds; fstFlags selects
+	// which times to set and how.
+	SetTimes(atim, mtim int64, fstFlags int32) error
+
+	// Accept accepts a connection on a socket handle (sock_accept).
+	Accept() (File, error)
+	// Shutdown shuts down a socket handle (sock_shutdown).
+	Shutdown(how int32) error
+}
+
+// FileSystem is a sandboxed, directory-rooted view of a filesystem. Every name
+// is resolved relative to the root and may never escape it, mirroring the WASI
+// directory-capability model where each directory descriptor is its own root.
+// The default host implementation resolves every path relative to the root
+// using *at syscalls, providing traversal-resistant ("..") and symlink-escape
+// protections.
+type FileSystem interface {
+	fs.FS // Open(name string) (fs.File, error)
+
+	// OpenFile opens a regular file within the root. followSymlink controls
+	// whether a symlink in the final path component is followed.
+	OpenFile(name string, followSymlink bool, oflags, fdflags int32, rights uint64) (File, error)
+	// OpenRoot opens a subdirectory as a new sandboxed FileSystem.
+	OpenRoot(name string) (FileSystem, error)
+
+	Mkdir(name string, perm fs.FileMode) error
+	// Stat returns the metadata of name. followSymlink controls whether a
+	// symlink in the final path component is followed.
+	Stat(name string, followSymlink bool) (FileStat, error)
+	Readlink(name string) (string, error)
+	Symlink(target, name string) error
+	// Unlink removes a non-directory entry (EISDIR on a directory).
+	Unlink(name string) error
+	// Rmdir removes an empty directory (ENOTDIR on a non-directory).
+	Rmdir(name string) error
+	Rename(newDir FileSystem, oldName, newName string) error
+	Link(oldName string, followSymlink bool, newDir FileSystem, newName string) error
+	// Chtimes sets the access/modification times of name. followSymlink controls
+	// whether a symlink in the final path component is followed.
+	Chtimes(name string, atim, mtim int64, fstFlags int32, followSymlink bool) error
+	// ReadDir reads the entries of the root directory, including the synthetic
+	// "." and ".." entries required by fd_readdir.
+	ReadDir() ([]DirEntry, error)
+
+	// Handle returns the directory's own open handle, used for fd-level
+	// operations (fd_fdstat_get, fd_readdir, fd_filestat_get, fd_sync).
+	Handle() File
+	Close() error
+}
+
+// mapError maps Go, io/fs, and syscall errors to a WASI errno.
+func mapError(err error) int32 {
+	if err == nil {
+		return errnoSuccess
+	}
+
+	// Match the specific syscall.Errno before the broader io/fs sentinels:
+	// syscall.Errno.Is maps several distinct errnos onto the same fs sentinel
+	// (e.g. both EEXIST and ENOTEMPTY satisfy fs.ErrExist), which would
+	// otherwise lose the distinction WASI requires.
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		switch errno {
+		case syscall.EACCES:
+			return errnoAcces
+		case syscall.EPERM:
+			return errnoPerm
+		case syscall.ENOENT:
+			return errnoNoEnt
+		case syscall.EEXIST:
+			return errnoExist
+		case syscall.EISDIR:
+			return errnoIsDir
+		case syscall.ENOTDIR:
+			return errnoNotDir
+		case syscall.EINVAL:
+			return errnoInval
+		case syscall.ENOTEMPTY:
+			return errnoNotEmpty
+		case syscall.ELOOP:
+			return errnoLoop
+		case syscall.EBADF:
+			return errnoBadF
+		case syscall.EMFILE, syscall.ENFILE:
+			return errnoNFile
+		case syscall.ENAMETOOLONG:
+			return errnoNameTooLong
+		case syscall.EPIPE:
+			return errnoPipe
+		case syscall.EAGAIN:
+			return errnoAgain
+		}
+	}
+
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return errnoNoEnt
+	case errors.Is(err, fs.ErrExist):
+		return errnoExist
+	case errors.Is(err, fs.ErrPermission):
+		return errnoAcces
+	case errors.Is(err, fs.ErrInvalid):
+		return errnoInval
+	}
+
+	return errnoNotCapable
 }

@@ -27,13 +27,12 @@ import (
 )
 
 func TestRightsEscalation_FdSync(t *testing.T) {
-	_, dirFd := testFS(t, file("test.txt", "hello"))
-	defer dirFd.Close()
+	_, fsys := testHostFS(t, file("test.txt", "hello"))
 
 	// Open file WITH RightsFdRead but WITHOUT RightsFdSync
-	f, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
+	f, err := fsys.OpenFile("test.txt", false, 0, 0, uint64(RightsFdRead))
 	if err != nil {
-		t.Fatalf("openat failed: %v", err)
+		t.Fatalf("OpenFile failed: %v", err)
 	}
 	defer f.Close()
 
@@ -41,7 +40,7 @@ func TestRightsEscalation_FdSync(t *testing.T) {
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
 				file:     f,
-				fileType: fileTypeRegularFile,
+				fileType: FileTypeRegularFile,
 				rights:   RightsFdRead,
 			},
 		},
@@ -55,12 +54,11 @@ func TestRightsEscalation_FdSync(t *testing.T) {
 }
 
 func TestRightsEscalation_FdFilestatGet(t *testing.T) {
-	_, dirFd := testFS(t, file("test.txt", "hello"))
-	defer dirFd.Close()
+	_, fsys := testHostFS(t, file("test.txt", "hello"))
 
-	f, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
+	f, err := fsys.OpenFile("test.txt", false, 0, 0, uint64(RightsFdRead))
 	if err != nil {
-		t.Fatalf("openat failed: %v", err)
+		t.Fatalf("OpenFile failed: %v", err)
 	}
 	defer f.Close()
 
@@ -70,7 +68,7 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
 				file:     f,
-				fileType: fileTypeRegularFile,
+				fileType: FileTypeRegularFile,
 				rights:   RightsFdRead, // Missing RightsFdFilestatGet
 			},
 		},
@@ -95,11 +93,16 @@ func TestRightsEscalation_SockShutdown(t *testing.T) {
 	}
 	defer file.Close()
 
+	sockFile, err := NewHostFile(file)
+	if err != nil {
+		t.Fatalf("newHostFile failed: %v", err)
+	}
+
 	rt := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
-				file:     file,
-				fileType: fileTypeSocketStream,
+				file:     sockFile,
+				fileType: FileTypeSocketStream,
 				rights:   0, // No rights
 			},
 		},
@@ -140,11 +143,16 @@ func TestRightsEscalation_SockAccept_Inheritance(t *testing.T) {
 	// rightsInheriting.
 	const customRight = RightsFdRead
 
+	sockFile, err := NewHostFile(file)
+	if err != nil {
+		t.Fatalf("newHostFile failed: %v", err)
+	}
+
 	rt := &wasiResourceTable{
 		fds: map[int32]*wasiFileDescriptor{
 			3: {
-				file:             file,
-				fileType:         fileTypeSocketStream,
+				file:             sockFile,
+				fileType:         FileTypeSocketStream,
 				rights:           rightsAll,
 				rightsInheriting: customRight,
 			},

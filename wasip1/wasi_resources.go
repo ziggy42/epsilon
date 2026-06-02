@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -21,6 +19,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/ziggy42/epsilon/epsilon"
 )
@@ -30,17 +29,25 @@ const maxFileDescriptors = 2048
 var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
 type wasiFileDescriptor struct {
-	file             *os.File
-	fileType         uint8
+	file             File
+	fsRoot           FileSystem // non-nil for directory descriptors
+	fileType         FileType
 	flags            uint16
 	rights           int64
 	rightsInheriting int64
 	guestPath        string
 	isPreopen        bool
+	keepOpen         bool // std streams the runtime must not close
 }
 
 func (fd *wasiFileDescriptor) close() {
-	if fd.file != os.Stdin && fd.file != os.Stdout && fd.file != os.Stderr {
+	if fd.fsRoot != nil {
+		// fsRoot.Close releases both the directory's open handle (fd.file) and
+		// the underlying root.
+		fd.fsRoot.Close()
+		return
+	}
+	if !fd.keepOpen {
 		fd.file.Close()
 	}
 }
@@ -55,9 +62,16 @@ func (rt *wasiResourceTable) closeAll() {
 	}
 }
 
+// stdStream is a resolved standard stream: the backing File and whether the
+// runtime must leave it open (true for the process stdio).
+type stdStream struct {
+	file     File
+	keepOpen bool
+}
+
 func newWasiResourceTable(
 	preopens []WasiPreopen,
-	stdin, stdout, stderr *os.File,
+	stdin, stdout, stderr stdStream,
 ) (*wasiResourceTable, error) {
 	stdRights := RightsFdFilestatGet | RightsPollFdReadwrite
 	stdinFd, err := newStdFileDescriptor(stdin, RightsFdRead|stdRights)
@@ -77,13 +91,17 @@ func newWasiResourceTable(
 		fds: map[int32]*wasiFileDescriptor{0: stdinFd, 1: stdoutFd, 2: stderrFd},
 	}
 
-	for _, dir := range preopens {
-		fd, err := newPreopenFileDescriptor(dir)
+	for _, pre := range preopens {
+		fd, err := newPreopenFileDescriptor(pre)
 		if err != nil {
+			pre.FS.Close()
+			resourceTable.closeAll()
 			return nil, err
 		}
 		newFdIndex, err := resourceTable.allocateFdIndex()
 		if err != nil {
+			fd.close()
+			resourceTable.closeAll()
 			return nil, err
 		}
 		resourceTable.fds[newFdIndex] = fd
@@ -91,14 +109,22 @@ func newWasiResourceTable(
 	return resourceTable, nil
 }
 
+// newFileDescriptor wraps file as a descriptor. If info is non-nil it is the
+// caller's already-fetched stat of file, avoiding a redundant Stat; otherwise
+// file is stat'd here.
 func newFileDescriptor(
-	file *os.File,
+	file File,
+	fsRoot FileSystem,
+	info os.FileInfo,
 	rights, rightsInheriting int64,
 	flags uint16,
 ) (*wasiFileDescriptor, error) {
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
+	if info == nil {
+		var err error
+		info, err = file.Stat()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if info.IsDir() {
@@ -107,6 +133,7 @@ func newFileDescriptor(
 
 	return &wasiFileDescriptor{
 		file:             file,
+		fsRoot:           fsRoot,
 		fileType:         getModeFileType(info.Mode()),
 		flags:            flags,
 		rights:           rights,
@@ -116,8 +143,17 @@ func newFileDescriptor(
 	}, nil
 }
 
-func newPreopenFileDescriptor(pre WasiPreopen) (*wasiFileDescriptor, error) {
-	fd, err := newFileDescriptor(pre.File, pre.Rights, pre.RightsInheriting, 0)
+func newPreopenFileDescriptor(
+	pre WasiPreopen,
+) (*wasiFileDescriptor, error) {
+	fd, err := newFileDescriptor(
+		pre.FS.Handle(),
+		pre.FS,
+		nil,
+		pre.Rights,
+		pre.RightsInheriting,
+		0,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -127,10 +163,15 @@ func newPreopenFileDescriptor(pre WasiPreopen) (*wasiFileDescriptor, error) {
 }
 
 func newStdFileDescriptor(
-	file *os.File,
+	stream stdStream,
 	rights int64,
 ) (*wasiFileDescriptor, error) {
-	return newFileDescriptor(file, rights, 0, 0)
+	fd, err := newFileDescriptor(stream.file, nil, nil, rights, 0, 0)
+	if err != nil {
+		return nil, err
+	}
+	fd.keepOpen = stream.keepOpen
+	return fd, nil
 }
 
 func (w *wasiResourceTable) advise(
@@ -217,7 +258,9 @@ func (w *wasiResourceTable) setStatFlags(fdIndex, fdFlags int32) int32 {
 
 	fd.flags = uint16(fdFlags)
 
-	if err := setFdFlags(fd.file, fdFlags); err != nil {
+	appendFlag := fdFlags&int32(fdFlagsAppend) != 0
+	nonblock := fdFlags&int32(fdFlagsNonblock) != 0
+	if err := fd.file.SetFlags(appendFlag, nonblock); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -254,7 +297,7 @@ func (w *wasiResourceTable) getFileStat(
 		return errCode
 	}
 
-	fs, err := fdstat(fd.file)
+	fs, err := fd.file.FileStat()
 	if err != nil {
 		return mapError(err)
 	}
@@ -272,7 +315,7 @@ func (w *wasiResourceTable) setFileStatSize(fdIndex int32, size int64) int32 {
 		return errCode
 	}
 
-	if fd.fileType == fileTypeDirectory {
+	if fd.fileType == FileTypeDirectory {
 		return errnoIsDir
 	}
 
@@ -292,7 +335,7 @@ func (w *wasiResourceTable) setFileStatTimes(
 		return errCode
 	}
 
-	if err := utimesNanoAt(fd.file, atim, mtim, fstFlags); err != nil {
+	if err := fd.file.SetTimes(atim, mtim, fstFlags); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -375,7 +418,7 @@ func (w *wasiResourceTable) pwrite(
 
 	currentOffset := offset
 	writeBytes := func(data []byte) (int, error) {
-		n, err := writeAt(fd.file, data, currentOffset, fd.flags&fdFlagsAppend != 0)
+		n, err := fd.file.WriteAt(data, currentOffset)
 		currentOffset += int64(n)
 		return n, err
 	}
@@ -414,7 +457,7 @@ func (w *wasiResourceTable) readdir(
 		return errCode
 	}
 
-	entries, err := readDirEntries(fd.file)
+	entries, err := fd.fsRoot.ReadDir()
 	if err != nil {
 		return mapError(err)
 	}
@@ -570,7 +613,7 @@ func (w *wasiResourceTable) pathCreateDirectory(
 		return errnoFault
 	}
 
-	if err := mkdirat(fd.file, path, 0o755); err != nil {
+	if err := fd.fsRoot.Mkdir(path, 0o755); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -591,7 +634,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	}
 
 	followSymlinks := flags&lookupFlagsSymlinkFollow != 0
-	fs, err := stat(fd.file, path, followSymlinks)
+	fs, err := fd.fsRoot.Stat(path, followSymlinks)
 	if err != nil {
 		return mapError(err)
 	}
@@ -620,7 +663,7 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 	}
 
 	followSymlinks := flags&lookupFlagsSymlinkFollow != 0
-	err = utimes(fd.file, path, atim, mtim, fstFlags, followSymlinks)
+	err = fd.fsRoot.Chtimes(path, atim, mtim, fstFlags, followSymlinks)
 	if err != nil {
 		return mapError(err)
 	}
@@ -653,7 +696,7 @@ func (w *wasiResourceTable) pathLink(
 	}
 
 	followSymlinks := oldFlags&lookupFlagsSymlinkFollow != 0
-	err = linkat(oldFd.file, oldPath, followSymlinks, newFd.file, newPath)
+	err = oldFd.fsRoot.Link(oldPath, followSymlinks, newFd.fsRoot, newPath)
 	if err != nil {
 		return mapError(err)
 	}
@@ -698,14 +741,66 @@ func (w *wasiResourceTable) pathOpen(
 	}
 
 	followSymlinks := dirflags&lookupFlagsSymlinkFollow != 0
-	rights := uint64(rightsBase)
-	file, err := openat(fd.file, path, followSymlinks, oflags, fdflags, rights)
-	if err != nil {
-		return mapError(err)
+	// A trailing slash or an explicit O_DIRECTORY means the path must be a
+	// directory, which becomes its own sandboxed root.
+	wantDir := oflags&int32(oFlagsDirectory) != 0 ||
+		strings.HasSuffix(path, "/")
+
+	var file File
+	var childFS FileSystem
+	var info os.FileInfo
+	if wantDir {
+		// A directory cannot be opened for writing.
+		if rightsBase&RightsFdWrite != 0 {
+			return errnoIsDir
+		}
+		// Without symlink-follow, a symlink named as a directory must not be
+		// followed; opening it as a directory fails.
+		if !followSymlinks {
+			if info, serr := fd.fsRoot.Stat(path, false); serr == nil &&
+				info.FileType == FileTypeSymbolicLink {
+				return errnoLoop
+			}
+		}
+		childFS, err = fd.fsRoot.OpenRoot(path)
+		if err != nil {
+			return mapError(err)
+		}
+		file = childFS.Handle()
+	} else {
+		file, err = fd.fsRoot.OpenFile(
+			path,
+			followSymlinks,
+			oflags,
+			fdflags,
+			uint64(rightsBase),
+		)
+		if err != nil {
+			return mapError(err)
+		}
+
+		// A directory may be opened without O_DIRECTORY; promote it to a root so
+		// subsequent path operations on the descriptor work.
+		info, err = file.Stat()
+		if err != nil {
+			file.Close()
+			return mapError(err)
+		}
+		if info.IsDir() {
+			file.Close()
+			childFS, err = fd.fsRoot.OpenRoot(path)
+			if err != nil {
+				return mapError(err)
+			}
+			file = childFS.Handle()
+			info = nil // file now refers to the root handle; re-stat in allocateFd
+		}
 	}
 
 	newFdIndex, errCode := w.allocateFd(
 		file,
+		childFS,
+		info,
 		rightsBase,
 		rightsInheriting,
 		uint16(fdflags),
@@ -740,7 +835,7 @@ func (w *wasiResourceTable) pathReadlink(
 		return errnoFault
 	}
 
-	target, err := readlink(fd.file, path)
+	target, err := fd.fsRoot.Readlink(path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -771,7 +866,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoFault
 	}
 
-	if err := rmdirat(fd.file, path); err != nil {
+	if err := fd.fsRoot.Rmdir(path); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -801,7 +896,7 @@ func (w *wasiResourceTable) pathRename(
 		return errnoFault
 	}
 
-	if err := renameat(oldFd.file, oldPath, newFd.file, newPath); err != nil {
+	if err := oldFd.fsRoot.Rename(newFd.fsRoot, oldPath, newPath); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -826,7 +921,7 @@ func (w *wasiResourceTable) pathSymlink(
 		return errnoFault
 	}
 
-	if err := symlinkat(targetPath, fd.file, linkPath); err != nil {
+	if err := fd.fsRoot.Symlink(targetPath, linkPath); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -846,7 +941,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoFault
 	}
 
-	if err := unlinkat(fd.file, path); err != nil {
+	if err := fd.fsRoot.Unlink(path); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -861,12 +956,11 @@ func (w *wasiResourceTable) sockAccept(
 		return errCode
 	}
 
-	connectedSocketFd, err := accept(fd.file)
+	newFile, err := fd.file.Accept()
 	if err != nil {
 		return mapError(err)
 	}
 
-	newFile := os.NewFile(uintptr(connectedSocketFd), "")
 	// The accepted socket inherits its rights from the listener's
 	// rights_inheriting mask.
 	rights := fd.rightsInheriting
@@ -874,6 +968,8 @@ func (w *wasiResourceTable) sockAccept(
 	inheritRights := fd.rightsInheriting
 	newFdIndex, errCode := w.allocateFd(
 		newFile,
+		nil,
+		nil,
 		rights,
 		inheritRights,
 		uint16(flags),
@@ -941,7 +1037,7 @@ func (w *wasiResourceTable) sockShutdown(fdIndex, how int32) int32 {
 		return errCode
 	}
 
-	if err := shutdown(fd.file, how); err != nil {
+	if err := fd.file.Shutdown(how); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -963,13 +1059,19 @@ func (w *wasiResourceTable) allocateFdIndex() (int32, error) {
 // allocateFd allocates a new file descriptor and returns its index and an error
 // code.
 func (w *wasiResourceTable) allocateFd(
-	file *os.File,
+	file File,
+	fsRoot FileSystem,
+	info os.FileInfo,
 	rights, inheritRights int64,
 	flags uint16,
 ) (int32, int32) {
-	fd, err := newFileDescriptor(file, rights, inheritRights, flags)
+	fd, err := newFileDescriptor(file, fsRoot, info, rights, inheritRights, flags)
 	if err != nil {
-		file.Close()
+		if fsRoot != nil {
+			fsRoot.Close()
+		} else {
+			file.Close()
+		}
 		return 0, mapError(err)
 	}
 	newFdIndex, err := w.allocateFdIndex()
@@ -989,7 +1091,7 @@ func (w *wasiResourceTable) getFile(
 	if errCode != errnoSuccess {
 		return nil, errCode
 	}
-	if fd.fileType == fileTypeDirectory {
+	if fd.fileType == FileTypeDirectory {
 		return nil, errnoIsDir
 	}
 	return fd, errnoSuccess
@@ -1003,7 +1105,7 @@ func (w *wasiResourceTable) getDir(
 	if errCode != errnoSuccess {
 		return nil, errCode
 	}
-	if fd.fileType != fileTypeDirectory {
+	if fd.fileType != FileTypeDirectory {
 		return nil, errnoNotDir
 	}
 	return fd, errnoSuccess
@@ -1031,7 +1133,7 @@ func (w *wasiResourceTable) getSocket(
 	if !ok {
 		return nil, errnoBadF
 	}
-	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
+	if fd.fileType != FileTypeSocketDgram && fd.fileType != FileTypeSocketStream {
 		return nil, errnoNotSock
 	}
 	if fd.rights&rights == 0 {
@@ -1122,24 +1224,24 @@ func iterCiovec(
 	return errnoSuccess
 }
 
-func getModeFileType(mode os.FileMode) uint8 {
+func getModeFileType(mode os.FileMode) FileType {
 	switch {
 	case mode.IsDir():
-		return fileTypeDirectory
+		return FileTypeDirectory
 	case mode.IsRegular():
-		return fileTypeRegularFile
+		return FileTypeRegularFile
 	case mode&os.ModeSymlink != 0:
-		return fileTypeSymbolicLink
+		return FileTypeSymbolicLink
 	case mode&os.ModeSocket != 0:
-		return fileTypeSocketStream
+		return FileTypeSocketStream
 	case mode&os.ModeNamedPipe != 0:
-		return fileTypeCharacterDevice
+		return FileTypeCharacterDevice
 	case mode&os.ModeCharDevice != 0:
-		return fileTypeCharacterDevice
+		return FileTypeCharacterDevice
 	case mode&os.ModeDevice != 0:
-		return fileTypeBlockDevice
+		return FileTypeBlockDevice
 	default:
-		return fileTypeUnknown
+		return FileTypeUnknown
 	}
 }
 

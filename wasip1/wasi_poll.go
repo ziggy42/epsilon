@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build unix
-
 package wasip1
 
 import (
@@ -191,7 +189,7 @@ func (w *WasiModule) handleFdSubscription(sub subscription) *event {
 	}
 
 	var nbytes uint64
-	if fd.fileType == fileTypeRegularFile && fd.rights&RightsFdFilestatGet != 0 {
+	if fd.fileType == FileTypeRegularFile && fd.rights&RightsFdFilestatGet != 0 {
 		if info, err := fd.file.Stat(); err == nil {
 			nbytes = uint64(info.Size())
 		}

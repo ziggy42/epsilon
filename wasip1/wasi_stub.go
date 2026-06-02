@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC
+// Copyright 2026 Google LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,87 +19,21 @@ package wasip1
 import (
 	"errors"
 	"os"
-
-	"github.com/ziggy42/epsilon/epsilon"
 )
 
-// WasiModuleBuilder is a builder for creating WasiModule instances.
-// On non-Unix platforms, WASI is not supported.
-type WasiModuleBuilder struct {
-	files []*os.File
+// errUnsupportedPlatform is returned when constructing the host filesystem
+// backend on a platform that does not support it. The core WASI state machine
+// compiles everywhere; only the syscall-based host backend is Unix-only.
+var errUnsupportedPlatform = errors.New("WASI is not supported on this platform")
+
+// OpenHostFileSystem reports that the syscall-based host backend is
+// unavailable on this platform.
+func OpenHostFileSystem(dir string) (FileSystem, error) {
+	return nil, errUnsupportedPlatform
 }
 
-// WasiModule provides WASI functionality to WebAssembly modules.
-// On non-Unix platforms, WASI is not supported.
-type WasiModule struct{}
-
-func NewWasiModuleBuilder() *WasiModuleBuilder {
-	return &WasiModuleBuilder{}
+// NewHostFile reports that the syscall-based host backend is unavailable on
+// this platform.
+func NewHostFile(*os.File) (File, error) {
+	return nil, errUnsupportedPlatform
 }
-
-func (b *WasiModuleBuilder) WithArgs(args ...string) *WasiModuleBuilder {
-	return b
-}
-
-func (b *WasiModuleBuilder) WithEnv(key, value string) *WasiModuleBuilder {
-	return b
-}
-
-func (b *WasiModuleBuilder) WithEnvMap(
-	env map[string]string,
-) *WasiModuleBuilder {
-	return b
-}
-
-func (b *WasiModuleBuilder) WithDir(
-	guestPath string,
-	hostDir *os.File,
-) *WasiModuleBuilder {
-	b.files = append(b.files, hostDir)
-	return b
-}
-
-func (b *WasiModuleBuilder) WithDirRights(
-	guestPath string,
-	hostDir *os.File,
-	rights, rightsInheriting int64,
-) *WasiModuleBuilder {
-	b.files = append(b.files, hostDir)
-	return b
-}
-
-func (b *WasiModuleBuilder) WithStdin(f *os.File) *WasiModuleBuilder {
-	b.files = append(b.files, f)
-	return b
-}
-
-func (b *WasiModuleBuilder) WithStdout(f *os.File) *WasiModuleBuilder {
-	b.files = append(b.files, f)
-	return b
-}
-
-func (b *WasiModuleBuilder) WithStderr(f *os.File) *WasiModuleBuilder {
-	b.files = append(b.files, f)
-	return b
-}
-
-// Close releases all resources accumulated by the builder without constructing
-// a WasiModule.
-func (b *WasiModuleBuilder) Close() {
-	for _, f := range b.files {
-		f.Close()
-	}
-}
-
-// Build constructs a WasiModule from the builder configuration.
-// On non-Unix platforms, this always returns an error.
-func (b *WasiModuleBuilder) Build() (*WasiModule, error) {
-	b.Close()
-	return nil, errors.New("WASI is not supported on this platform")
-}
-
-func (w *WasiModule) ToImports() *epsilon.ModuleImports {
-	return epsilon.NewModuleImports(ModuleName)
-}
-
-func (w *WasiModule) Close() {}

@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -61,6 +62,179 @@ func init() {
 		utimeNow = -1
 		utimeOmit = -2
 	}
+}
+
+// hostFile is the default File implementation, backed by an *os.File. Its
+// methods delegate to the package's *at-syscall helpers below.
+type hostFile struct {
+	*os.File
+	// appendMode tracks whether the file was opened (or reconfigured) with
+	// O_APPEND, so WriteAt can still honor an explicit offset.
+	appendMode bool
+}
+
+// NewHostFile wraps a host *os.File as a File. It is the bridge for using
+// process streams (e.g. os.Stdin) or other host files with the builder's
+// backend-agnostic WithStdin/WithStdout/WithStderr methods.
+func NewHostFile(f *os.File) (File, error) {
+	return &hostFile{File: f}, nil
+}
+
+func (f *hostFile) WriteAt(p []byte, off int64) (int, error) {
+	return writeAt(f.File, p, off, f.appendMode)
+}
+
+func (f *hostFile) FileStat() (FileStat, error) {
+	return fdstat(f.File)
+}
+
+func (f *hostFile) SetFlags(appendFlag, nonblock bool) error {
+	var fdFlags int32
+	if appendFlag {
+		fdFlags |= int32(fdFlagsAppend)
+	}
+	if nonblock {
+		fdFlags |= int32(fdFlagsNonblock)
+	}
+	if err := setFdFlags(f.File, fdFlags); err != nil {
+		return err
+	}
+	f.appendMode = appendFlag
+	return nil
+}
+
+func (f *hostFile) SetTimes(atim, mtim int64, fstFlags int32) error {
+	return utimesNanoAt(f.File, atim, mtim, fstFlags)
+}
+
+func (f *hostFile) Accept() (File, error) {
+	nfd, err := accept(f.File)
+	if err != nil {
+		return nil, err
+	}
+	return &hostFile{File: os.NewFile(uintptr(nfd), "")}, nil
+}
+
+func (f *hostFile) Shutdown(how int32) error {
+	return shutdown(f.File, how)
+}
+
+// hostFileSystem is the default FileSystem implementation. It is rooted at an
+// open directory handle and resolves every path relative to it with the
+// *at-syscall helpers below, which never escape the sandbox: ".." is traversed
+// at runtime and symlinks are resolved within the root (see resolvePath).
+type hostFileSystem struct {
+	handle *hostFile // the directory's own open handle (the sandbox root)
+}
+
+// OpenHostFileSystem opens dir as a sandboxed FileSystem. Subsequent
+// operations are confined to that directory tree.
+func OpenHostFileSystem(dir string) (FileSystem, error) {
+	f, err := os.OpenFile(dir, os.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return nil, err
+	}
+	return &hostFileSystem{handle: &hostFile{File: f}}, nil
+}
+
+// dir returns the directory handle every path is resolved relative to.
+func (h *hostFileSystem) dir() *os.File { return h.handle.File }
+
+func (h *hostFileSystem) Open(name string) (fs.File, error) {
+	f, err := openat(h.dir(), name, true, 0, 0, uint64(RightsFdRead))
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (h *hostFileSystem) Handle() File { return h.handle }
+
+func (h *hostFileSystem) Close() error { return h.handle.Close() }
+
+func (h *hostFileSystem) OpenFile(
+	name string,
+	followSymlink bool,
+	oflags, fdflags int32,
+	rights uint64,
+) (File, error) {
+	f, err := openat(h.dir(), name, followSymlink, oflags, fdflags, rights)
+	if err != nil {
+		return nil, err
+	}
+	appendMode := fdflags&int32(fdFlagsAppend) != 0
+	return &hostFile{File: f, appendMode: appendMode}, nil
+}
+
+func (h *hostFileSystem) OpenRoot(name string) (FileSystem, error) {
+	f, err := openat(
+		h.dir(), name, true, int32(oFlagsDirectory), 0, uint64(RightsFdRead),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &hostFileSystem{handle: &hostFile{File: f}}, nil
+}
+
+func (h *hostFileSystem) Mkdir(name string, perm fs.FileMode) error {
+	return mkdirat(h.dir(), name, uint32(perm))
+}
+
+func (h *hostFileSystem) Stat(name string, followSymlink bool) (FileStat, error) {
+	return stat(h.dir(), name, followSymlink)
+}
+
+func (h *hostFileSystem) Readlink(name string) (string, error) {
+	return readlink(h.dir(), name)
+}
+
+func (h *hostFileSystem) Symlink(target, name string) error {
+	return symlinkat(target, h.dir(), name)
+}
+
+func (h *hostFileSystem) Unlink(name string) error {
+	return unlinkat(h.dir(), name)
+}
+
+func (h *hostFileSystem) Rmdir(name string) error {
+	return rmdirat(h.dir(), name)
+}
+
+func (h *hostFileSystem) Rename(
+	newDir FileSystem,
+	oldName, newName string,
+) error {
+	target, ok := newDir.(*hostFileSystem)
+	if !ok {
+		return syscall.EXDEV
+	}
+	return renameat(h.dir(), oldName, target.dir(), newName)
+}
+
+func (h *hostFileSystem) Link(
+	oldName string,
+	followSymlink bool,
+	newDir FileSystem,
+	newName string,
+) error {
+	target, ok := newDir.(*hostFileSystem)
+	if !ok {
+		return syscall.EXDEV
+	}
+	return linkat(h.dir(), oldName, followSymlink, target.dir(), newName)
+}
+
+func (h *hostFileSystem) Chtimes(
+	name string,
+	atim, mtim int64,
+	fstFlags int32,
+	followSymlink bool,
+) error {
+	return utimes(h.dir(), name, atim, mtim, fstFlags, followSymlink)
+}
+
+func (h *hostFileSystem) ReadDir() ([]DirEntry, error) {
+	return readDirEntries(h.dir())
 }
 
 // mkdirat creates a directory relative to a directory.
@@ -107,10 +281,10 @@ func mkdirat(dir *os.File, path string, mode uint32) error {
 //   - followSymlinks: whether to follow final symlink
 //
 // Returns the filestat and an error if the operation fails.
-func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
+func stat(dir *os.File, path string, followSymlinks bool) (FileStat, error) {
 	dirFd, fileName, err := resolvePath(dir, path, followSymlinks, 0)
 	if err != nil {
-		return filestat{}, err
+		return FileStat{}, err
 	}
 	if dirFd != int(dir.Fd()) {
 		defer unix.Close(dirFd)
@@ -119,16 +293,16 @@ func stat(dir *os.File, path string, followSymlinks bool) (filestat, error) {
 	var statBuf unix.Stat_t
 	flags := unix.AT_SYMLINK_NOFOLLOW
 	if err := unix.Fstatat(dirFd, fileName, &statBuf, flags); err != nil {
-		return filestat{}, err
+		return FileStat{}, err
 	}
 	return statFromUnix(&statBuf), nil
 }
 
 // fdstat returns a filestat from a file.
-func fdstat(file *os.File) (filestat, error) {
+func fdstat(file *os.File) (FileStat, error) {
 	var stat unix.Stat_t
 	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
-		return filestat{}, err
+		return FileStat{}, err
 	}
 	return statFromUnix(&stat), nil
 }
@@ -140,7 +314,7 @@ func fdstat(file *os.File) (filestat, error) {
 // For each entry, the inode is obtained via Fstatat. The "." entry uses the
 // directory's own inode; ".." uses inode 0 because we cannot safely access
 // the parent directory due to sandboxing.
-func readDirEntries(dir *os.File) ([]dirEntry, error) {
+func readDirEntries(dir *os.File) ([]DirEntry, error) {
 	// Get the directory's own inode for "."
 	var dirStat unix.Stat_t
 	if err := unix.Fstat(int(dir.Fd()), &dirStat); err != nil {
@@ -157,11 +331,11 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 		return nil, err
 	}
 
-	result := make([]dirEntry, 0, len(entries)+2)
+	result := make([]DirEntry, 0, len(entries)+2)
 	result = append(
 		result,
-		dirEntry{name: ".", fileType: int8(fileTypeDirectory), ino: dirStat.Ino},
-		dirEntry{name: "..", fileType: int8(fileTypeDirectory), ino: 0},
+		DirEntry{Name: ".", FileType: FileTypeDirectory, Ino: dirStat.Ino},
+		DirEntry{Name: "..", FileType: FileTypeDirectory, Ino: 0},
 	)
 
 	dirFd := int(dir.Fd())
@@ -172,10 +346,10 @@ func readDirEntries(dir *os.File) ([]dirEntry, error) {
 			return nil, err
 		}
 
-		result = append(result, dirEntry{
-			name:     entry.Name(),
-			fileType: fileTypeFromMode(uint32(statBuf.Mode)),
-			ino:      statBuf.Ino,
+		result = append(result, DirEntry{
+			Name:     entry.Name(),
+			FileType: fileTypeFromMode(uint32(statBuf.Mode)),
+			Ino:      statBuf.Ino,
 		})
 	}
 
@@ -815,36 +989,36 @@ func resolvePath(
 }
 
 // statFromUnix converts a unix.Stat_t to a filestat.
-func statFromUnix(s *unix.Stat_t) filestat {
-	return filestat{
-		dev:      uint64(s.Dev),
-		ino:      s.Ino,
-		filetype: fileTypeFromMode(uint32(s.Mode)),
-		nlink:    uint64(s.Nlink),
-		size:     uint64(s.Size),
-		atim:     uint64(unix.TimespecToNsec(s.Atim)),
-		mtim:     uint64(unix.TimespecToNsec(s.Mtim)),
-		ctim:     uint64(unix.TimespecToNsec(s.Ctim)),
+func statFromUnix(s *unix.Stat_t) FileStat {
+	return FileStat{
+		Dev:      uint64(s.Dev),
+		Ino:      s.Ino,
+		FileType: fileTypeFromMode(uint32(s.Mode)),
+		Nlink:    uint64(s.Nlink),
+		Size:     uint64(s.Size),
+		Atim:     uint64(unix.TimespecToNsec(s.Atim)),
+		Mtim:     uint64(unix.TimespecToNsec(s.Mtim)),
+		Ctim:     uint64(unix.TimespecToNsec(s.Ctim)),
 	}
 }
 
 // fileTypeFromMode extracts the WASI file type from a Unix mode.
-func fileTypeFromMode(mode uint32) int8 {
+func fileTypeFromMode(mode uint32) FileType {
 	switch mode & unix.S_IFMT {
 	case unix.S_IFBLK:
-		return int8(fileTypeBlockDevice)
+		return FileTypeBlockDevice
 	case unix.S_IFCHR:
-		return int8(fileTypeCharacterDevice)
+		return FileTypeCharacterDevice
 	case unix.S_IFDIR:
-		return int8(fileTypeDirectory)
+		return FileTypeDirectory
 	case unix.S_IFREG:
-		return int8(fileTypeRegularFile)
+		return FileTypeRegularFile
 	case unix.S_IFSOCK:
-		return int8(fileTypeSocketStream)
+		return FileTypeSocketStream
 	case unix.S_IFLNK:
-		return int8(fileTypeSymbolicLink)
+		return FileTypeSymbolicLink
 	default:
-		return int8(fileTypeUnknown)
+		return FileTypeUnknown
 	}
 }
 
@@ -876,46 +1050,4 @@ func buildTimespec(atim, mtim int64, fstFlags int32) ([]unix.Timespec, error) {
 	}
 
 	return []unix.Timespec{atimSpec, mtimSpec}, nil
-}
-
-// mapError maps Go/Syscall errors to WASI errno.
-func mapError(err error) int32 {
-	if unwrapped := errors.Unwrap(err); unwrapped != nil {
-		err = unwrapped
-	}
-
-	if errno, ok := err.(syscall.Errno); ok {
-		switch errno {
-		case syscall.EACCES:
-			return errnoAcces
-		case syscall.EPERM:
-			return errnoPerm
-		case syscall.ENOENT:
-			return errnoNoEnt
-		case syscall.EEXIST:
-			return errnoExist
-		case syscall.EISDIR:
-			return errnoIsDir
-		case syscall.ENOTDIR:
-			return errnoNotDir
-		case syscall.EINVAL:
-			return errnoInval
-		case syscall.ENOTEMPTY:
-			return errnoNotEmpty
-		case syscall.ELOOP:
-			return errnoLoop
-		case syscall.EBADF:
-			return errnoBadF
-		case syscall.EMFILE, syscall.ENFILE:
-			return errnoNFile
-		case syscall.ENAMETOOLONG:
-			return errnoNameTooLong
-		case syscall.EPIPE:
-			return errnoPipe
-		case syscall.EAGAIN:
-			return errnoAgain
-		}
-	}
-
-	return errnoNotCapable
 }
