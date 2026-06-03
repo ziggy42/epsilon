@@ -212,6 +212,98 @@ func TestRuntimeImportedFunctionsInTable(t *testing.T) {
 	}
 }
 
+// TestHostFunctionReentrancy guards host call argument isolation: a host
+// function that re-enters the VM and triggers a nested host call must not have
+// its own arguments overwritten by that nested call.
+func TestHostFunctionReentrancy(t *testing.T) {
+	wasm, _ := wabt.Wat2Wasm(`(module
+		(import "env" "inner" (func $inner (param i32 i32 i32) (result i32)))
+		(import "env" "outer" (func $outer (param i32 i32) (result i32)))
+		(func (export "inner3") (param i32 i32 i32) (result i32)
+			local.get 0 local.get 1 local.get 2 call $inner)
+		(func (export "run") (result i32)
+			i32.const 100 i32.const 200 call $outer))`)
+
+	var instance *ModuleInstance
+	imports := NewModuleImports("env").
+		AddHostFunc("inner", func(_ *ModuleInstance, args ...any) []any {
+			return []any{args[0].(int32) + args[1].(int32) + args[2].(int32)}
+		}).
+		AddHostFunc("outer", func(_ *ModuleInstance, args ...any) []any {
+			before0, before1 := args[0].(int32), args[1].(int32)
+			// Re-enter the VM, which triggers the nested inner host call.
+			_, err := instance.Invoke("inner3", int32(1), int32(2), int32(3))
+			if err != nil {
+				t.Fatalf("nested invoke failed: %v", err)
+			}
+			if args[0].(int32) != before0 || args[1].(int32) != before1 {
+				t.Fatalf("outer args clobbered: before=(%d,%d) after=(%d,%d)",
+					before0, before1, args[0], args[1])
+			}
+			return []any{before0 + before1}
+		})
+
+	instance, err := NewRuntime().
+		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+	if err != nil {
+		t.Fatalf("failed to instantiate module: %v", err)
+	}
+
+	results, err := instance.Invoke("run")
+	if err != nil {
+		t.Fatalf("failed to invoke run: %v", err)
+	}
+	if results[0].(int32) != int32(300) {
+		t.Fatalf("expected 300, got %v", results[0])
+	}
+}
+
+// TestHostFunctionArgsRetention guards that the args slice handed to a host
+// function stays valid after the call returns: a host may retain it, and a
+// later host call must not overwrite the retained values.
+//
+// "run" makes two sequential host calls, capture(11, 22) then observe(33, 44).
+// capture stores its args slice; observe records what that slice holds while it
+// runs. If the two calls shared a backing array, capture's slice would read
+// (33, 44) by then.
+func TestHostFunctionArgsRetention(t *testing.T) {
+	wasm, _ := wabt.Wat2Wasm(`(module
+		(import "env" "capture" (func $capture (param i32 i32) (result i32)))
+		(import "env" "observe" (func $observe (param i32 i32) (result i32)))
+		(func (export "run") (result i32)
+			i32.const 11 i32.const 22 call $capture
+			drop
+			i32.const 33 i32.const 44 call $observe))`)
+
+	var captured []any
+	var capturedDuringObserve []any
+	imports := NewModuleImports("env").
+		AddHostFunc("capture", func(_ *ModuleInstance, args ...any) []any {
+			captured = args
+			return []any{int32(0)}
+		}).
+		AddHostFunc("observe", func(_ *ModuleInstance, args ...any) []any {
+			capturedDuringObserve = append([]any(nil), captured...)
+			return []any{int32(0)}
+		})
+
+	instance, err := NewRuntime().
+		InstantiateModuleWithImports(bytes.NewReader(wasm), imports)
+	if err != nil {
+		t.Fatalf("failed to instantiate module: %v", err)
+	}
+	if _, err := instance.Invoke("run"); err != nil {
+		t.Fatalf("failed to invoke run: %v", err)
+	}
+
+	if len(capturedDuringObserve) != 2 ||
+		capturedDuringObserve[0] != int32(11) ||
+		capturedDuringObserve[1] != int32(22) {
+		t.Fatalf("capture's retained args were not preserved: got %v, want [11 22]",
+			capturedDuringObserve)
+	}
+}
+
 func TestRuntimeModuleToModuleImport(t *testing.T) {
 	module1Wasm, _ := wabt.Wat2Wasm(`(module
 		(func (export "multiply") (param i32 i32) (result i32)

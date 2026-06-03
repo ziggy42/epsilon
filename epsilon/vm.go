@@ -1898,6 +1898,7 @@ func (vm *vm) invokeHostFunction(fun *hostFunction) (err error) {
 		}
 	}()
 
+	// popValueTypes returns a fresh slice per call, so the host may retain args.
 	args := vm.stack.popValueTypes(fun.GetType().ParamTypes)
 	res := fun.hostCode(fun.module, args...)
 	if len(res) != len(fun.GetType().ResultTypes) {
