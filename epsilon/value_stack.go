@@ -108,6 +108,8 @@ func (s *valueStack) pop() value {
 	return element
 }
 
+// popValueTypes pops the top len(types) values off the stack, converts each to
+// its Go type, and returns them in a freshly allocated []any.
 func (s *valueStack) popValueTypes(types []ValueType) []any {
 	n := len(types)
 	newLen := len(s.data) - n
