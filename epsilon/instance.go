@@ -177,6 +177,10 @@ type wasmFunction struct {
 	functionType FunctionType
 	module       *ModuleInstance
 	code         function
+	// frames is the compilation of the function body. It is populated by
+	// vm.compile at instantiation (before the function can be invoked); the
+	// interpreter runs this directly.
+	frames []frame
 }
 
 func (wf *wasmFunction) GetType() *FunctionType { return &wf.functionType }
