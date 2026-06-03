@@ -52,12 +52,12 @@ const (
 	sixthBitMask         = uint64(1 << 6)
 )
 
-// initialVectorCapacity caps the up-front allocation parseVector and similar
+// maxInitialCapacity caps the up-front allocation parseVector and similar
 // callers perform from an attacker-controlled count. Real modules rarely
 // exceed a few thousand items per vector, so this is the common-case exact
 // size; pathological counts grow via append+EOF instead of OOMing on a
 // pre-allocation.
-const initialVectorCapacity = 4096
+const maxInitialCapacity = 4096
 
 // sectionId represents the different sections of a WebAssembly module.
 // See https://webassembly.github.io/spec/core/binary/modules.html#sections
@@ -84,8 +84,7 @@ type localEntry struct {
 	typ   ValueType
 }
 
-// wasmReader is the combined reader interface the parser needs: single-byte
-// reads for LEB128 decoding plus bulk reads for section payloads.
+// wasmReader is an interface that combines io.Reader and io.ByteReader.
 type wasmReader interface {
 	io.Reader
 	io.ByteReader
@@ -93,7 +92,7 @@ type wasmReader interface {
 
 // limitedByteReader caps reads at rem bytes from an underlying wasmReader. It
 // is equivalent to wrapping an io.LimitReader in a bufio.Reader to regain
-// ByteReader, but reads from the source directly and so needs no buffer.
+// ByteReader, but reads from the source directly and so allocates no buffer.
 type limitedByteReader struct {
 	r   wasmReader
 	rem int64
@@ -353,7 +352,7 @@ func (p *parser) parseFunction() (function, error) {
 		)
 	}
 
-	locals := make([]ValueType, 0, min(totalLocalsCount, initialVectorCapacity))
+	locals := make([]ValueType, 0, min(totalLocalsCount, maxInitialCapacity))
 	for _, entry := range localEntries {
 		for i := uint64(0); i < entry.count; i++ {
 			locals = append(locals, entry.typ)
@@ -813,7 +812,7 @@ func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	items := make([]T, 0, min(count, initialVectorCapacity))
+	items := make([]T, 0, min(count, maxInitialCapacity))
 	for i := uint32(0); i < count; i++ {
 		parsed, err := parse()
 		if err != nil {
@@ -853,11 +852,11 @@ func (p *parser) parseUtf8String() (string, error) {
 }
 
 // readN reads exactly length bytes from the reader. The initial buffer
-// capacity is capped at initialVectorCapacity so an attacker-controlled
+// capacity is capped at maxInitialCapacity so an attacker-controlled
 // length cannot force a huge up-front allocation; the buffer grows as needed
 // and a short read surfaces as an error.
 func (p *parser) readN(length uint64) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, min(length, initialVectorCapacity)))
+	buf := bytes.NewBuffer(make([]byte, 0, min(length, maxInitialCapacity)))
 	if _, err := io.CopyN(buf, p.reader, int64(length)); err != nil {
 		return nil, err
 	}
@@ -918,24 +917,26 @@ type bytecodeResult struct {
 	jumpElseCache map[uint32]uint32
 }
 
-// readCode reads a sequence of instructions into the flat uint64 bytecode
-// slice. sizeHint is the body's byte length when known (0 otherwise), used only
-// to size the bytecode buffer up front and avoid repeated slice growth.
+// readCode decodes a sequence of WASM instructions into the flat uint64
+// bytecode the VM executes, and returns it with the jump caches that map each
+// block/if to its branch targets.
 //
-// It is an estimate, not an exact count: bytecode holds one uint64 per decoded
-// word, so a multi-byte LEB immediate (e.g. a wide i32.const) collapses several
-// bytes into one word, while a memory argument expands a couple of bytes into
-// several words. In practice most instructions map a byte to roughly a word, so
-// the hint is close; a miss in either direction just costs one more append.
+// Decoding stops at the first instruction for which isEnd returns true; a nil
+// isEnd decodes until the reader reaches EOF, which a function body's bounded
+// reader hits at the end of the body. A sequence that does not end with an end
+// opcode is rejected with errMissingEndOpcode.
+//
+// sizeHint only seeds the bytecode buffer capacity to avoid regrowth: it is the
+// body's declared byte length, or 0 if unknown, and need not be accurate.
 func (p *parser) readCode(
 	sizeHint uint32,
 	isEnd func([]uint64) bool,
 ) (bytecodeResult, error) {
 	// sizeHint is attacker-controlled (the function body's declared size), so cap
-	// the initial capacity at initialVectorCapacity. The buffer still grows via
+	// the initial capacity at maxInitialCapacity. The buffer still grows via
 	// append as real bytes are decoded; a bogus huge size cannot force a large
 	// up-front allocation.
-	bytecode := make([]uint64, 0, min(sizeHint, initialVectorCapacity))
+	bytecode := make([]uint64, 0, min(sizeHint, maxInitialCapacity))
 	// The jump caches are allocated lazily: a function with no control flow
 	// never branches, so it needs neither map.
 	var jumpCache map[uint32]uint32
@@ -1236,7 +1237,7 @@ func (p *parser) readImmediateVector() ([]uint64, error) {
 		return nil, err
 	}
 
-	immediates := make([]uint64, 0, min(size, initialVectorCapacity))
+	immediates := make([]uint64, 0, min(size, maxInitialCapacity))
 	for range size {
 		val, err := p.readUint32()
 		if err != nil {

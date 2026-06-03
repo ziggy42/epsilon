@@ -284,17 +284,15 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	}
 
 	callDepth := len(vm.callStack)
-	// The control stack uses a fixed per-depth slot in controlStackCache, which
-	// only covers call depths within the preallocated range; deeper frames put
-	// their control stack on the heap.
+	// Unlike locals, the control stack uses a fixed per-depth slot; only depths
+	// within the preallocated range are cached, and deeper frames use the heap.
 	useControlStackCache := callDepth < vm.config.CallStackPreallocationSize
 
 	numParams := len(function.functionType.ParamTypes)
 	numLocals := numParams + len(function.code.locals)
 
-	// Bump-allocate locals from the cache: take numLocals slots at localsTop and
-	// advance it (rewound after the call returns). Nested calls bump further, so
-	// frames never overlap. Only an exhausted cache falls back to the heap.
+	// Carve this frame's locals at the cursor; nested calls bump past them, so
+	// frames never overlap.
 	localsMark := vm.localsTop
 	var locals []value
 	if end := localsMark + numLocals; end <= len(vm.localsCache) {
@@ -309,7 +307,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 			clear(locals[numParams:])
 		}
 	} else {
-		// Cache exhausted: heap allocate (make already zeroes the locals).
+		// Not enough cache room: heap allocate (make already zeroes the locals).
 		locals = make([]value, numLocals)
 		if function.code.defaultLocals != nil {
 			copy(locals[numParams:], function.code.defaultLocals)
