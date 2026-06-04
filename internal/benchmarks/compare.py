@@ -77,6 +77,27 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
   return _worktree(tmpdir, ref)
 
 
+def _build_wasm(cwd: str, sdk_dir: str) -> None:
+  """Build the benchmark .wasm files for the checkout at cwd.
+
+  The .wasm artifacts are git-ignored (built on demand), so a freshly created
+  worktree has none and the benchmarks would fail to open them. We rebuild them
+  from each ref's own C sources, reusing the already-installed wasi-sdk via an
+  absolute WASI_SDK_DIR so it is not re-downloaded per checkout.
+  """
+  result = subprocess.run(
+      ["make", "build-wasm", f"WASI_SDK_DIR={sdk_dir}"],
+      cwd=cwd,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  if result.returncode != 0:
+    print(result.stdout, file=sys.stderr)
+    print(result.stderr, file=sys.stderr)
+    sys.exit(1)
+
+
 def _run_benchmarks(
         cwd: str, output_file: Path, bench_pattern: str = ".") -> None:
   """Run benchmarks and append results to file."""
@@ -147,6 +168,13 @@ def _main():
 
       print(f"Base:   {args.base}")
       print(f"Target: {args.target}")
+
+      # Worktrees have no .wasm artifacts (git-ignored). Build them for each ref
+      # from its own sources, reusing the root's installed wasi-sdk.
+      sdk_dir = str(Path(root) / ".toolchain" / "wasi-sdk")
+      print("Building benchmark .wasm for each ref...")
+      _build_wasm(base_path, sdk_dir)
+      _build_wasm(target_path, sdk_dir)
 
       for i in range(args.count):
         print(f"Iteration {i+1}/{args.count}...", end="\r")
