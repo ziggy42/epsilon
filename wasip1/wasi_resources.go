@@ -30,7 +30,10 @@ const maxFileDescriptors = 2048
 var errMaxFileDescriptorsReached = errors.New("max file descriptors reached")
 
 type wasiFileDescriptor struct {
-	file             *os.File
+	file *os.File
+	// root is non-nil for directory descriptors: the sandboxed os.Root used to
+	// resolve paths; file is the directory's own handle for fd-level operations.
+	root             *os.Root
 	fileType         uint8
 	flags            uint16
 	rights           int64
@@ -42,6 +45,9 @@ type wasiFileDescriptor struct {
 func (fd *wasiFileDescriptor) close() {
 	if fd.file != os.Stdin && fd.file != os.Stdout && fd.file != os.Stderr {
 		fd.file.Close()
+	}
+	if fd.root != nil {
+		fd.root.Close()
 	}
 }
 
@@ -93,6 +99,7 @@ func newWasiResourceTable(
 
 func newFileDescriptor(
 	file *os.File,
+	root *os.Root,
 	rights, rightsInheriting int64,
 	flags uint16,
 ) (*wasiFileDescriptor, error) {
@@ -107,6 +114,7 @@ func newFileDescriptor(
 
 	return &wasiFileDescriptor{
 		file:             file,
+		root:             root,
 		fileType:         getModeFileType(info.Mode()),
 		flags:            flags,
 		rights:           rights,
@@ -117,8 +125,18 @@ func newFileDescriptor(
 }
 
 func newPreopenFileDescriptor(pre WasiPreopen) (*wasiFileDescriptor, error) {
-	fd, err := newFileDescriptor(pre.File, pre.Rights, pre.RightsInheriting, 0)
+	// Re-root by the preopen's path so the descriptor owns a sandboxed os.Root,
+	// taking ownership of (closing) the originally provided handle.
+	root, handle, err := openRootHandle(os.OpenRoot(pre.File.Name()))
+	pre.File.Close()
 	if err != nil {
+		return nil, err
+	}
+
+	fd, err := newFileDescriptor(handle, root, pre.Rights, pre.RightsInheriting, 0)
+	if err != nil {
+		handle.Close()
+		root.Close()
 		return nil, err
 	}
 	fd.guestPath = pre.GuestPath
@@ -130,7 +148,7 @@ func newStdFileDescriptor(
 	file *os.File,
 	rights int64,
 ) (*wasiFileDescriptor, error) {
-	return newFileDescriptor(file, rights, 0, 0)
+	return newFileDescriptor(file, nil, rights, 0, 0)
 }
 
 func (w *wasiResourceTable) advise(
@@ -570,7 +588,7 @@ func (w *wasiResourceTable) pathCreateDirectory(
 		return errnoFault
 	}
 
-	if err := mkdirat(fd.file, path, 0o755); err != nil {
+	if err := mkdirat(fd.root, path, 0o755); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -591,7 +609,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 	}
 
 	followSymlinks := flags&lookupFlagsSymlinkFollow != 0
-	fs, err := stat(fd.file, path, followSymlinks)
+	fs, err := stat(fd.root, path, followSymlinks)
 	if err != nil {
 		return mapError(err)
 	}
@@ -620,7 +638,7 @@ func (w *wasiResourceTable) pathFilestatSetTimes(
 	}
 
 	followSymlinks := flags&lookupFlagsSymlinkFollow != 0
-	err = utimes(fd.file, path, atim, mtim, fstFlags, followSymlinks)
+	err = utimes(fd.root, path, atim, mtim, fstFlags, followSymlinks)
 	if err != nil {
 		return mapError(err)
 	}
@@ -653,7 +671,7 @@ func (w *wasiResourceTable) pathLink(
 	}
 
 	followSymlinks := oldFlags&lookupFlagsSymlinkFollow != 0
-	err = linkat(oldFd.file, oldPath, followSymlinks, newFd.file, newPath)
+	err = linkat(oldFd.root, oldPath, followSymlinks, newFd.root, newPath)
 	if err != nil {
 		return mapError(err)
 	}
@@ -698,14 +716,21 @@ func (w *wasiResourceTable) pathOpen(
 	}
 
 	followSymlinks := dirflags&lookupFlagsSymlinkFollow != 0
-	rights := uint64(rightsBase)
-	file, err := openat(fd.file, path, followSymlinks, oflags, fdflags, rights)
+	file, childRoot, err := openat(
+		fd.root,
+		path,
+		followSymlinks,
+		oflags,
+		fdflags,
+		uint64(rightsBase),
+	)
 	if err != nil {
 		return mapError(err)
 	}
 
 	newFdIndex, errCode := w.allocateFd(
 		file,
+		childRoot,
 		rightsBase,
 		rightsInheriting,
 		uint16(fdflags),
@@ -740,7 +765,7 @@ func (w *wasiResourceTable) pathReadlink(
 		return errnoFault
 	}
 
-	target, err := readlink(fd.file, path)
+	target, err := readlink(fd.root, path)
 	if err != nil {
 		return mapError(err)
 	}
@@ -771,7 +796,7 @@ func (w *wasiResourceTable) pathRemoveDirectory(
 		return errnoFault
 	}
 
-	if err := rmdirat(fd.file, path); err != nil {
+	if err := rmdirat(fd.root, path); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -801,7 +826,7 @@ func (w *wasiResourceTable) pathRename(
 		return errnoFault
 	}
 
-	if err := renameat(oldFd.file, oldPath, newFd.file, newPath); err != nil {
+	if err := renameat(oldFd.root, oldPath, newFd.root, newPath); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -826,7 +851,7 @@ func (w *wasiResourceTable) pathSymlink(
 		return errnoFault
 	}
 
-	if err := symlinkat(targetPath, fd.file, linkPath); err != nil {
+	if err := symlinkat(targetPath, fd.root, linkPath); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -846,7 +871,7 @@ func (w *wasiResourceTable) pathUnlinkFile(
 		return errnoFault
 	}
 
-	if err := unlinkat(fd.file, path); err != nil {
+	if err := unlinkat(fd.root, path); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess
@@ -874,6 +899,7 @@ func (w *wasiResourceTable) sockAccept(
 	inheritRights := fd.rightsInheriting
 	newFdIndex, errCode := w.allocateFd(
 		newFile,
+		nil,
 		rights,
 		inheritRights,
 		uint16(flags),
@@ -964,12 +990,16 @@ func (w *wasiResourceTable) allocateFdIndex() (int32, error) {
 // code.
 func (w *wasiResourceTable) allocateFd(
 	file *os.File,
+	root *os.Root,
 	rights, inheritRights int64,
 	flags uint16,
 ) (int32, int32) {
-	fd, err := newFileDescriptor(file, rights, inheritRights, flags)
+	fd, err := newFileDescriptor(file, root, rights, inheritRights, flags)
 	if err != nil {
 		file.Close()
+		if root != nil {
+			root.Close()
+		}
 		return 0, mapError(err)
 	}
 	newFdIndex, err := w.allocateFdIndex()

@@ -31,7 +31,7 @@ func TestRightsEscalation_FdSync(t *testing.T) {
 	defer dirFd.Close()
 
 	// Open file WITH RightsFdRead but WITHOUT RightsFdSync
-	f, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
+	f, _, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
 	if err != nil {
 		t.Fatalf("openat failed: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 	_, dirFd := testFS(t, file("test.txt", "hello"))
 	defer dirFd.Close()
 
-	f, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
+	f, _, err := openat(dirFd, "test.txt", false, 0, 0, uint64(RightsFdRead))
 	if err != nil {
 		t.Fatalf("openat failed: %v", err)
 	}
