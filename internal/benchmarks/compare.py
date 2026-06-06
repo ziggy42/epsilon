@@ -16,7 +16,9 @@
 """Compares benchmark results between two git references using benchstat."""
 
 import argparse
+import filecmp
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -77,25 +79,30 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
   return _worktree(tmpdir, ref)
 
 
-def _build_wasm(cwd: str, sdk_dir: str) -> None:
-  """Build the benchmark .wasm files for the checkout at cwd.
+def _copy_wasm(root: str, cwd: str) -> None:
+  """Copy the root checkout's built .wasm files into the worktree at cwd.
 
   The .wasm artifacts are git-ignored (built on demand), so a freshly created
-  worktree has none and the benchmarks would fail to open them. We rebuild them
-  from each ref's own C sources, reusing the already-installed wasi-sdk via an
-  absolute WASI_SDK_DIR so it is not re-downloaded per checkout.
+  worktree has none and the benchmarks would fail to open them. Rather than
+  rebuild them per checkout (which would require make in every worktree), we
+  copy the root's already-built artifacts. Both refs then run identical .wasm
+  inputs, so the comparison reflects only the Go VM changes.
   """
-  result = subprocess.run(
-      ["make", "build-wasm", f"WASI_SDK_DIR={sdk_dir}"],
-      cwd=cwd,
-      capture_output=True,
-      text=True,
-      check=False,
-  )
-  if result.returncode != 0:
-    print(result.stdout, file=sys.stderr)
-    print(result.stderr, file=sys.stderr)
+  src = Path(root) / "internal" / "benchmarks" / "wasm"
+  wasm_files = sorted(src.glob("*.wasm"))
+  if not wasm_files:
+    print(
+        f"No .wasm artifacts in {src}. Run `make build-wasm` first.",
+        file=sys.stderr,
+    )
     sys.exit(1)
+  dst = Path(cwd) / "internal" / "benchmarks" / "wasm"
+  dst.mkdir(parents=True, exist_ok=True)
+  for wasm_file in wasm_files:
+    target = dst / wasm_file.name
+    if target.exists() and filecmp.cmp(wasm_file, target, shallow=False):
+      continue
+    shutil.copy2(wasm_file, target)
 
 
 def _run_benchmarks(
@@ -169,12 +176,12 @@ def _main():
       print(f"Base:   {args.base}")
       print(f"Target: {args.target}")
 
-      # Worktrees have no .wasm artifacts (git-ignored). Build them for each ref
-      # from its own sources, reusing the root's installed wasi-sdk.
-      sdk_dir = str(Path(root) / ".toolchain" / "wasi-sdk")
-      print("Building benchmark .wasm for each ref...")
-      _build_wasm(base_path, sdk_dir)
-      _build_wasm(target_path, sdk_dir)
+      # Worktrees have no .wasm artifacts (git-ignored). Copy the root's
+      # already-built artifacts into each worktree so neither has to rebuild.
+      if base_path != root:
+        _copy_wasm(root, base_path)
+      if target_path != root:
+        _copy_wasm(root, target_path)
 
       for i in range(args.count):
         print(f"Iteration {i+1}/{args.count}...", end="\r")
