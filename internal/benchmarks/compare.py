@@ -80,14 +80,7 @@ def _resolve_path(ref: str, root: str, tmpdir: Path) -> str:
 
 
 def _copy_wasm(root: str, cwd: str) -> None:
-  """Copy the root checkout's built .wasm files into the worktree at cwd.
-
-  The .wasm artifacts are git-ignored (built on demand), so a freshly created
-  worktree has none and the benchmarks would fail to open them. Rather than
-  rebuild them per checkout (which would require make in every worktree), we
-  copy the root's already-built artifacts. Both refs then run identical .wasm
-  inputs, so the comparison reflects only the Go VM changes.
-  """
+  """Copy the root checkout's built .wasm files into the worktree at cwd."""
   src = Path(root) / "internal" / "benchmarks" / "wasm"
   wasm_files = sorted(src.glob("*.wasm"))
   if not wasm_files:
