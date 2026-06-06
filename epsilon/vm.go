@@ -356,57 +356,51 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	// To avoid the performance penalty of checking the fuel limit on every
 	// instruction when fuel is disabled, we provide two separate loop
 	// implementations.
-	arity := uint32(len(function.functionType.ResultTypes))
+	frameCtx := vm.newFrameCtx(function)
 	var err error
 	if vm.config.EnableFuel {
-		err = vm.runLoopWithFuel(function.frames, arity)
+		err = vm.runLoopWithFuel(frameCtx, function.frames)
 	} else {
-		err = vm.runLoop(function.frames, arity)
+		err = vm.runLoop(frameCtx, function.frames)
 	}
 	// The run loop pops this frame before returning, so its locals slots are free
 	// to reuse. Rewinding the cursor here is a no-op for the heap case.
 	vm.localsTop = localsMark
+	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return err
 }
 
-func (vm *vm) runLoop(code []frame, resultArity uint32) error {
-	c := vm.newFrameCtx(code, resultArity)
+func (vm *vm) runLoop(frameCtx *frameCtx, frames []frame) error {
 	ip := 0
-	for ip < len(code) {
-		switch n := code[ip](c); n {
+	for ip < len(frames) {
+		switch n := frames[ip](frameCtx); n {
 		case advance:
 			ip++
 		case trap:
-			vm.callStack = vm.callStack[:len(vm.callStack)-1]
-			return c.trap
+			return frameCtx.trap
 		default:
 			ip = n
 		}
 	}
-	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return nil
 }
 
-func (vm *vm) runLoopWithFuel(code []frame, resultArity uint32) error {
-	c := vm.newFrameCtx(code, resultArity)
+func (vm *vm) runLoopWithFuel(frameCtx *frameCtx, frames []frame) error {
 	ip := 0
-	for ip < len(code) {
+	for ip < len(frames) {
 		if vm.fuel == 0 {
-			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return errFuelExhausted
 		}
 		vm.fuel--
-		switch n := code[ip](c); n {
+		switch n := frames[ip](frameCtx); n {
 		case advance:
 			ip++
 		case trap:
-			vm.callStack = vm.callStack[:len(vm.callStack)-1]
-			return c.trap
+			return frameCtx.trap
 		default:
 			ip = n
 		}
 	}
-	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return nil
 }
 
@@ -449,12 +443,8 @@ func operandWordCount(op opcode, body []uint64, operandStart int) int {
 	}
 }
 
-// newFrameCtx returns the execution context for the current call, seeded with
-// the function's base control frame (the target of a return or outermost
-// branch). The context and its control stack come from depth-indexed caches, so
-// a call allocates nothing up to the preallocated depth and falls back to the
-// heap beyond it.
-func (vm *vm) newFrameCtx(code []frame, resultArity uint32) *frameCtx {
+// newFrameCtx returns the execution context for function.
+func (vm *vm) newFrameCtx(function *wasmFunction) *frameCtx {
 	callDepth := len(vm.callStack) - 1
 	frame := &vm.callStack[callDepth]
 
@@ -469,8 +459,8 @@ func (vm *vm) newFrameCtx(code []frame, resultArity uint32) *frameCtx {
 	}
 	*c = frameCtx{vm: vm, locals: frame.locals, module: frame.module}
 	c.ctrl = append(ctrl, controlFrame{
-		targetIp:    int32(len(code)),
-		arity:       resultArity,
+		targetIp:    int32(len(function.frames)),
+		arity:       uint32(len(function.functionType.ResultTypes)),
 		stackHeight: vm.stack.size(),
 	})
 	return c
@@ -1522,151 +1512,6 @@ func safe(body func(c *frameCtx) error) frame {
 	}
 }
 
-// handleLoad builds a memory-load closure, capturing the memory index and
-// offset from the memarg at body[pc+1..pc+3] (align is unused).
-func handleLoad[T any, R any](
-	body []uint64, pc int,
-	push func(R),
-	load func(*Memory, uint32, uint32) (T, error),
-	convert func(T) R,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
-		memory := c.vm.getMemory(c.module, memIdx)
-		index := uint32(c.vm.stack.popInt32())
-		v, err := load(memory, offset, index)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		push(convert(v))
-		return advance
-	}
-}
-
-// handleStore builds a memory-store closure. The value is popped before the
-// address index.
-func handleStore[T any](
-	body []uint64, pc int,
-	pop func() T,
-	store func(*Memory, uint32, uint32, T) error,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
-		val := pop()
-		memory := c.vm.getMemory(c.module, memIdx)
-		index := uint32(c.vm.stack.popInt32())
-		if err := store(memory, offset, index, val); err != nil {
-			c.trap = err
-			return trap
-		}
-		return advance
-	}
-}
-
-// handleLoadV128FromBytes builds a v128 load that converts sizeBytes of memory
-// via fromBytes.
-func handleLoadV128FromBytes(
-	body []uint64, pc int, fromBytes func([]byte) V128Value, sizeBytes uint32,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
-		memory := c.vm.getMemory(c.module, memIdx)
-		index := c.vm.stack.popInt32()
-		data, err := memory.Get(offset, uint32(index), sizeBytes)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		c.vm.stack.pushV128(fromBytes(data))
-		return advance
-	}
-}
-
-// handleSimdLoadLane builds a v128 load-lane closure for a laneSize-bit lane.
-func handleSimdLoadLane(body []uint64, pc int, laneSize uint32) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	laneIndex := uint32(body[pc+4])
-	return func(c *frameCtx) int {
-		memory := c.vm.getMemory(c.module, memIdx)
-		v := c.vm.stack.popV128()
-		index := c.vm.stack.popInt32()
-		laneValue, err := memory.Get(offset, uint32(index), laneSize/8)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		c.vm.stack.pushV128(simdLoadLane(v, laneIndex, laneValue))
-		return advance
-	}
-}
-
-// handleSimdStoreLane builds a v128 store-lane closure for a laneSize-bit lane.
-func handleSimdStoreLane(body []uint64, pc int, laneSize uint32) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	laneIndex := uint32(body[pc+4])
-	return func(c *frameCtx) int {
-		memory := c.vm.getMemory(c.module, memIdx)
-		v := c.vm.stack.popV128()
-		index := c.vm.stack.popInt32()
-
-		lanesPerUint64 := 64 / laneSize
-		shift := (laneIndex % lanesPerUint64) * laneSize
-		var val uint64
-		if laneIndex < lanesPerUint64 {
-			val = v.Low >> shift
-		} else {
-			val = v.High >> shift
-		}
-
-		var err error
-		switch laneSize {
-		case 8:
-			err = memory.StoreByte(offset, uint32(index), byte(val))
-		case 16:
-			err = memory.StoreUint16(offset, uint32(index), uint16(val))
-		case 32:
-			err = memory.StoreUint32(offset, uint32(index), uint32(val))
-		case 64:
-			err = memory.StoreUint64(offset, uint32(index), val)
-		}
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		return advance
-	}
-}
-
-// handleExtractLane builds a lane-extract closure; the lane index is at pc+1.
-func handleExtractLane[R wasmNumber](
-	body []uint64, pc int, push func(R), op func(V128Value, uint32) R,
-) frame {
-	laneIndex := uint32(body[pc+1])
-	return func(c *frameCtx) int {
-		push(op(c.vm.stack.popV128(), laneIndex))
-		return advance
-	}
-}
-
-// handleReplaceLane builds a lane-replace closure; the lane index is at pc+1.
-func handleReplaceLane[T wasmNumber](
-	body []uint64, pc int, pop func() T, op func(V128Value, uint32, T) V128Value,
-) frame {
-	laneIndex := uint32(body[pc+1])
-	return func(c *frameCtx) int {
-		laneValue := pop()
-		vector := c.vm.stack.popV128()
-		c.vm.stack.pushV128(op(vector, laneIndex, laneValue))
-		return advance
-	}
-}
-
 // v128Unary builds a closure for an operand-free V128 -> V128 instruction.
 func v128Unary(op func(V128Value) V128Value) frame {
 	return simple(func(c *frameCtx) { c.vm.stack.pushV128(op(c.vm.stack.popV128())) })
@@ -1992,6 +1837,151 @@ func (vm *vm) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
 	vm.stack.pushV128(op(v1, v2, v3))
+}
+
+// handleLoad builds a memory-load closure, capturing the memory index and
+// offset from the memarg at body[pc+1..pc+3] (align is unused).
+func handleLoad[T any, R any](
+	body []uint64, pc int,
+	push func(R),
+	load func(*Memory, uint32, uint32) (T, error),
+	convert func(T) R,
+) frame {
+	memIdx := body[pc+2]
+	offset := uint32(body[pc+3])
+	return func(c *frameCtx) int {
+		memory := c.vm.getMemory(c.module, memIdx)
+		index := uint32(c.vm.stack.popInt32())
+		v, err := load(memory, offset, index)
+		if err != nil {
+			c.trap = err
+			return trap
+		}
+		push(convert(v))
+		return advance
+	}
+}
+
+// handleStore builds a memory-store closure. The value is popped before the
+// address index.
+func handleStore[T any](
+	body []uint64, pc int,
+	pop func() T,
+	store func(*Memory, uint32, uint32, T) error,
+) frame {
+	memIdx := body[pc+2]
+	offset := uint32(body[pc+3])
+	return func(c *frameCtx) int {
+		val := pop()
+		memory := c.vm.getMemory(c.module, memIdx)
+		index := uint32(c.vm.stack.popInt32())
+		if err := store(memory, offset, index, val); err != nil {
+			c.trap = err
+			return trap
+		}
+		return advance
+	}
+}
+
+// handleLoadV128FromBytes builds a v128 load that converts sizeBytes of memory
+// via fromBytes.
+func handleLoadV128FromBytes(
+	body []uint64, pc int, fromBytes func([]byte) V128Value, sizeBytes uint32,
+) frame {
+	memIdx := body[pc+2]
+	offset := uint32(body[pc+3])
+	return func(c *frameCtx) int {
+		memory := c.vm.getMemory(c.module, memIdx)
+		index := c.vm.stack.popInt32()
+		data, err := memory.Get(offset, uint32(index), sizeBytes)
+		if err != nil {
+			c.trap = err
+			return trap
+		}
+		c.vm.stack.pushV128(fromBytes(data))
+		return advance
+	}
+}
+
+// handleExtractLane builds a lane-extract closure; the lane index is at pc+1.
+func handleExtractLane[R wasmNumber](
+	body []uint64, pc int, push func(R), op func(V128Value, uint32) R,
+) frame {
+	laneIndex := uint32(body[pc+1])
+	return func(c *frameCtx) int {
+		push(op(c.vm.stack.popV128(), laneIndex))
+		return advance
+	}
+}
+
+// handleReplaceLane builds a lane-replace closure; the lane index is at pc+1.
+func handleReplaceLane[T wasmNumber](
+	body []uint64, pc int, pop func() T, op func(V128Value, uint32, T) V128Value,
+) frame {
+	laneIndex := uint32(body[pc+1])
+	return func(c *frameCtx) int {
+		laneValue := pop()
+		vector := c.vm.stack.popV128()
+		c.vm.stack.pushV128(op(vector, laneIndex, laneValue))
+		return advance
+	}
+}
+
+// handleSimdLoadLane builds a v128 load-lane closure for a laneSize-bit lane.
+func handleSimdLoadLane(body []uint64, pc int, laneSize uint32) frame {
+	memIdx := body[pc+2]
+	offset := uint32(body[pc+3])
+	laneIndex := uint32(body[pc+4])
+	return func(c *frameCtx) int {
+		memory := c.vm.getMemory(c.module, memIdx)
+		v := c.vm.stack.popV128()
+		index := c.vm.stack.popInt32()
+		laneValue, err := memory.Get(offset, uint32(index), laneSize/8)
+		if err != nil {
+			c.trap = err
+			return trap
+		}
+		c.vm.stack.pushV128(simdLoadLane(v, laneIndex, laneValue))
+		return advance
+	}
+}
+
+// handleSimdStoreLane builds a v128 store-lane closure for a laneSize-bit lane.
+func handleSimdStoreLane(body []uint64, pc int, laneSize uint32) frame {
+	memIdx := body[pc+2]
+	offset := uint32(body[pc+3])
+	laneIndex := uint32(body[pc+4])
+	return func(c *frameCtx) int {
+		memory := c.vm.getMemory(c.module, memIdx)
+		v := c.vm.stack.popV128()
+		index := c.vm.stack.popInt32()
+
+		lanesPerUint64 := 64 / laneSize
+		shift := (laneIndex % lanesPerUint64) * laneSize
+		var val uint64
+		if laneIndex < lanesPerUint64 {
+			val = v.Low >> shift
+		} else {
+			val = v.High >> shift
+		}
+
+		var err error
+		switch laneSize {
+		case 8:
+			err = memory.StoreByte(offset, uint32(index), byte(val))
+		case 16:
+			err = memory.StoreUint16(offset, uint32(index), uint16(val))
+		case 32:
+			err = memory.StoreUint32(offset, uint32(index), uint32(val))
+		case 64:
+			err = memory.StoreUint64(offset, uint32(index), val)
+		}
+		if err != nil {
+			c.trap = err
+			return trap
+		}
+		return advance
+	}
 }
 
 func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
