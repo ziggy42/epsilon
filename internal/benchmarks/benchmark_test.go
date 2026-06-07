@@ -121,6 +121,20 @@ func BenchmarkVectorMath(b *testing.B) {
 	}
 }
 
+func BenchmarkIntegerVectorMath(b *testing.B) {
+	instance, err := instantiate("wasm/vector_math.wasm")
+	if err != nil {
+		b.Fatalf("failed to initialize test: %v", err)
+	}
+
+	for b.Loop() {
+		_, err := instance.Invoke("compute_integer_vector_math", int32(100))
+		if err != nil {
+			b.Fatalf("failed to execute benchmark: %v", err)
+		}
+	}
+}
+
 func BenchmarkMemoryAccess(b *testing.B) {
 	instance, err := instantiate("wasm/memory_access.wasm")
 	if err != nil {
