@@ -65,8 +65,11 @@ type dataInstance struct {
 }
 
 type callFrame struct {
-	locals []value
-	module *ModuleInstance
+	vm           *vm
+	controlStack []controlFrame
+	locals       []value
+	module       *ModuleInstance
+	trap         error
 }
 
 // controlFrame represents a block of code that can be branched to.
@@ -80,39 +83,23 @@ type controlFrame struct {
 // A frame returns the next instruction index, or one of these sentinels.
 const (
 	advance = -1 // continue to the next instruction
-	trap    = -2 // stop; frameCtx.trap holds the error
+	trap    = -2 // stop; callFrame.trap holds the error
 )
 
-type frame func(c *frameCtx) int
-
-type frameCtx struct {
-	vm     *vm
-	locals []value
-	module *ModuleInstance // for stateful ops: memory / global / table / call
-	ctrl   []controlFrame
-	trap   error
-}
+type frame func(c *callFrame) int
 
 // brToLabel branches out labelIndex enclosing blocks, unwinding the value stack
 // to the target's height (keeping its arity values) and returning the target
 // instruction index.
-func (c *frameCtx) brToLabel(labelIndex int) int {
-	targetIndex := len(c.ctrl) - labelIndex - 1
-	target := c.ctrl[targetIndex]
-	c.ctrl = c.ctrl[:targetIndex]
+func (c *callFrame) brToLabel(labelIndex int) int {
+	targetIndex := len(c.controlStack) - labelIndex - 1
+	target := c.controlStack[targetIndex]
+	c.controlStack = c.controlStack[:targetIndex]
 	c.vm.stack.unwind(target.stackHeight, target.arity)
 	if target.isLoop {
-		c.ctrl = append(c.ctrl, target)
+		c.controlStack = append(c.controlStack, target)
 	}
 	return int(target.targetIp)
-}
-
-func (c *frameCtx) handleBrTable(labels []uint32, defaultLabel uint32) int {
-	index := uint32(c.vm.stack.popInt32())
-	if index < uint32(len(labels)) {
-		return c.brToLabel(int(labels[index]))
-	}
-	return c.brToLabel(int(defaultLabel))
 }
 
 // vm is the WebAssembly Virtual Machine.
@@ -121,7 +108,6 @@ type vm struct {
 	stack             *valueStack
 	callStack         []callFrame
 	controlStackCache []controlFrame
-	frameCtxCache     []frameCtx
 	localsCache       []value
 	// localsTop is the bump-allocation cursor into localsCache: each wasm call
 	// carves its locals starting here, advances the cursor, and rewinds it when
@@ -140,7 +126,6 @@ func newVm(config Config) *vm {
 		stack:             newValueStack(),
 		callStack:         make([]callFrame, 0, config.CallStackPreallocationSize),
 		controlStackCache: make([]controlFrame, ctrlCacheSize),
-		frameCtxCache:     make([]frameCtx, config.CallStackPreallocationSize),
 		localsCache:       make([]value, localsCacheSize),
 		config:            config,
 		fuel:              config.Fuel,
@@ -348,36 +333,32 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	copy(locals[:numParams], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
-	vm.callStack = append(vm.callStack, callFrame{
-		locals: locals,
-		module: function.module,
-	})
+	c := vm.pushCallFrame(function, locals)
 
 	// To avoid the performance penalty of checking the fuel limit on every
 	// instruction when fuel is disabled, we provide two separate loop
 	// implementations.
-	frameCtx := vm.newFrameCtx(function)
 	var err error
 	if vm.config.EnableFuel {
-		err = vm.runLoopWithFuel(frameCtx, function.frames)
+		err = vm.runLoopWithFuel(c, function.frames)
 	} else {
-		err = vm.runLoop(frameCtx, function.frames)
+		err = vm.runLoop(c, function.frames)
 	}
-	// The run loop pops this frame before returning, so its locals slots are free
-	// to reuse. Rewinding the cursor here is a no-op for the heap case.
+	// The run loop is done with this frame, so its locals slots are free to
+	// reuse. Rewinding the cursor here is a no-op for the heap case.
 	vm.localsTop = localsMark
 	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return err
 }
 
-func (vm *vm) runLoop(frameCtx *frameCtx, frames []frame) error {
+func (vm *vm) runLoop(c *callFrame, frames []frame) error {
 	ip := 0
 	for ip < len(frames) {
-		switch n := frames[ip](frameCtx); n {
+		switch n := frames[ip](c); n {
 		case advance:
 			ip++
 		case trap:
-			return frameCtx.trap
+			return c.trap
 		default:
 			ip = n
 		}
@@ -385,18 +366,18 @@ func (vm *vm) runLoop(frameCtx *frameCtx, frames []frame) error {
 	return nil
 }
 
-func (vm *vm) runLoopWithFuel(frameCtx *frameCtx, frames []frame) error {
+func (vm *vm) runLoopWithFuel(c *callFrame, frames []frame) error {
 	ip := 0
 	for ip < len(frames) {
 		if vm.fuel == 0 {
 			return errFuelExhausted
 		}
 		vm.fuel--
-		switch n := frames[ip](frameCtx); n {
+		switch n := frames[ip](c); n {
 		case advance:
 			ip++
 		case trap:
-			return frameCtx.trap
+			return c.trap
 		default:
 			ip = n
 		}
@@ -443,22 +424,25 @@ func operandWordCount(op opcode, body []uint64, operandStart int) int {
 	}
 }
 
-// newFrameCtx returns the execution context for function.
-func (vm *vm) newFrameCtx(function *wasmFunction) *frameCtx {
+// pushCallFrame appends a frame for function to the call stack and returns it,
+// initialized with the locals and the base control frame for the function body.
+func (vm *vm) pushCallFrame(function *wasmFunction, locals []value) *callFrame {
+	vm.callStack = append(vm.callStack, callFrame{
+		vm:     vm,
+		locals: locals,
+		module: function.module,
+	})
 	callDepth := len(vm.callStack) - 1
-	frame := &vm.callStack[callDepth]
+	c := &vm.callStack[callDepth]
 
-	var c *frameCtx
+	// Unlike locals, the control stack uses a fixed per-depth slot; only depths
+	// within the preallocated range are cached, and deeper frames use the heap.
 	var ctrl []controlFrame
 	if callDepth < vm.config.CallStackPreallocationSize {
-		c = &vm.frameCtxCache[callDepth]
 		base := callDepth * controlStackCacheSlotSize
 		ctrl = vm.controlStackCache[base : base : base+controlStackCacheSlotSize]
-	} else {
-		c = &frameCtx{}
 	}
-	*c = frameCtx{vm: vm, locals: frame.locals, module: frame.module}
-	c.ctrl = append(ctrl, controlFrame{
+	c.controlStack = append(ctrl, controlFrame{
 		targetIp:    int32(len(function.frames)),
 		arity:       uint32(len(function.functionType.ResultTypes)),
 		stackHeight: vm.stack.size(),
@@ -521,16 +505,16 @@ func (vm *vm) compileInstr(
 
 	switch op {
 	case unreachable:
-		return func(c *frameCtx) int { c.trap = errUnreachable; return trap }, nil
+		return func(c *callFrame) int { c.trap = errUnreachable; return trap }, nil
 	case nop:
-		return func(c *frameCtx) int { return advance }, nil
+		return func(c *callFrame) int { return advance }, nil
 	case block:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return func(c *frameCtx) int {
-			c.ctrl = append(c.ctrl, controlFrame{
+		return func(c *callFrame) int {
+			c.controlStack = append(c.controlStack, controlFrame{
 				targetIp:    int32(afterEndIp),
 				arity:       outputCount,
 				stackHeight: c.vm.stack.size() - inputCount,
@@ -541,8 +525,8 @@ func (vm *vm) compileInstr(
 		blockType := int32(body[pc+1])
 		bodyIp := pcToIp[uint32(pc+2)]
 		inputCount := vm.getInputCount(module, blockType)
-		return func(c *frameCtx) int {
-			c.ctrl = append(c.ctrl, controlFrame{
+		return func(c *callFrame) int {
+			c.controlStack = append(c.controlStack, controlFrame{
 				isLoop:      true,
 				targetIp:    int32(bodyIp),
 				arity:       inputCount,
@@ -556,9 +540,9 @@ func (vm *vm) compileInstr(
 		elseIp := pcToIp[fn.jumpElseCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return func(c *frameCtx) int {
+		return func(c *callFrame) int {
 			condition := c.vm.stack.popInt32()
-			c.ctrl = append(c.ctrl, controlFrame{
+			c.controlStack = append(c.controlStack, controlFrame{
 				targetIp:    int32(afterEndIp),
 				arity:       outputCount,
 				stackHeight: c.vm.stack.size() - inputCount,
@@ -569,24 +553,24 @@ func (vm *vm) compileInstr(
 			return advance
 		}, nil
 	case elseOp:
-		return func(c *frameCtx) int {
-			target := c.ctrl[len(c.ctrl)-1].targetIp
-			c.ctrl = c.ctrl[:len(c.ctrl)-1]
+		return func(c *callFrame) int {
+			target := c.controlStack[len(c.controlStack)-1].targetIp
+			c.controlStack = c.controlStack[:len(c.controlStack)-1]
 			return int(target)
 		}, nil
 	case end:
-		return func(c *frameCtx) int {
-			if len(c.ctrl) > 0 {
-				c.ctrl = c.ctrl[:len(c.ctrl)-1]
+		return func(c *callFrame) int {
+			if len(c.controlStack) > 0 {
+				c.controlStack = c.controlStack[:len(c.controlStack)-1]
 			}
 			return advance
 		}, nil
 	case br:
 		label := int(body[pc+1])
-		return func(c *frameCtx) int { return c.brToLabel(label) }, nil
+		return func(c *callFrame) int { return c.brToLabel(label) }, nil
 	case brIf:
 		label := int(body[pc+1])
-		return func(c *frameCtx) int {
+		return func(c *callFrame) int {
 			if c.vm.stack.popInt32() != 0 {
 				return c.brToLabel(label)
 			}
@@ -599,48 +583,48 @@ func (vm *vm) compileInstr(
 			labels[i] = uint32(body[pc+2+i])
 		}
 		defaultLabel := uint32(body[pc+2+int(count)])
-		return func(c *frameCtx) int { return c.handleBrTable(labels, defaultLabel) }, nil
+		return handleBrTable(labels, defaultLabel), nil
 	case returnOp:
-		return func(c *frameCtx) int { return c.brToLabel(len(c.ctrl) - 1) }, nil
+		return func(c *callFrame) int { return c.brToLabel(len(c.controlStack)-1) }, nil
 	case call:
 		funcIndex := body[pc+1]
-		return safe(func(c *frameCtx) error { return c.vm.handleCall(c.module, funcIndex) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleCall(c.module, funcIndex) }), nil
 	case callIndirect:
 		typeIndex, tableIndex := body[pc+1], body[pc+2]
-		return safe(func(c *frameCtx) error {
+		return safe(func(c *callFrame) error {
 			return c.vm.handleCallIndirect(c.module, typeIndex, tableIndex)
 		}), nil
 	case drop:
-		return func(c *frameCtx) int { c.vm.stack.drop(); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.drop(); return advance }, nil
 	case selectOp:
-		return func(c *frameCtx) int { c.vm.handleSelect(); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleSelect(); return advance }, nil
 	case selectT:
 		// The type-vector operand is for validation only; semantics match select.
-		return func(c *frameCtx) int { c.vm.handleSelect(); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleSelect(); return advance }, nil
 	case localGet:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.stack.push(c.locals[idx]); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.push(c.locals[idx]); return advance }, nil
 	case localSet:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.locals[idx] = c.vm.stack.pop(); return advance }, nil
+		return func(c *callFrame) int { c.locals[idx] = c.vm.stack.pop(); return advance }, nil
 	case localTee:
 		idx := body[pc+1]
-		return func(c *frameCtx) int {
+		return func(c *callFrame) int {
 			c.locals[idx] = c.vm.stack.data[len(c.vm.stack.data)-1]
 			return advance
 		}, nil
 	case globalGet:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleGlobalGet(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleGlobalGet(c.module, idx); return advance }, nil
 	case globalSet:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleGlobalSet(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleGlobalSet(c.module, idx); return advance }, nil
 	case tableGet:
 		idx := body[pc+1]
-		return safe(func(c *frameCtx) error { return c.vm.handleTableGet(c.module, idx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTableGet(c.module, idx) }), nil
 	case tableSet:
 		idx := body[pc+1]
-		return safe(func(c *frameCtx) error { return c.vm.handleTableSet(c.module, idx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTableSet(c.module, idx) }), nil
 	case i32Load:
 		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadUint32, uint32ToInt32), nil
 	case i64Load:
@@ -689,24 +673,24 @@ func (vm *vm) compileInstr(
 		return handleStore(body, pc, vm.stack.popInt64, func(m *Memory, o, i uint32, v int64) error { return m.StoreUint32(o, i, uint32(v)) }), nil
 	case memorySize:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleMemorySize(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleMemorySize(c.module, idx); return advance }, nil
 	case memoryGrow:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleMemoryGrow(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleMemoryGrow(c.module, idx); return advance }, nil
 	case i32Const:
 		v := int32(body[pc+1])
-		return func(c *frameCtx) int { c.vm.stack.pushInt32(v); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushInt32(v); return advance }, nil
 	case i64Const:
 		v := int64(body[pc+1])
-		return func(c *frameCtx) int { c.vm.stack.pushInt64(v); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushInt64(v); return advance }, nil
 	case f32Const:
 		v := math.Float32frombits(uint32(body[pc+1]))
-		return func(c *frameCtx) int { c.vm.stack.pushFloat32(v); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushFloat32(v); return advance }, nil
 	case f64Const:
 		v := math.Float64frombits(body[pc+1])
-		return func(c *frameCtx) int { c.vm.stack.pushFloat64(v); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushFloat64(v); return advance }, nil
 	case i32Eqz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt32() == 0)) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt32() == 0)) }), nil
 	case i32Eq:
 		return cmp32(equal[int32]), nil
 	case i32Ne:
@@ -728,7 +712,7 @@ func (vm *vm) compileInstr(
 	case i32GeU:
 		return cmp32(greaterOrEqualU32), nil
 	case i64Eqz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt64() == 0)) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt64() == 0)) }), nil
 	case i64Eq:
 		return cmp64(equal[int64]), nil
 	case i64Ne:
@@ -774,11 +758,11 @@ func (vm *vm) compileInstr(
 	case f64Ge:
 		return cmpf64(greaterOrEqual[float64]), nil
 	case i32Clz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(clz32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(clz32(c.vm.stack.popInt32())) }), nil
 	case i32Ctz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(ctz32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(ctz32(c.vm.stack.popInt32())) }), nil
 	case i32Popcnt:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(popcnt32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(popcnt32(c.vm.stack.popInt32())) }), nil
 	case i32Add:
 		return alu32(func(a, b int32) int32 { return a + b }), nil
 	case i32Sub:
@@ -786,13 +770,13 @@ func (vm *vm) compileInstr(
 	case i32Mul:
 		return alu32(func(a, b int32) int32 { return a * b }), nil
 	case i32DivS:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt32(divS32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt32(divS32) }), nil
 	case i32DivU:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt32(divU32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt32(divU32) }), nil
 	case i32RemS:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt32(remS32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt32(remS32) }), nil
 	case i32RemU:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt32(remU32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt32(remU32) }), nil
 	case i32And:
 		return alu32(func(a, b int32) int32 { return a & b }), nil
 	case i32Or:
@@ -810,11 +794,11 @@ func (vm *vm) compileInstr(
 	case i32Rotr:
 		return alu32(rotr32), nil
 	case i64Clz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(clz64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(clz64(c.vm.stack.popInt64())) }), nil
 	case i64Ctz:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(ctz64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(ctz64(c.vm.stack.popInt64())) }), nil
 	case i64Popcnt:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(popcnt64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(popcnt64(c.vm.stack.popInt64())) }), nil
 	case i64Add:
 		return alu64(func(a, b int64) int64 { return a + b }), nil
 	case i64Sub:
@@ -822,13 +806,13 @@ func (vm *vm) compileInstr(
 	case i64Mul:
 		return alu64(func(a, b int64) int64 { return a * b }), nil
 	case i64DivS:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt64(divS64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt64(divS64) }), nil
 	case i64DivU:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt64(divU64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt64(divU64) }), nil
 	case i64RemS:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt64(remS64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt64(remS64) }), nil
 	case i64RemU:
-		return safe(func(c *frameCtx) error { return c.vm.handleBinarySafeInt64(remU64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleBinarySafeInt64(remU64) }), nil
 	case i64And:
 		return alu64(func(a, b int64) int64 { return a & b }), nil
 	case i64Or:
@@ -846,174 +830,174 @@ func (vm *vm) compileInstr(
 	case i64Rotr:
 		return alu64(rotr64), nil
 	case f32Abs:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(abs(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(abs(c.vm.stack.popFloat32())) }), nil
 	case f32Neg:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(-c.vm.stack.popFloat32()) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(-c.vm.stack.popFloat32()) }), nil
 	case f32Ceil:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(ceil(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(ceil(c.vm.stack.popFloat32())) }), nil
 	case f32Floor:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(floor(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(floor(c.vm.stack.popFloat32())) }), nil
 	case f32Trunc:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(trunc(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(trunc(c.vm.stack.popFloat32())) }), nil
 	case f32Nearest:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(nearest(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(nearest(c.vm.stack.popFloat32())) }), nil
 	case f32Sqrt:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(sqrt(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(sqrt(c.vm.stack.popFloat32())) }), nil
 	case f32Add:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(add[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(add[float32]) }), nil
 	case f32Sub:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(sub[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(sub[float32]) }), nil
 	case f32Mul:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(mul[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(mul[float32]) }), nil
 	case f32Div:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(div[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(div[float32]) }), nil
 	case f32Min:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(wasmMin[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(wasmMin[float32]) }), nil
 	case f32Max:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(wasmMax[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(wasmMax[float32]) }), nil
 	case f32Copysign:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat32(copysign[float32]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat32(copysign[float32]) }), nil
 	case f64Abs:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(abs(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(abs(c.vm.stack.popFloat64())) }), nil
 	case f64Neg:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(-c.vm.stack.popFloat64()) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(-c.vm.stack.popFloat64()) }), nil
 	case f64Ceil:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(ceil(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(ceil(c.vm.stack.popFloat64())) }), nil
 	case f64Floor:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(floor(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(floor(c.vm.stack.popFloat64())) }), nil
 	case f64Trunc:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(trunc(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(trunc(c.vm.stack.popFloat64())) }), nil
 	case f64Nearest:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(nearest(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(nearest(c.vm.stack.popFloat64())) }), nil
 	case f64Sqrt:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(sqrt(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(sqrt(c.vm.stack.popFloat64())) }), nil
 	case f64Add:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(add[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(add[float64]) }), nil
 	case f64Sub:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(sub[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(sub[float64]) }), nil
 	case f64Mul:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(mul[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(mul[float64]) }), nil
 	case f64Div:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(div[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(div[float64]) }), nil
 	case f64Min:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(wasmMin[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(wasmMin[float64]) }), nil
 	case f64Max:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(wasmMax[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(wasmMax[float64]) }), nil
 	case f64Copysign:
-		return simple(func(c *frameCtx) { c.vm.handleBinaryFloat64(copysign[float64]) }), nil
+		return simple(func(c *callFrame) { c.vm.handleBinaryFloat64(copysign[float64]) }), nil
 	case i32WrapI64:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(wrapI64ToI32(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(wrapI64ToI32(c.vm.stack.popInt64())) }), nil
 	case i32TruncF32S:
-		return safe(func(c *frameCtx) error { return c.vm.handleUnarySafeFloat32(truncF32SToI32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleUnarySafeFloat32(truncF32SToI32) }), nil
 	case i32TruncF32U:
-		return safe(func(c *frameCtx) error { return c.vm.handleUnarySafeFloat32(truncF32UToI32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleUnarySafeFloat32(truncF32UToI32) }), nil
 	case i32TruncF64S:
-		return safe(func(c *frameCtx) error { return c.vm.handleUnarySafeFloat64(truncF64SToI32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleUnarySafeFloat64(truncF64SToI32) }), nil
 	case i32TruncF64U:
-		return safe(func(c *frameCtx) error { return c.vm.handleUnarySafeFloat64(truncF64UToI32) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleUnarySafeFloat64(truncF64UToI32) }), nil
 	case i64ExtendI32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(extendI32SToI64(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(extendI32SToI64(c.vm.stack.popInt32())) }), nil
 	case i64ExtendI32U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(extendI32UToI64(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(extendI32UToI64(c.vm.stack.popInt32())) }), nil
 	case i64TruncF32S:
-		return safe(func(c *frameCtx) error { return c.vm.handleTruncFloat32Int64(truncF32SToI64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTruncFloat32Int64(truncF32SToI64) }), nil
 	case i64TruncF32U:
-		return safe(func(c *frameCtx) error { return c.vm.handleTruncFloat32Int64(truncF32UToI64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTruncFloat32Int64(truncF32UToI64) }), nil
 	case i64TruncF64S:
-		return safe(func(c *frameCtx) error { return c.vm.handleTruncFloat64Int64(truncF64SToI64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTruncFloat64Int64(truncF64SToI64) }), nil
 	case i64TruncF64U:
-		return safe(func(c *frameCtx) error { return c.vm.handleTruncFloat64Int64(truncF64UToI64) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTruncFloat64Int64(truncF64UToI64) }), nil
 	case f32ConvertI32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(convertI32SToF32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(convertI32SToF32(c.vm.stack.popInt32())) }), nil
 	case f32ConvertI32U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(convertI32UToF32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(convertI32UToF32(c.vm.stack.popInt32())) }), nil
 	case f32ConvertI64S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(convertI64SToF32(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(convertI64SToF32(c.vm.stack.popInt64())) }), nil
 	case f32ConvertI64U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(convertI64UToF32(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(convertI64UToF32(c.vm.stack.popInt64())) }), nil
 	case f32DemoteF64:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(demoteF64ToF32(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(demoteF64ToF32(c.vm.stack.popFloat64())) }), nil
 	case f64ConvertI32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(convertI32SToF64(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(convertI32SToF64(c.vm.stack.popInt32())) }), nil
 	case f64ConvertI32U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(convertI32UToF64(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(convertI32UToF64(c.vm.stack.popInt32())) }), nil
 	case f64ConvertI64S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(convertI64SToF64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(convertI64SToF64(c.vm.stack.popInt64())) }), nil
 	case f64ConvertI64U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(convertI64UToF64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(convertI64UToF64(c.vm.stack.popInt64())) }), nil
 	case f64PromoteF32:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(promoteF32ToF64(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(promoteF32ToF64(c.vm.stack.popFloat32())) }), nil
 	case i32ReinterpretF32:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(reinterpretF32ToI32(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(reinterpretF32ToI32(c.vm.stack.popFloat32())) }), nil
 	case i64ReinterpretF64:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(reinterpretF64ToI64(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(reinterpretF64ToI64(c.vm.stack.popFloat64())) }), nil
 	case f32ReinterpretI32:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat32(reinterpretI32ToF32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat32(reinterpretI32ToF32(c.vm.stack.popInt32())) }), nil
 	case f64ReinterpretI64:
-		return simple(func(c *frameCtx) { c.vm.stack.pushFloat64(reinterpretI64ToF64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushFloat64(reinterpretI64ToF64(c.vm.stack.popInt64())) }), nil
 	case i32Extend8S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(extend8STo32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(extend8STo32(c.vm.stack.popInt32())) }), nil
 	case i32Extend16S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(extend16STo32(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(extend16STo32(c.vm.stack.popInt32())) }), nil
 	case i64Extend8S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(extend8STo64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(extend8STo64(c.vm.stack.popInt64())) }), nil
 	case i64Extend16S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(extend16STo64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(extend16STo64(c.vm.stack.popInt64())) }), nil
 	case i64Extend32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(extend32STo64(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(extend32STo64(c.vm.stack.popInt64())) }), nil
 	case refNull:
-		return func(c *frameCtx) int { c.vm.stack.pushInt32(NullReference); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushInt32(NullReference); return advance }, nil
 	case refIsNull:
-		return func(c *frameCtx) int { c.vm.handleRefIsNull(); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleRefIsNull(); return advance }, nil
 	case refFunc:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleRefFunc(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleRefFunc(c.module, idx); return advance }, nil
 	case i32TruncSatF32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(truncSatF32SToI32(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(truncSatF32SToI32(c.vm.stack.popFloat32())) }), nil
 	case i32TruncSatF32U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(truncSatF32UToI32(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(truncSatF32UToI32(c.vm.stack.popFloat32())) }), nil
 	case i32TruncSatF64S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(truncSatF64SToI32(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(truncSatF64SToI32(c.vm.stack.popFloat64())) }), nil
 	case i32TruncSatF64U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(truncSatF64UToI32(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(truncSatF64UToI32(c.vm.stack.popFloat64())) }), nil
 	case i64TruncSatF32S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(truncSatF32SToI64(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(truncSatF32SToI64(c.vm.stack.popFloat32())) }), nil
 	case i64TruncSatF32U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(truncSatF32UToI64(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(truncSatF32UToI64(c.vm.stack.popFloat32())) }), nil
 	case i64TruncSatF64S:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(truncSatF64SToI64(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(truncSatF64SToI64(c.vm.stack.popFloat64())) }), nil
 	case i64TruncSatF64U:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt64(truncSatF64UToI64(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt64(truncSatF64UToI64(c.vm.stack.popFloat64())) }), nil
 	case memoryInit:
 		dataIdx, memIdx := body[pc+1], body[pc+2]
-		return safe(func(c *frameCtx) error { return c.vm.handleMemoryInit(c.module, dataIdx, memIdx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleMemoryInit(c.module, dataIdx, memIdx) }), nil
 	case dataDrop:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleDataDrop(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleDataDrop(c.module, idx); return advance }, nil
 	case memoryCopy:
 		destIdx, srcIdx := body[pc+1], body[pc+2]
-		return safe(func(c *frameCtx) error { return c.vm.handleMemoryCopy(c.module, destIdx, srcIdx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleMemoryCopy(c.module, destIdx, srcIdx) }), nil
 	case memoryFill:
 		idx := body[pc+1]
-		return safe(func(c *frameCtx) error { return c.vm.handleMemoryFill(c.module, idx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleMemoryFill(c.module, idx) }), nil
 	case tableInit:
 		elemIdx, tableIdx := body[pc+1], body[pc+2]
-		return safe(func(c *frameCtx) error { return c.vm.handleTableInit(c.module, elemIdx, tableIdx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTableInit(c.module, elemIdx, tableIdx) }), nil
 	case elemDrop:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleElemDrop(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleElemDrop(c.module, idx); return advance }, nil
 	case tableCopy:
 		destIdx, srcIdx := body[pc+1], body[pc+2]
-		return safe(func(c *frameCtx) error { return c.vm.handleTableCopy(c.module, destIdx, srcIdx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTableCopy(c.module, destIdx, srcIdx) }), nil
 	case tableGrow:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleTableGrow(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleTableGrow(c.module, idx); return advance }, nil
 	case tableSize:
 		idx := body[pc+1]
-		return func(c *frameCtx) int { c.vm.handleTableSize(c.module, idx); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleTableSize(c.module, idx); return advance }, nil
 	case tableFill:
 		idx := body[pc+1]
-		return safe(func(c *frameCtx) error { return c.vm.handleTableFill(c.module, idx) }), nil
+		return safe(func(c *callFrame) error { return c.vm.handleTableFill(c.module, idx) }), nil
 	case v128Load:
 		return handleLoad(body, pc, vm.stack.pushV128, (*Memory).LoadV128, identityV128), nil
 	case v128Load8x8S:
@@ -1040,27 +1024,27 @@ func (vm *vm) compileInstr(
 		return handleStore(body, pc, vm.stack.popV128, (*Memory).StoreV128), nil
 	case v128Const:
 		v := V128Value{Low: body[pc+1], High: body[pc+2]}
-		return func(c *frameCtx) int { c.vm.stack.pushV128(v); return advance }, nil
+		return func(c *callFrame) int { c.vm.stack.pushV128(v); return advance }, nil
 	case i8x16Shuffle:
 		var lanes [16]byte
 		for i := range lanes {
 			lanes[i] = byte(body[pc+1+i])
 		}
-		return func(c *frameCtx) int { c.vm.handleI8x16Shuffle(lanes); return advance }, nil
+		return func(c *callFrame) int { c.vm.handleI8x16Shuffle(lanes); return advance }, nil
 	case i8x16Swizzle:
 		return v128Binary(simdI8x16Swizzle), nil
 	case i8x16Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdI8x16Splat(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdI8x16Splat(c.vm.stack.popInt32())) }), nil
 	case i16x8Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdI16x8Splat(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdI16x8Splat(c.vm.stack.popInt32())) }), nil
 	case i32x4Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdI32x4Splat(c.vm.stack.popInt32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdI32x4Splat(c.vm.stack.popInt32())) }), nil
 	case i64x2Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdI64x2Splat(c.vm.stack.popInt64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdI64x2Splat(c.vm.stack.popInt64())) }), nil
 	case f32x4Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdF32x4Splat(c.vm.stack.popFloat32())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdF32x4Splat(c.vm.stack.popFloat32())) }), nil
 	case f64x2Splat:
-		return simple(func(c *frameCtx) { c.vm.stack.pushV128(simdF64x2Splat(c.vm.stack.popFloat64())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushV128(simdF64x2Splat(c.vm.stack.popFloat64())) }), nil
 	case i8x16ExtractLaneS:
 		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI8x16ExtractLaneS), nil
 	case i8x16ExtractLaneU:
@@ -1184,9 +1168,9 @@ func (vm *vm) compileInstr(
 	case v128Xor:
 		return v128Binary(simdV128Xor), nil
 	case v128Bitselect:
-		return simple(func(c *frameCtx) { c.vm.handleSimdTernary(simdV128Bitselect) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdTernary(simdV128Bitselect) }), nil
 	case v128AnyTrue:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(c.vm.stack.popV128()))) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(c.vm.stack.popV128()))) }), nil
 	case v128Load8Lane:
 		return handleSimdLoadLane(body, pc, 8), nil
 	case v128Load16Lane:
@@ -1218,9 +1202,9 @@ func (vm *vm) compileInstr(
 	case i8x16Popcnt:
 		return v128Unary(simdI8x16Popcnt), nil
 	case i8x16AllTrue:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(simdI8x16AllTrue(c.vm.stack.popV128()))) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(simdI8x16AllTrue(c.vm.stack.popV128()))) }), nil
 	case i8x16Bitmask:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(simdI8x16Bitmask(c.vm.stack.popV128())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(simdI8x16Bitmask(c.vm.stack.popV128())) }), nil
 	case i8x16NarrowI16x8S:
 		return v128Binary(simdI8x16NarrowI16x8S), nil
 	case i8x16NarrowI16x8U:
@@ -1234,11 +1218,11 @@ func (vm *vm) compileInstr(
 	case f32x4Nearest:
 		return v128Unary(simdF32x4Nearest), nil
 	case i8x16Shl:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI8x16Shl) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI8x16Shl) }), nil
 	case i8x16ShrU:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI8x16ShrU) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI8x16ShrU) }), nil
 	case i8x16ShrS:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI8x16ShrS) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI8x16ShrS) }), nil
 	case i8x16Add:
 		return v128Binary(simdI8x16Add), nil
 	case i8x16AddSatS:
@@ -1282,9 +1266,9 @@ func (vm *vm) compileInstr(
 	case i16x8Q15mulrSatS:
 		return v128Binary(simdI16x8Q15mulrSatS), nil
 	case i16x8AllTrue:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(c.vm.stack.popV128()))) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(c.vm.stack.popV128()))) }), nil
 	case i16x8Bitmask:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(simdI16x8Bitmask(c.vm.stack.popV128())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(simdI16x8Bitmask(c.vm.stack.popV128())) }), nil
 	case i16x8NarrowI32x4S:
 		return v128Binary(simdI16x8NarrowI32x4S), nil
 	case i16x8NarrowI32x4U:
@@ -1298,11 +1282,11 @@ func (vm *vm) compileInstr(
 	case i16x8ExtendHighI8x16U:
 		return v128Unary(simdI16x8ExtendHighI8x16U), nil
 	case i16x8Shl:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI16x8Shl) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI16x8Shl) }), nil
 	case i16x8ShrS:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI16x8ShrS) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI16x8ShrS) }), nil
 	case i16x8ShrU:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI16x8ShrU) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI16x8ShrU) }), nil
 	case i16x8Add:
 		return v128Binary(simdI16x8Add), nil
 	case i16x8AddSatS:
@@ -1342,9 +1326,9 @@ func (vm *vm) compileInstr(
 	case i32x4Neg:
 		return v128Unary(simdI32x4Neg), nil
 	case i32x4AllTrue:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(simdI32x4AllTrue(c.vm.stack.popV128()))) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(simdI32x4AllTrue(c.vm.stack.popV128()))) }), nil
 	case i32x4Bitmask:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(simdI32x4Bitmask(c.vm.stack.popV128())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(simdI32x4Bitmask(c.vm.stack.popV128())) }), nil
 	case i32x4ExtendLowI16x8S:
 		return v128Unary(simdI32x4ExtendLowI16x8S), nil
 	case i32x4ExtendHighI16x8S:
@@ -1354,11 +1338,11 @@ func (vm *vm) compileInstr(
 	case i32x4ExtendHighI16x8U:
 		return v128Unary(simdI32x4ExtendHighI16x8U), nil
 	case i32x4Shl:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI32x4Shl) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI32x4Shl) }), nil
 	case i32x4ShrS:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI32x4ShrS) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI32x4ShrS) }), nil
 	case i32x4ShrU:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI32x4ShrU) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI32x4ShrU) }), nil
 	case i32x4Add:
 		return v128Binary(simdI32x4Add), nil
 	case i32x4Sub:
@@ -1388,9 +1372,9 @@ func (vm *vm) compileInstr(
 	case i64x2Neg:
 		return v128Unary(simdI64x2Neg), nil
 	case i64x2AllTrue:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(boolToInt32(simdI64x2AllTrue(c.vm.stack.popV128()))) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(boolToInt32(simdI64x2AllTrue(c.vm.stack.popV128()))) }), nil
 	case i64x2Bitmask:
-		return simple(func(c *frameCtx) { c.vm.stack.pushInt32(simdI64x2Bitmask(c.vm.stack.popV128())) }), nil
+		return simple(func(c *callFrame) { c.vm.stack.pushInt32(simdI64x2Bitmask(c.vm.stack.popV128())) }), nil
 	case i64x2ExtendLowI32x4S:
 		return v128Unary(simdI64x2ExtendLowI32x4S), nil
 	case i64x2ExtendHighI32x4S:
@@ -1400,11 +1384,11 @@ func (vm *vm) compileInstr(
 	case i64x2ExtendHighI32x4U:
 		return v128Unary(simdI64x2ExtendHighI32x4U), nil
 	case i64x2Shl:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI64x2Shl) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI64x2Shl) }), nil
 	case i64x2ShrS:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI64x2ShrS) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI64x2ShrS) }), nil
 	case i64x2ShrU:
-		return simple(func(c *frameCtx) { c.vm.handleSimdShift(simdI64x2ShrU) }), nil
+		return simple(func(c *callFrame) { c.vm.handleSimdShift(simdI64x2ShrU) }), nil
 	case i64x2Add:
 		return v128Binary(simdI64x2Add), nil
 	case i64x2Sub:
@@ -1497,13 +1481,13 @@ func (vm *vm) compileInstr(
 }
 
 // simple wraps a body that always advances to the next instruction.
-func simple(body func(c *frameCtx)) frame {
-	return func(c *frameCtx) int { body(c); return advance }
+func simple(body func(c *callFrame)) frame {
+	return func(c *callFrame) int { body(c); return advance }
 }
 
 // safe wraps a body that may trap; a non-nil error halts with the trap set.
-func safe(body func(c *frameCtx) error) frame {
-	return func(c *frameCtx) int {
+func safe(body func(c *callFrame) error) frame {
+	return func(c *callFrame) int {
 		if err := body(c); err != nil {
 			c.trap = err
 			return trap
@@ -1514,32 +1498,32 @@ func safe(body func(c *frameCtx) error) frame {
 
 // v128Unary builds a closure for an operand-free V128 -> V128 instruction.
 func v128Unary(op func(V128Value) V128Value) frame {
-	return simple(func(c *frameCtx) { c.vm.stack.pushV128(op(c.vm.stack.popV128())) })
+	return simple(func(c *callFrame) { c.vm.stack.pushV128(op(c.vm.stack.popV128())) })
 }
 
 // v128Binary builds a closure for an operand-free (V128, V128) -> V128 instruction.
 func v128Binary(op func(a, b V128Value) V128Value) frame {
-	return simple(func(c *frameCtx) { c.vm.handleBinaryV128(op) })
+	return simple(func(c *callFrame) { c.vm.handleBinaryV128(op) })
 }
 
 func cmp32(op func(a, b int32) bool) frame {
-	return simple(func(c *frameCtx) { c.vm.handleBinaryBoolInt32(op) })
+	return simple(func(c *callFrame) { c.vm.handleBinaryBoolInt32(op) })
 }
 
 func cmp64(op func(a, b int64) bool) frame {
-	return simple(func(c *frameCtx) { c.vm.handleBinaryBoolInt64(op) })
+	return simple(func(c *callFrame) { c.vm.handleBinaryBoolInt64(op) })
 }
 
 func cmpf32(op func(a, b float32) bool) frame {
-	return simple(func(c *frameCtx) { c.vm.handleBinaryBoolFloat32(op) })
+	return simple(func(c *callFrame) { c.vm.handleBinaryBoolFloat32(op) })
 }
 
 func cmpf64(op func(a, b float64) bool) frame {
-	return simple(func(c *frameCtx) { c.vm.handleBinaryBoolFloat64(op) })
+	return simple(func(c *callFrame) { c.vm.handleBinaryBoolFloat64(op) })
 }
 
 func alu64(op func(a, b int64) int64) frame {
-	return simple(func(c *frameCtx) {
+	return simple(func(c *callFrame) {
 		b := c.vm.stack.popInt64()
 		data := c.vm.stack.data
 		last := len(data) - 1
@@ -1548,12 +1532,22 @@ func alu64(op func(a, b int64) int64) frame {
 }
 
 func alu32(op func(a, b int32) int32) frame {
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		b := c.vm.stack.popInt32()
 		data := c.vm.stack.data
 		last := len(data) - 1
 		data[last] = i32(op(data[last].int32(), b))
 		return advance
+	}
+}
+
+func handleBrTable(labels []uint32, defaultLabel uint32) frame {
+	return func(c *callFrame) int {
+		index := uint32(c.vm.stack.popInt32())
+		if index < uint32(len(labels)) {
+			return c.brToLabel(int(labels[index]))
+		}
+		return c.brToLabel(int(defaultLabel))
 	}
 }
 
@@ -1849,7 +1843,7 @@ func handleLoad[T any, R any](
 ) frame {
 	memIdx := body[pc+2]
 	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		memory := c.vm.getMemory(c.module, memIdx)
 		index := uint32(c.vm.stack.popInt32())
 		v, err := load(memory, offset, index)
@@ -1871,7 +1865,7 @@ func handleStore[T any](
 ) frame {
 	memIdx := body[pc+2]
 	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		val := pop()
 		memory := c.vm.getMemory(c.module, memIdx)
 		index := uint32(c.vm.stack.popInt32())
@@ -1890,7 +1884,7 @@ func handleLoadV128FromBytes(
 ) frame {
 	memIdx := body[pc+2]
 	offset := uint32(body[pc+3])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		memory := c.vm.getMemory(c.module, memIdx)
 		index := c.vm.stack.popInt32()
 		data, err := memory.Get(offset, uint32(index), sizeBytes)
@@ -1908,7 +1902,7 @@ func handleExtractLane[R wasmNumber](
 	body []uint64, pc int, push func(R), op func(V128Value, uint32) R,
 ) frame {
 	laneIndex := uint32(body[pc+1])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		push(op(c.vm.stack.popV128(), laneIndex))
 		return advance
 	}
@@ -1919,7 +1913,7 @@ func handleReplaceLane[T wasmNumber](
 	body []uint64, pc int, pop func() T, op func(V128Value, uint32, T) V128Value,
 ) frame {
 	laneIndex := uint32(body[pc+1])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		laneValue := pop()
 		vector := c.vm.stack.popV128()
 		c.vm.stack.pushV128(op(vector, laneIndex, laneValue))
@@ -1932,7 +1926,7 @@ func handleSimdLoadLane(body []uint64, pc int, laneSize uint32) frame {
 	memIdx := body[pc+2]
 	offset := uint32(body[pc+3])
 	laneIndex := uint32(body[pc+4])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		memory := c.vm.getMemory(c.module, memIdx)
 		v := c.vm.stack.popV128()
 		index := c.vm.stack.popInt32()
@@ -1951,7 +1945,7 @@ func handleSimdStoreLane(body []uint64, pc int, laneSize uint32) frame {
 	memIdx := body[pc+2]
 	offset := uint32(body[pc+3])
 	laneIndex := uint32(body[pc+4])
-	return func(c *frameCtx) int {
+	return func(c *callFrame) int {
 		memory := c.vm.getMemory(c.module, memIdx)
 		v := c.vm.stack.popV128()
 		index := c.vm.stack.popInt32()
