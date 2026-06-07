@@ -170,8 +170,8 @@ $(WASM_OUT_DIR):
 
 # $(1) = archive basename, $(2) = URL, $(3) = dest dir,
 # $(4) = directory name inside the extracted tarball.
-# $(strip ...) absorbs whitespace introduced by `\` line continuation at
-# the call site.
+# $(strip ...) absorbs whitespace introduced by `\` line continuation at the
+# call site.
 define install-toolchain
 	$(eval N := $(strip $(1)))
 	$(eval U := $(strip $(2)))
