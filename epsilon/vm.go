@@ -482,16 +482,18 @@ func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]frame, er
 
 	// First pass: assign an instruction index to every bytecode boundary so
 	// branch targets (which the parser recorded as bytecode pcs) can be
-	// translated into instruction indices.
-	pcToIp := make(map[uint32]int, len(body))
+	// translated into instruction indices. pcToIp is a dense pc-indexed slice
+	// rather than a map: branch targets are always instruction-start pcs, whose
+	// entries are filled below; the gaps for operand words are never read.
+	pcToIp := make([]int, len(body)+1)
 	starts := make([]int, 0, len(body))
 	for i := 0; i < len(body); {
-		pcToIp[uint32(i)] = len(starts)
+		pcToIp[i] = len(starts)
 		starts = append(starts, i)
 		op := opcode(body[i])
 		i += 1 + operandWordCount(op, body, i+1)
 	}
-	pcToIp[uint32(len(body))] = len(starts)
+	pcToIp[len(body)] = len(starts)
 
 	// Second pass: emit one closure per instruction.
 	code := make([]frame, 0, len(starts))
@@ -507,7 +509,7 @@ func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]frame, er
 
 // compileInstr builds the closure for the instruction at bytecode index pc.
 func (vm *vm) compileInstr(
-	fn *function, module *ModuleInstance, pc int, pcToIp map[uint32]int,
+	fn *function, module *ModuleInstance, pc int, pcToIp []int,
 ) (frame, error) {
 	body := fn.body
 	op := opcode(body[pc])
