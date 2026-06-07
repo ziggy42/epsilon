@@ -16,11 +16,11 @@
 
 #include <stdint.h>
 
-__attribute__((import_module("env"), import_name("noop")))
-extern int32_t host_noop(int32_t x);
+__attribute__((import_module("env"), import_name("noop"))) extern int32_t
+host_noop(int32_t x);
 
-__attribute__((export_name("run_host_calls")))
-int32_t run_host_calls(int32_t iterations) {
+__attribute__((export_name("run_host_calls"))) int32_t
+run_host_calls(int32_t iterations) {
   int32_t result = 0;
   for (int32_t i = 0; i < iterations; i++) {
     result = host_noop(result + i);

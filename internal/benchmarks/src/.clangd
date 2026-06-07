@@ -1,0 +1,9 @@
+# clangd configuration (https://clangd.llvm.org/config).
+#
+# These sources are compiled for wasm (wasm32-wasip1) via `make build-wasm`,
+# where __attribute__((export_name(...))) is a valid Clang attribute. clangd,
+# however, parses them with the host target by default and reports the
+# attribute as unknown (-Wunknown-attributes). The build itself never warns;
+# silence only that one editor-side false positive.
+CompileFlags:
+  Add: [-Wno-unknown-attributes]

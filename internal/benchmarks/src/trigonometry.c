@@ -16,7 +16,6 @@
 
 #include <math.h>
 
-__attribute__((export_name("compute_sin")))
-float compute_sin(float n) {
+__attribute__((export_name("compute_sin"))) float compute_sin(float n) {
   return sin(n);
 }

@@ -25,8 +25,8 @@ binary_op operations[] = {&add, &sub, &mul, &xor_op};
 
 #define NUM_OPS 4
 
-__attribute__((export_name("run_indirect_calls")))
-int run_indirect_calls(int iterations) {
+__attribute__((export_name("run_indirect_calls"))) int run_indirect_calls(
+    int iterations) {
   int result = 0;
   for (int i = 0; i < iterations; i++) {
     // Cycle through the functions in the operations table.

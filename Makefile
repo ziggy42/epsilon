@@ -103,6 +103,9 @@ fmt-md: check-uv ## Format repo-owned Markdown
 		--with mdformat-gfm==1.0.0 --with mdformat-frontmatter==2.1.2 \
 		mdformat@1.0.0 --wrap 80 --number
 
+fmt-c: $(WASI_SDK_CLANG) ## Format benchmark C sources
+	$(WASI_SDK_DIR)/bin/clang-format -i $(WASM_SRC_DIR)/*.c
+
 vet: ## Run go vet across the tree
 	go vet ./...
 
@@ -212,6 +215,6 @@ internal/spec_tests/testsuite/.git wasip1/wasi-testsuite/.git:
 
 # ----- phony declarations -----------------------------------------------------
 
-.PHONY: help build build-all run-example fmt fmt-md check-uv vet clean \
+.PHONY: help build build-all run-example fmt fmt-md fmt-c check-uv vet clean \
         distclean test test-spec test-wasi test-all bench bench-compare \
         build-wasm setup-wasi-sdk setup-wabt

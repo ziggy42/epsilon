@@ -109,8 +109,7 @@ int data_buffer[BUFFER_LENGTH];
 
 void init_data() { memcpy(data_buffer, original_data, sizeof(original_data)); }
 
-__attribute__((export_name("bubble_sort")))
-void bubble_sort() {
+__attribute__((export_name("bubble_sort"))) void bubble_sort() {
   init_data();
   for (int i = 0; i < BUFFER_LENGTH; i++) {
     for (int j = 0; j < BUFFER_LENGTH - i - 1; j++) {
@@ -123,7 +122,7 @@ void bubble_sort() {
   }
 }
 
-void merge_sort_internal(int *array, int left, int right) {
+void merge_sort_internal(int* array, int left, int right) {
   if (left >= right) {
     return;
   }
@@ -134,8 +133,8 @@ void merge_sort_internal(int *array, int left, int right) {
 
   int n1 = mid - left + 1;
   int n2 = right - mid;
-  int *left_array = (int *)malloc(n1 * sizeof(int));
-  int *right_array = (int *)malloc(n2 * sizeof(int));
+  int* left_array = (int*)malloc(n1 * sizeof(int));
+  int* right_array = (int*)malloc(n2 * sizeof(int));
   for (int i = 0; i < n1; i++) {
     left_array[i] = array[left + i];
   }
@@ -166,19 +165,18 @@ void merge_sort_internal(int *array, int left, int right) {
   free(right_array);
 }
 
-__attribute__((export_name("merge_sort")))
-void merge_sort() {
+__attribute__((export_name("merge_sort"))) void merge_sort() {
   init_data();
   merge_sort_internal(data_buffer, 0, BUFFER_LENGTH - 1);
 }
 
-void swap(int *a, int *b) {
+void swap(int* a, int* b) {
   int temp = *a;
   *a = *b;
   *b = temp;
 }
 
-int partition(int *array, int left, int right) {
+int partition(int* array, int left, int right) {
   int pivot = array[right];
   int i = left - 1;
 
@@ -192,8 +190,8 @@ int partition(int *array, int left, int right) {
   return i + 1;
 }
 
-__attribute__((noinline, disable_tail_calls))
-void quick_sort_internal(int *array, int left, int right) {
+__attribute__((noinline, disable_tail_calls)) void quick_sort_internal(
+    int* array, int left, int right) {
   if (left >= right) {
     return;
   }
@@ -202,8 +200,7 @@ void quick_sort_internal(int *array, int left, int right) {
   quick_sort_internal(array, pivot_index + 1, right);
 }
 
-__attribute__((export_name("quick_sort")))
-void quick_sort() {
+__attribute__((export_name("quick_sort"))) void quick_sort() {
   init_data();
   quick_sort_internal(data_buffer, 0, BUFFER_LENGTH - 1);
 }

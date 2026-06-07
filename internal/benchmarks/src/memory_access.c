@@ -18,8 +18,8 @@
  * the two 16 MiB buffers below.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // 16 MiB (16 * 1024 * 1024 bytes)
 #define BUFFER_SIZE 16777216
@@ -27,8 +27,7 @@
 uint8_t source_buffer[BUFFER_SIZE];
 uint8_t destination_buffer[BUFFER_SIZE];
 
-__attribute__((export_name("run_memcpy")))
-uint32_t run_memcpy(int iterations) {
+__attribute__((export_name("run_memcpy"))) uint32_t run_memcpy(int iterations) {
   // Initialize source buffer.
   for (size_t i = 0; i < BUFFER_SIZE; ++i) {
     source_buffer[i] = (uint8_t)(i * 31 % 251);

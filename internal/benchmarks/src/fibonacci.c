@@ -16,8 +16,7 @@
 
 #include <stdint.h>
 
-__attribute__((noinline))
-static int fib_recursive_impl(int n) {
+__attribute__((noinline)) static int fib_recursive_impl(int n) {
   if (n == 0) {
     return 0;
   }
@@ -33,8 +32,8 @@ static int fib_recursive_impl(int n) {
 
 // `n` is passed in (rather than hardcoded) so LLVM can't fold the inner
 // loop into a closed-form expression.
-__attribute__((export_name("fib_recursive")))
-int fib_recursive(int32_t iterations, int32_t n) {
+__attribute__((export_name("fib_recursive"))) int fib_recursive(
+    int32_t iterations, int32_t n) {
   int total = 0;
   for (int32_t i = 0; i < iterations; i++) {
     total += fib_recursive_impl(n);
@@ -42,8 +41,8 @@ int fib_recursive(int32_t iterations, int32_t n) {
   return total;
 }
 
-__attribute__((export_name("fib_iterative")))
-int fib_iterative(int32_t iterations, int32_t n) {
+__attribute__((export_name("fib_iterative"))) int fib_iterative(
+    int32_t iterations, int32_t n) {
   int total = 0;
   for (int32_t iter = 0; iter < iterations; iter++) {
     int a = 0;
