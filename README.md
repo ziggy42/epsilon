@@ -130,12 +130,13 @@ Targets:
   build-all             Cross-compile the CLI for Linux, Darwin, and Windows
   run-example           Run the basic example (smoke check)
   fmt                   Run gofmt across the tree
+  fmt-md                Format repo-owned Markdown
   vet                   Run go vet across the tree
   clean                 Remove built artifacts (keeps the wasi-sdk toolchain)
   distclean             Remove built artifacts AND the wasi-sdk toolchain
   test                  Run all Go tests (unit + spec)
   test-spec             Run wasm spec tests
-  test-wasi             Run the WASI testsuite (needs uv)
+  test-wasi             Run the WASI testsuite
   test-all              Run all tests (Go tests + WASI spec tests)
   bench                 Run benchmarks (vars: BENCH_PATTERN, etc.)
   bench-compare         Compare benchmarks across refs; TARGET=<ref> required
