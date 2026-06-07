@@ -86,7 +86,15 @@ const (
 	trap    = -2 // stop; callFrame.trap holds the error
 )
 
-type frame func(c *callFrame) int
+// instr is a decoded instruction in the threaded run loop: a shared handler
+// plus its inline operands. The handler reads operands from the instr rather
+// than from a captured closure, so no per-instruction closure is allocated.
+type instr struct {
+	fn   handler
+	a, b uint64
+}
+
+type handler func(c *callFrame, in *instr) int
 
 // brToLabel branches out labelIndex enclosing blocks, unwinding the value stack
 // to the target's height (keeping its arity values) and returning the target
@@ -110,6 +118,10 @@ type vm struct {
 	callDepth         int
 	controlStackCache []controlFrame
 	localsCache       []value
+	// brTables holds the label vectors of every br_table in the store, indexed
+	// by the instr operand. They are variable length, so they live here rather
+	// than inline in the fixed-size instr.
+	brTables [][]uint32
 	// localsTop is the bump-allocation cursor into localsCache: each wasm call
 	// carves its locals starting here, advances the cursor, and rewinds it when
 	// the call returns. This lets a frame with many locals use the shared cache
@@ -386,10 +398,11 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	return err
 }
 
-func (vm *vm) runLoop(c *callFrame, frames []frame) error {
+func (vm *vm) runLoop(c *callFrame, frames []instr) error {
 	ip := 0
 	for ip < len(frames) {
-		switch n := frames[ip](c); n {
+		in := &frames[ip]
+		switch n := in.fn(c, in); n {
 		case advance:
 			ip++
 		case trap:
@@ -401,14 +414,15 @@ func (vm *vm) runLoop(c *callFrame, frames []frame) error {
 	return nil
 }
 
-func (vm *vm) runLoopWithFuel(c *callFrame, frames []frame) error {
+func (vm *vm) runLoopWithFuel(c *callFrame, frames []instr) error {
 	ip := 0
 	for ip < len(frames) {
 		if vm.fuel == 0 {
 			return errFuelExhausted
 		}
 		vm.fuel--
-		switch n := frames[ip](c); n {
+		in := &frames[ip]
+		switch n := in.fn(c, in); n {
 		case advance:
 			ip++
 		case trap:
@@ -477,7 +491,7 @@ func (vm *vm) compile(fn *wasmFunction) error {
 
 // compileClosures lowers a function body to its frames, returning an error on
 // an opcode it does not handle.
-func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]frame, error) {
+func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]instr, error) {
 	body := fn.body
 
 	// First pass: assign an instruction index to every bytecode boundary so
@@ -495,1796 +509,3443 @@ func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]frame, er
 	}
 	pcToIp[len(body)] = len(starts)
 
-	// Second pass: emit one closure per instruction.
-	code := make([]frame, 0, len(starts))
+	// Second pass: emit one instr per instruction. Opcodes converted to a shared
+	// threaded handler are built by compileThreaded; the rest fall back to a
+	// per-instruction closure adapted via runLegacy.
+	code := make([]instr, 0, len(starts))
 	for _, pc := range starts {
-		instr, err := vm.compileInstr(fn, module, pc, pcToIp)
-		if err != nil {
-			return nil, err
+		in, ok := vm.compileThreaded(fn, module, pc, pcToIp)
+		if !ok {
+			return nil, fmt.Errorf("unhandled opcode %d", opcode(fn.body[pc]))
 		}
-		code = append(code, instr)
+		code = append(code, in)
 	}
 	return code, nil
 }
 
-// compileInstr builds the closure for the instruction at bytecode index pc.
-func (vm *vm) compileInstr(
-	fn *function, module *ModuleInstance, pc int, pcToIp []int,
-) (frame, error) {
+// compileThreaded builds the threaded instr for opcodes that have a shared
+// handler. It returns ok=false for opcodes still served by the closure path.
+func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcToIp []int) (instr, bool) {
 	body := fn.body
-	op := opcode(body[pc])
-
-	switch op {
-	case unreachable:
-		return func(c *callFrame) int { c.trap = errUnreachable; return trap }, nil
-	case nop:
-		return func(c *callFrame) int { return advance }, nil
+	switch opcode(body[pc]) {
 	case block:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return func(c *callFrame) int {
-			c.controlStack = append(c.controlStack, controlFrame{
-				targetIp:    int32(afterEndIp),
-				arity:       outputCount,
-				stackHeight: c.vm.stack.size() - inputCount,
-			})
-			return advance
-		}, nil
+		return instr{fn: opBlock, a: uint64(uint32(afterEndIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, true
 	case loop:
 		blockType := int32(body[pc+1])
 		bodyIp := pcToIp[uint32(pc+2)]
 		inputCount := vm.getInputCount(module, blockType)
-		return func(c *callFrame) int {
-			c.controlStack = append(c.controlStack, controlFrame{
-				isLoop:      true,
-				targetIp:    int32(bodyIp),
-				arity:       inputCount,
-				stackHeight: c.vm.stack.size() - inputCount,
-			})
-			return advance
-		}, nil
+		return instr{fn: opLoop, a: uint64(uint32(bodyIp)), b: uint64(inputCount)}, true
 	case ifOp:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
 		elseIp := pcToIp[fn.jumpElseCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return handleIf(afterEndIp, elseIp, inputCount, outputCount), nil
+		return instr{fn: opIf, a: uint64(uint32(afterEndIp))<<32 | uint64(uint32(elseIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, true
 	case elseOp:
-		return handleElse(), nil
+		return instr{fn: opElse}, true
 	case end:
-		return handleEnd(), nil
+		return instr{fn: opEnd}, true
 	case br:
-		label := int(body[pc+1])
-		return func(c *callFrame) int { return c.brToLabel(label) }, nil
+		return instr{fn: opBr, a: body[pc+1]}, true
 	case brIf:
-		label := int(body[pc+1])
-		return func(c *callFrame) int {
-			if c.vm.stack.popInt32() != 0 {
-				return c.brToLabel(label)
-			}
-			return advance
-		}, nil
+		return instr{fn: opBrIf, a: body[pc+1]}, true
+	case returnOp:
+		return instr{fn: opReturn}, true
+	case call:
+		return instr{fn: opCall, a: body[pc+1]}, true
+	case callIndirect:
+		return instr{fn: opCallIndirect, a: body[pc+1], b: body[pc+2]}, true
+	case selectOp:
+		return instr{fn: opSelect}, true
+	case selectT:
+		return instr{fn: opSelect}, true
+	case globalGet:
+		return instr{fn: opGlobalGet, a: body[pc+1]}, true
+	case globalSet:
+		return instr{fn: opGlobalSet, a: body[pc+1]}, true
+	case memorySize:
+		return instr{fn: opMemorySize, a: body[pc+1]}, true
+	case memoryGrow:
+		return instr{fn: opMemoryGrow, a: body[pc+1]}, true
+	case refIsNull:
+		return instr{fn: opRefIsNull}, true
+	case refNull:
+		return instr{fn: opRefNull}, true
+	case refFunc:
+		return instr{fn: opRefFunc, a: body[pc+1]}, true
 	case brTable:
-		count := uint32(body[pc+1])
+		count := int(body[pc+1])
 		labels := make([]uint32, count)
 		for i := range labels {
 			labels[i] = uint32(body[pc+2+i])
 		}
-		defaultLabel := uint32(body[pc+2+int(count)])
-		return handleBrTable(labels, defaultLabel), nil
-	case returnOp:
-		return func(c *callFrame) int { return c.brToLabel(len(c.controlStack) - 1) }, nil
-	case call:
-		funcIndex := body[pc+1]
-		return handleCall(funcIndex), nil
-	case callIndirect:
-		typeIndex, tableIndex := body[pc+1], body[pc+2]
-		return handleCallIndirect(typeIndex, tableIndex), nil
+		idx := len(vm.brTables)
+		vm.brTables = append(vm.brTables, labels)
+		return instr{fn: opBrTable, a: uint64(idx), b: body[pc+2+count]}, true
+	case nop:
+		return instr{fn: opNop}, true
+	case unreachable:
+		return instr{fn: opUnreachable}, true
 	case drop:
-		return func(c *callFrame) int { c.vm.stack.drop(); return advance }, nil
-	case selectOp:
-		return handleSelect(), nil
-	case selectT:
-		// The type-vector operand is for validation only; semantics match select.
-		return handleSelect(), nil
-	case localGet:
-		idx := body[pc+1]
-		return func(c *callFrame) int { c.vm.stack.push(c.locals[idx]); return advance }, nil
-	case localSet:
-		idx := body[pc+1]
-		return func(c *callFrame) int { c.locals[idx] = c.vm.stack.pop(); return advance }, nil
-	case localTee:
-		idx := body[pc+1]
-		return func(c *callFrame) int {
-			c.locals[idx] = c.vm.stack.data[len(c.vm.stack.data)-1]
-			return advance
-		}, nil
-	case globalGet:
-		idx := body[pc+1]
-		return handleGlobalGet(idx), nil
-	case globalSet:
-		idx := body[pc+1]
-		return handleGlobalSet(idx), nil
-	case tableGet:
-		idx := body[pc+1]
-		return handleTableGet(idx), nil
-	case tableSet:
-		idx := body[pc+1]
-		return handleTableSet(idx), nil
-	case i32Load:
-		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadUint32, uint32ToInt32), nil
-	case i64Load:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadUint64, uint64ToInt64), nil
-	case f32Load:
-		return handleLoad(body, pc, vm.stack.pushFloat32, (*Memory).LoadUint32, math.Float32frombits), nil
-	case f64Load:
-		return handleLoad(body, pc, vm.stack.pushFloat64, (*Memory).LoadUint64, math.Float64frombits), nil
-	case i32Load8S:
-		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadByte, signExtend8To32), nil
-	case i32Load8U:
-		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadByte, zeroExtend8To32), nil
-	case i32Load16S:
-		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadUint16, signExtend16To32), nil
-	case i32Load16U:
-		return handleLoad(body, pc, vm.stack.pushInt32, (*Memory).LoadUint16, zeroExtend16To32), nil
-	case i64Load8S:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadByte, signExtend8To64), nil
-	case i64Load8U:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadByte, zeroExtend8To64), nil
-	case i64Load16S:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadUint16, signExtend16To64), nil
-	case i64Load16U:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadUint16, zeroExtend16To64), nil
-	case i64Load32S:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadUint32, signExtend32To64), nil
-	case i64Load32U:
-		return handleLoad(body, pc, vm.stack.pushInt64, (*Memory).LoadUint32, zeroExtend32To64), nil
-	case i32Store:
-		return handleStore(body, pc, vm.stack.popInt32, func(m *Memory, o, i uint32, v int32) error { return m.StoreUint32(o, i, uint32(v)) }), nil
-	case i64Store:
-		return handleStore(body, pc, vm.stack.popInt64, func(m *Memory, o, i uint32, v int64) error { return m.StoreUint64(o, i, uint64(v)) }), nil
-	case f32Store:
-		return handleStore(body, pc, vm.stack.popFloat32, func(m *Memory, o, i uint32, v float32) error { return m.StoreUint32(o, i, math.Float32bits(v)) }), nil
-	case f64Store:
-		return handleStore(body, pc, vm.stack.popFloat64, func(m *Memory, o, i uint32, v float64) error { return m.StoreUint64(o, i, math.Float64bits(v)) }), nil
-	case i32Store8:
-		return handleStore(body, pc, vm.stack.popInt32, func(m *Memory, o, i uint32, v int32) error { return m.StoreByte(o, i, byte(v)) }), nil
-	case i32Store16:
-		return handleStore(body, pc, vm.stack.popInt32, func(m *Memory, o, i uint32, v int32) error { return m.StoreUint16(o, i, uint16(v)) }), nil
-	case i64Store8:
-		return handleStore(body, pc, vm.stack.popInt64, func(m *Memory, o, i uint32, v int64) error { return m.StoreByte(o, i, byte(v)) }), nil
-	case i64Store16:
-		return handleStore(body, pc, vm.stack.popInt64, func(m *Memory, o, i uint32, v int64) error { return m.StoreUint16(o, i, uint16(v)) }), nil
-	case i64Store32:
-		return handleStore(body, pc, vm.stack.popInt64, func(m *Memory, o, i uint32, v int64) error { return m.StoreUint32(o, i, uint32(v)) }), nil
-	case memorySize:
-		idx := body[pc+1]
-		return handleMemorySize(idx), nil
-	case memoryGrow:
-		idx := body[pc+1]
-		return handleMemoryGrow(idx), nil
+		return instr{fn: opDrop}, true
 	case i32Const:
-		v := int32(body[pc+1])
-		return func(c *callFrame) int { c.vm.stack.pushInt32(v); return advance }, nil
+		return instr{fn: opI32Const, a: body[pc+1]}, true
 	case i64Const:
-		v := int64(body[pc+1])
-		return func(c *callFrame) int { c.vm.stack.pushInt64(v); return advance }, nil
+		return instr{fn: opI64Const, a: body[pc+1]}, true
 	case f32Const:
-		v := math.Float32frombits(uint32(body[pc+1]))
-		return func(c *callFrame) int { c.vm.stack.pushFloat32(v); return advance }, nil
+		return instr{fn: opF32Const, a: body[pc+1]}, true
 	case f64Const:
-		v := math.Float64frombits(body[pc+1])
-		return func(c *callFrame) int { c.vm.stack.pushFloat64(v); return advance }, nil
-	case i32Eqz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt32() == 0))
-			return advance
-		}, nil
-	case i32Eq:
-		return handleBinaryBoolInt32(equal[int32]), nil
-	case i32Ne:
-		return handleBinaryBoolInt32(notEqual[int32]), nil
-	case i32LtS:
-		return handleBinaryBoolInt32(lessThan[int32]), nil
-	case i32LtU:
-		return handleBinaryBoolInt32(lessThanU32), nil
-	case i32GtS:
-		return handleBinaryBoolInt32(greaterThan[int32]), nil
-	case i32GtU:
-		return handleBinaryBoolInt32(greaterThanU32), nil
-	case i32LeS:
-		return handleBinaryBoolInt32(lessOrEqual[int32]), nil
-	case i32LeU:
-		return handleBinaryBoolInt32(lessOrEqualU32), nil
-	case i32GeS:
-		return handleBinaryBoolInt32(greaterOrEqual[int32]), nil
-	case i32GeU:
-		return handleBinaryBoolInt32(greaterOrEqualU32), nil
-	case i64Eqz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt64() == 0))
-			return advance
-		}, nil
-	case i64Eq:
-		return handleBinaryBoolInt64(equal[int64]), nil
-	case i64Ne:
-		return handleBinaryBoolInt64(notEqual[int64]), nil
-	case i64LtS:
-		return handleBinaryBoolInt64(lessThan[int64]), nil
-	case i64LtU:
-		return handleBinaryBoolInt64(lessThanU64), nil
-	case i64GtS:
-		return handleBinaryBoolInt64(greaterThan[int64]), nil
-	case i64GtU:
-		return handleBinaryBoolInt64(greaterThanU64), nil
-	case i64LeS:
-		return handleBinaryBoolInt64(lessOrEqual[int64]), nil
-	case i64LeU:
-		return handleBinaryBoolInt64(lessOrEqualU64), nil
-	case i64GeS:
-		return handleBinaryBoolInt64(greaterOrEqual[int64]), nil
-	case i64GeU:
-		return handleBinaryBoolInt64(greaterOrEqualU64), nil
-	case f32Eq:
-		return handleBinaryBoolFloat32(equal[float32]), nil
-	case f32Ne:
-		return handleBinaryBoolFloat32(notEqual[float32]), nil
-	case f32Lt:
-		return handleBinaryBoolFloat32(lessThan[float32]), nil
-	case f32Gt:
-		return handleBinaryBoolFloat32(greaterThan[float32]), nil
-	case f32Le:
-		return handleBinaryBoolFloat32(lessOrEqual[float32]), nil
-	case f32Ge:
-		return handleBinaryBoolFloat32(greaterOrEqual[float32]), nil
-	case f64Eq:
-		return handleBinaryBoolFloat64(equal[float64]), nil
-	case f64Ne:
-		return handleBinaryBoolFloat64(notEqual[float64]), nil
-	case f64Lt:
-		return handleBinaryBoolFloat64(lessThan[float64]), nil
-	case f64Gt:
-		return handleBinaryBoolFloat64(greaterThan[float64]), nil
-	case f64Le:
-		return handleBinaryBoolFloat64(lessOrEqual[float64]), nil
-	case f64Ge:
-		return handleBinaryBoolFloat64(greaterOrEqual[float64]), nil
-	case i32Clz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(clz32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i32Ctz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(ctz32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i32Popcnt:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(popcnt32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
+		return instr{fn: opF64Const, a: body[pc+1]}, true
+	case localGet:
+		return instr{fn: opLocalGet, a: body[pc+1]}, true
+	case localSet:
+		return instr{fn: opLocalSet, a: body[pc+1]}, true
+	case localTee:
+		return instr{fn: opLocalTee, a: body[pc+1]}, true
 	case i32Add:
-		return handleBinaryInt32(func(a, b int32) int32 { return a + b }), nil
+		return instr{fn: opBinI32[addI32]}, true
 	case i32Sub:
-		return handleBinaryInt32(func(a, b int32) int32 { return a - b }), nil
+		return instr{fn: opBinI32[subI32]}, true
 	case i32Mul:
-		return handleBinaryInt32(func(a, b int32) int32 { return a * b }), nil
-	case i32DivS:
-		return handleBinarySafeInt32(divS32), nil
-	case i32DivU:
-		return handleBinarySafeInt32(divU32), nil
-	case i32RemS:
-		return handleBinarySafeInt32(remS32), nil
-	case i32RemU:
-		return handleBinarySafeInt32(remU32), nil
+		return instr{fn: opBinI32[mulI32]}, true
 	case i32And:
-		return handleBinaryInt32(func(a, b int32) int32 { return a & b }), nil
+		return instr{fn: opBinI32[andI32]}, true
 	case i32Or:
-		return handleBinaryInt32(func(a, b int32) int32 { return a | b }), nil
+		return instr{fn: opBinI32[orI32]}, true
 	case i32Xor:
-		return handleBinaryInt32(func(a, b int32) int32 { return a ^ b }), nil
+		return instr{fn: opBinI32[xorI32]}, true
 	case i32Shl:
-		return handleBinaryInt32(func(a, b int32) int32 { return a << (uint32(b) % 32) }), nil
+		return instr{fn: opBinI32[shlI32]}, true
 	case i32ShrS:
-		return handleBinaryInt32(func(a, b int32) int32 { return a >> (uint32(b) % 32) }), nil
+		return instr{fn: opBinI32[shrSI32]}, true
 	case i32ShrU:
-		return handleBinaryInt32(shrU32), nil
+		return instr{fn: opBinI32[shrUI32]}, true
 	case i32Rotl:
-		return handleBinaryInt32(rotl32), nil
+		return instr{fn: opBinI32[rotlI32]}, true
 	case i32Rotr:
-		return handleBinaryInt32(rotr32), nil
-	case i64Clz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(clz64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case i64Ctz:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(ctz64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case i64Popcnt:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(popcnt64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
+		return instr{fn: opBinI32[rotrI32]}, true
 	case i64Add:
-		return handleBinaryInt64(func(a, b int64) int64 { return a + b }), nil
+		return instr{fn: opBinI64[addI64]}, true
 	case i64Sub:
-		return handleBinaryInt64(func(a, b int64) int64 { return a - b }), nil
+		return instr{fn: opBinI64[subI64]}, true
 	case i64Mul:
-		return handleBinaryInt64(func(a, b int64) int64 { return a * b }), nil
-	case i64DivS:
-		return handleBinarySafeInt64(divS64), nil
-	case i64DivU:
-		return handleBinarySafeInt64(divU64), nil
-	case i64RemS:
-		return handleBinarySafeInt64(remS64), nil
-	case i64RemU:
-		return handleBinarySafeInt64(remU64), nil
+		return instr{fn: opBinI64[mulI64]}, true
 	case i64And:
-		return handleBinaryInt64(func(a, b int64) int64 { return a & b }), nil
+		return instr{fn: opBinI64[andI64]}, true
 	case i64Or:
-		return handleBinaryInt64(func(a, b int64) int64 { return a | b }), nil
+		return instr{fn: opBinI64[orI64]}, true
 	case i64Xor:
-		return handleBinaryInt64(func(a, b int64) int64 { return a ^ b }), nil
+		return instr{fn: opBinI64[xorI64]}, true
 	case i64Shl:
-		return handleBinaryInt64(shl64), nil
+		return instr{fn: opBinI64[shlI64]}, true
 	case i64ShrS:
-		return handleBinaryInt64(shrS64), nil
+		return instr{fn: opBinI64[shrSI64]}, true
 	case i64ShrU:
-		return handleBinaryInt64(shrU64), nil
+		return instr{fn: opBinI64[shrUI64]}, true
 	case i64Rotl:
-		return handleBinaryInt64(rotl64), nil
+		return instr{fn: opBinI64[rotlI64]}, true
 	case i64Rotr:
-		return handleBinaryInt64(rotr64), nil
-	case f32Abs:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(abs(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f32Neg:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(-c.vm.stack.popFloat32())
-			return advance
-		}, nil
-	case f32Ceil:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(ceil(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f32Floor:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(floor(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f32Trunc:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(trunc(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f32Nearest:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(nearest(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f32Sqrt:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(sqrt(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
+		return instr{fn: opBinI64[rotrI64]}, true
+	case i32Eq:
+		return instr{fn: opCmpI32[eqI32]}, true
+	case i32Ne:
+		return instr{fn: opCmpI32[neI32]}, true
+	case i32LtS:
+		return instr{fn: opCmpI32[ltSI32]}, true
+	case i32LtU:
+		return instr{fn: opCmpI32[ltUI32]}, true
+	case i32GtS:
+		return instr{fn: opCmpI32[gtSI32]}, true
+	case i32GtU:
+		return instr{fn: opCmpI32[gtUI32]}, true
+	case i32LeS:
+		return instr{fn: opCmpI32[leSI32]}, true
+	case i32LeU:
+		return instr{fn: opCmpI32[leUI32]}, true
+	case i32GeS:
+		return instr{fn: opCmpI32[geSI32]}, true
+	case i32GeU:
+		return instr{fn: opCmpI32[geUI32]}, true
+	case i64Eq:
+		return instr{fn: opCmpI64[eqI64]}, true
+	case i64Ne:
+		return instr{fn: opCmpI64[neI64]}, true
+	case i64LtS:
+		return instr{fn: opCmpI64[ltSI64]}, true
+	case i64LtU:
+		return instr{fn: opCmpI64[ltUI64]}, true
+	case i64GtS:
+		return instr{fn: opCmpI64[gtSI64]}, true
+	case i64GtU:
+		return instr{fn: opCmpI64[gtUI64]}, true
+	case i64LeS:
+		return instr{fn: opCmpI64[leSI64]}, true
+	case i64LeU:
+		return instr{fn: opCmpI64[leUI64]}, true
+	case i64GeS:
+		return instr{fn: opCmpI64[geSI64]}, true
+	case i64GeU:
+		return instr{fn: opCmpI64[geUI64]}, true
+	case f32Eq:
+		return instr{fn: opCmpF32[f32EqOp]}, true
+	case f32Ne:
+		return instr{fn: opCmpF32[f32NeOp]}, true
+	case f32Lt:
+		return instr{fn: opCmpF32[f32LtOp]}, true
+	case f32Gt:
+		return instr{fn: opCmpF32[f32GtOp]}, true
+	case f32Le:
+		return instr{fn: opCmpF32[f32LeOp]}, true
+	case f32Ge:
+		return instr{fn: opCmpF32[f32GeOp]}, true
+	case f64Eq:
+		return instr{fn: opCmpF64[f64EqOp]}, true
+	case f64Ne:
+		return instr{fn: opCmpF64[f64NeOp]}, true
+	case f64Lt:
+		return instr{fn: opCmpF64[f64LtOp]}, true
+	case f64Gt:
+		return instr{fn: opCmpF64[f64GtOp]}, true
+	case f64Le:
+		return instr{fn: opCmpF64[f64LeOp]}, true
+	case f64Ge:
+		return instr{fn: opCmpF64[f64GeOp]}, true
+	case i32DivS:
+		return instr{fn: opSafeBinI32[i32DivSOp]}, true
+	case i32DivU:
+		return instr{fn: opSafeBinI32[i32DivUOp]}, true
+	case i32RemS:
+		return instr{fn: opSafeBinI32[i32RemSOp]}, true
+	case i32RemU:
+		return instr{fn: opSafeBinI32[i32RemUOp]}, true
+	case i64DivS:
+		return instr{fn: opSafeBinI64[i64DivSOp]}, true
+	case i64DivU:
+		return instr{fn: opSafeBinI64[i64DivUOp]}, true
+	case i64RemS:
+		return instr{fn: opSafeBinI64[i64RemSOp]}, true
+	case i64RemU:
+		return instr{fn: opSafeBinI64[i64RemUOp]}, true
 	case f32Add:
-		return handleBinaryFloat32(add[float32]), nil
+		return instr{fn: opBinF32[f32AddOp]}, true
 	case f32Sub:
-		return handleBinaryFloat32(sub[float32]), nil
+		return instr{fn: opBinF32[f32SubOp]}, true
 	case f32Mul:
-		return handleBinaryFloat32(mul[float32]), nil
+		return instr{fn: opBinF32[f32MulOp]}, true
 	case f32Div:
-		return handleBinaryFloat32(div[float32]), nil
+		return instr{fn: opBinF32[f32DivOp]}, true
 	case f32Min:
-		return handleBinaryFloat32(wasmMin[float32]), nil
+		return instr{fn: opBinF32[f32MinOp]}, true
 	case f32Max:
-		return handleBinaryFloat32(wasmMax[float32]), nil
+		return instr{fn: opBinF32[f32MaxOp]}, true
 	case f32Copysign:
-		return handleBinaryFloat32(copysign[float32]), nil
-	case f64Abs:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(abs(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64Neg:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(-c.vm.stack.popFloat64())
-			return advance
-		}, nil
-	case f64Ceil:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(ceil(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64Floor:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(floor(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64Trunc:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(trunc(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64Nearest:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(nearest(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64Sqrt:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(sqrt(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
+		return instr{fn: opBinF32[f32CopysignOp]}, true
 	case f64Add:
-		return handleBinaryFloat64(add[float64]), nil
+		return instr{fn: opBinF64[f64AddOp]}, true
 	case f64Sub:
-		return handleBinaryFloat64(sub[float64]), nil
+		return instr{fn: opBinF64[f64SubOp]}, true
 	case f64Mul:
-		return handleBinaryFloat64(mul[float64]), nil
+		return instr{fn: opBinF64[f64MulOp]}, true
 	case f64Div:
-		return handleBinaryFloat64(div[float64]), nil
+		return instr{fn: opBinF64[f64DivOp]}, true
 	case f64Min:
-		return handleBinaryFloat64(wasmMin[float64]), nil
+		return instr{fn: opBinF64[f64MinOp]}, true
 	case f64Max:
-		return handleBinaryFloat64(wasmMax[float64]), nil
+		return instr{fn: opBinF64[f64MaxOp]}, true
 	case f64Copysign:
-		return handleBinaryFloat64(copysign[float64]), nil
-	case i32WrapI64:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(wrapI64ToI32(c.vm.stack.popInt64()))
-			return advance
-		}, nil
+		return instr{fn: opBinF64[f64CopysignOp]}, true
 	case i32TruncF32S:
-		return handleUnarySafeFloat32(truncF32SToI32), nil
+		return instr{fn: opUnarySafeF32[i32TruncF32SOp]}, true
 	case i32TruncF32U:
-		return handleUnarySafeFloat32(truncF32UToI32), nil
+		return instr{fn: opUnarySafeF32[i32TruncF32UOp]}, true
 	case i32TruncF64S:
-		return handleUnarySafeFloat64(truncF64SToI32), nil
+		return instr{fn: opUnarySafeF64[i32TruncF64SOp]}, true
 	case i32TruncF64U:
-		return handleUnarySafeFloat64(truncF64UToI32), nil
-	case i64ExtendI32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(extendI32SToI64(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i64ExtendI32U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(extendI32UToI64(c.vm.stack.popInt32()))
-			return advance
-		}, nil
+		return instr{fn: opUnarySafeF64[i32TruncF64UOp]}, true
 	case i64TruncF32S:
-		return handleTruncFloat32Int64(truncF32SToI64), nil
+		return instr{fn: opTruncF32I64[i64TruncF32SOp]}, true
 	case i64TruncF32U:
-		return handleTruncFloat32Int64(truncF32UToI64), nil
+		return instr{fn: opTruncF32I64[i64TruncF32UOp]}, true
 	case i64TruncF64S:
-		return handleTruncFloat64Int64(truncF64SToI64), nil
+		return instr{fn: opTruncF64I64[i64TruncF64SOp]}, true
 	case i64TruncF64U:
-		return handleTruncFloat64Int64(truncF64UToI64), nil
-	case f32ConvertI32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(convertI32SToF32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case f32ConvertI32U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(convertI32UToF32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case f32ConvertI64S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(convertI64SToF32(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case f32ConvertI64U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(convertI64UToF32(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case f32DemoteF64:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(demoteF64ToF32(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f64ConvertI32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(convertI32SToF64(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case f64ConvertI32U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(convertI32UToF64(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case f64ConvertI64S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(convertI64SToF64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case f64ConvertI64U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(convertI64UToF64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case f64PromoteF32:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(promoteF32ToF64(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i32ReinterpretF32:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(reinterpretF32ToI32(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i64ReinterpretF64:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(reinterpretF64ToI64(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case f32ReinterpretI32:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat32(reinterpretI32ToF32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case f64ReinterpretI64:
-		return func(c *callFrame) int {
-			c.vm.stack.pushFloat64(reinterpretI64ToF64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case i32Extend8S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(extend8STo32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i32Extend16S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(extend16STo32(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i64Extend8S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(extend8STo64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case i64Extend16S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(extend16STo64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case i64Extend32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(extend32STo64(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case refNull:
-		return func(c *callFrame) int { c.vm.stack.pushInt32(NullReference); return advance }, nil
-	case refIsNull:
-		return handleRefIsNull(), nil
-	case refFunc:
-		idx := body[pc+1]
-		return handleRefFunc(idx), nil
-	case i32TruncSatF32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(truncSatF32SToI32(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i32TruncSatF32U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(truncSatF32UToI32(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i32TruncSatF64S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(truncSatF64SToI32(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case i32TruncSatF64U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(truncSatF64UToI32(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case i64TruncSatF32S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(truncSatF32SToI64(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i64TruncSatF32U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(truncSatF32UToI64(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case i64TruncSatF64S:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(truncSatF64SToI64(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case i64TruncSatF64U:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt64(truncSatF64UToI64(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case memoryInit:
-		dataIdx, memIdx := body[pc+1], body[pc+2]
-		return handleMemoryInit(dataIdx, memIdx), nil
-	case dataDrop:
-		idx := body[pc+1]
-		return handleDataDrop(idx), nil
-	case memoryCopy:
-		destIdx, srcIdx := body[pc+1], body[pc+2]
-		return handleMemoryCopy(destIdx, srcIdx), nil
-	case memoryFill:
-		idx := body[pc+1]
-		return handleMemoryFill(idx), nil
-	case tableInit:
-		elemIdx, tableIdx := body[pc+1], body[pc+2]
-		return handleTableInit(elemIdx, tableIdx), nil
-	case elemDrop:
-		idx := body[pc+1]
-		return handleElemDrop(idx), nil
-	case tableCopy:
-		destIdx, srcIdx := body[pc+1], body[pc+2]
-		return handleTableCopy(destIdx, srcIdx), nil
-	case tableGrow:
-		idx := body[pc+1]
-		return handleTableGrow(idx), nil
-	case tableSize:
-		idx := body[pc+1]
-		return handleTableSize(idx), nil
-	case tableFill:
-		idx := body[pc+1]
-		return handleTableFill(idx), nil
-	case v128Load:
-		return handleLoad(body, pc, vm.stack.pushV128, (*Memory).LoadV128, identityV128), nil
-	case v128Load8x8S:
-		return handleLoadV128FromBytes(body, pc, simdV128Load8x8S, 8), nil
-	case v128Load8x8U:
-		return handleLoadV128FromBytes(body, pc, simdV128Load8x8U, 8), nil
-	case v128Load16x4S:
-		return handleLoadV128FromBytes(body, pc, simdV128Load16x4S, 8), nil
-	case v128Load16x4U:
-		return handleLoadV128FromBytes(body, pc, simdV128Load16x4U, 8), nil
-	case v128Load32x2S:
-		return handleLoadV128FromBytes(body, pc, simdV128Load32x2S, 8), nil
-	case v128Load32x2U:
-		return handleLoadV128FromBytes(body, pc, simdV128Load32x2U, 8), nil
-	case v128Load8Splat:
-		return handleLoadV128FromBytes(body, pc, simdI8x16SplatFromBytes, 1), nil
-	case v128Load16Splat:
-		return handleLoadV128FromBytes(body, pc, simdI16x8SplatFromBytes, 2), nil
-	case v128Load32Splat:
-		return handleLoadV128FromBytes(body, pc, simdI32x4SplatFromBytes, 4), nil
-	case v128Load64Splat:
-		return handleLoadV128FromBytes(body, pc, simdI64x2SplatFromBytes, 8), nil
-	case v128Store:
-		return handleStore(body, pc, vm.stack.popV128, (*Memory).StoreV128), nil
-	case v128Const:
-		v := V128Value{Low: body[pc+1], High: body[pc+2]}
-		return func(c *callFrame) int { c.vm.stack.pushV128(v); return advance }, nil
-	case i8x16Shuffle:
-		var lanes [16]byte
-		for i := range lanes {
-			lanes[i] = byte(body[pc+1+i])
-		}
-		return handleI8x16Shuffle(lanes), nil
+		return instr{fn: opTruncF64I64[i64TruncF64UOp]}, true
 	case i8x16Swizzle:
-		return handleBinaryV128(simdI8x16Swizzle), nil
-	case i8x16Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdI8x16Splat(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i16x8Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdI16x8Splat(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i32x4Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdI32x4Splat(c.vm.stack.popInt32()))
-			return advance
-		}, nil
-	case i64x2Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdI64x2Splat(c.vm.stack.popInt64()))
-			return advance
-		}, nil
-	case f32x4Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdF32x4Splat(c.vm.stack.popFloat32()))
-			return advance
-		}, nil
-	case f64x2Splat:
-		return func(c *callFrame) int {
-			c.vm.stack.pushV128(simdF64x2Splat(c.vm.stack.popFloat64()))
-			return advance
-		}, nil
-	case i8x16ExtractLaneS:
-		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI8x16ExtractLaneS), nil
-	case i8x16ExtractLaneU:
-		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI8x16ExtractLaneU), nil
-	case i8x16ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popInt32, simdI8x16ReplaceLane), nil
-	case i16x8ExtractLaneS:
-		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI16x8ExtractLaneS), nil
-	case i16x8ExtractLaneU:
-		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI16x8ExtractLaneU), nil
-	case i16x8ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popInt32, simdI16x8ReplaceLane), nil
-	case i32x4ExtractLane:
-		return handleExtractLane(body, pc, vm.stack.pushInt32, simdI32x4ExtractLane), nil
-	case i32x4ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popInt32, simdI32x4ReplaceLane), nil
-	case i64x2ExtractLane:
-		return handleExtractLane(body, pc, vm.stack.pushInt64, simdI64x2ExtractLane), nil
-	case i64x2ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popInt64, simdI64x2ReplaceLane), nil
-	case f32x4ExtractLane:
-		return handleExtractLane(body, pc, vm.stack.pushFloat32, simdF32x4ExtractLane), nil
-	case f32x4ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popFloat32, simdF32x4ReplaceLane), nil
-	case f64x2ExtractLane:
-		return handleExtractLane(body, pc, vm.stack.pushFloat64, simdF64x2ExtractLane), nil
-	case f64x2ReplaceLane:
-		return handleReplaceLane(body, pc, vm.stack.popFloat64, simdF64x2ReplaceLane), nil
+		return instr{fn: opBinV128[i8x16SwizzleOp]}, true
 	case i8x16Eq:
-		return handleBinaryV128(simdI8x16Eq), nil
+		return instr{fn: opBinV128[i8x16EqOp]}, true
 	case i8x16Ne:
-		return handleBinaryV128(simdI8x16Ne), nil
+		return instr{fn: opBinV128[i8x16NeOp]}, true
 	case i8x16LtS:
-		return handleBinaryV128(simdI8x16LtS), nil
+		return instr{fn: opBinV128[i8x16LtSOp]}, true
 	case i8x16LtU:
-		return handleBinaryV128(simdI8x16LtU), nil
+		return instr{fn: opBinV128[i8x16LtUOp]}, true
 	case i8x16GtS:
-		return handleBinaryV128(simdI8x16GtS), nil
+		return instr{fn: opBinV128[i8x16GtSOp]}, true
 	case i8x16GtU:
-		return handleBinaryV128(simdI8x16GtU), nil
+		return instr{fn: opBinV128[i8x16GtUOp]}, true
 	case i8x16LeS:
-		return handleBinaryV128(simdI8x16LeS), nil
+		return instr{fn: opBinV128[i8x16LeSOp]}, true
 	case i8x16LeU:
-		return handleBinaryV128(simdI8x16LeU), nil
+		return instr{fn: opBinV128[i8x16LeUOp]}, true
 	case i8x16GeS:
-		return handleBinaryV128(simdI8x16GeS), nil
+		return instr{fn: opBinV128[i8x16GeSOp]}, true
 	case i8x16GeU:
-		return handleBinaryV128(simdI8x16GeU), nil
+		return instr{fn: opBinV128[i8x16GeUOp]}, true
 	case i16x8Eq:
-		return handleBinaryV128(simdI16x8Eq), nil
+		return instr{fn: opBinV128[i16x8EqOp]}, true
 	case i16x8Ne:
-		return handleBinaryV128(simdI16x8Ne), nil
+		return instr{fn: opBinV128[i16x8NeOp]}, true
 	case i16x8LtS:
-		return handleBinaryV128(simdI16x8LtS), nil
+		return instr{fn: opBinV128[i16x8LtSOp]}, true
 	case i16x8LtU:
-		return handleBinaryV128(simdI16x8LtU), nil
+		return instr{fn: opBinV128[i16x8LtUOp]}, true
 	case i16x8GtS:
-		return handleBinaryV128(simdI16x8GtS), nil
+		return instr{fn: opBinV128[i16x8GtSOp]}, true
 	case i16x8GtU:
-		return handleBinaryV128(simdI16x8GtU), nil
+		return instr{fn: opBinV128[i16x8GtUOp]}, true
 	case i16x8LeS:
-		return handleBinaryV128(simdI16x8LeS), nil
+		return instr{fn: opBinV128[i16x8LeSOp]}, true
 	case i16x8LeU:
-		return handleBinaryV128(simdI16x8LeU), nil
+		return instr{fn: opBinV128[i16x8LeUOp]}, true
 	case i16x8GeS:
-		return handleBinaryV128(simdI16x8GeS), nil
+		return instr{fn: opBinV128[i16x8GeSOp]}, true
 	case i16x8GeU:
-		return handleBinaryV128(simdI16x8GeU), nil
+		return instr{fn: opBinV128[i16x8GeUOp]}, true
 	case i32x4Eq:
-		return handleBinaryV128(simdI32x4Eq), nil
+		return instr{fn: opBinV128[i32x4EqOp]}, true
 	case i32x4Ne:
-		return handleBinaryV128(simdI32x4Ne), nil
+		return instr{fn: opBinV128[i32x4NeOp]}, true
 	case i32x4LtS:
-		return handleBinaryV128(simdI32x4LtS), nil
+		return instr{fn: opBinV128[i32x4LtSOp]}, true
 	case i32x4LtU:
-		return handleBinaryV128(simdI32x4LtU), nil
+		return instr{fn: opBinV128[i32x4LtUOp]}, true
 	case i32x4GtS:
-		return handleBinaryV128(simdI32x4GtS), nil
+		return instr{fn: opBinV128[i32x4GtSOp]}, true
 	case i32x4GtU:
-		return handleBinaryV128(simdI32x4GtU), nil
+		return instr{fn: opBinV128[i32x4GtUOp]}, true
 	case i32x4LeS:
-		return handleBinaryV128(simdI32x4LeS), nil
+		return instr{fn: opBinV128[i32x4LeSOp]}, true
 	case i32x4LeU:
-		return handleBinaryV128(simdI32x4LeU), nil
+		return instr{fn: opBinV128[i32x4LeUOp]}, true
 	case i32x4GeS:
-		return handleBinaryV128(simdI32x4GeS), nil
+		return instr{fn: opBinV128[i32x4GeSOp]}, true
 	case i32x4GeU:
-		return handleBinaryV128(simdI32x4GeU), nil
+		return instr{fn: opBinV128[i32x4GeUOp]}, true
 	case f32x4Eq:
-		return handleBinaryV128(simdF32x4Eq), nil
+		return instr{fn: opBinV128[f32x4EqOp]}, true
 	case f32x4Ne:
-		return handleBinaryV128(simdF32x4Ne), nil
+		return instr{fn: opBinV128[f32x4NeOp]}, true
 	case f32x4Lt:
-		return handleBinaryV128(simdF32x4Lt), nil
+		return instr{fn: opBinV128[f32x4LtOp]}, true
 	case f32x4Gt:
-		return handleBinaryV128(simdF32x4Gt), nil
+		return instr{fn: opBinV128[f32x4GtOp]}, true
 	case f32x4Le:
-		return handleBinaryV128(simdF32x4Le), nil
+		return instr{fn: opBinV128[f32x4LeOp]}, true
 	case f32x4Ge:
-		return handleBinaryV128(simdF32x4Ge), nil
+		return instr{fn: opBinV128[f32x4GeOp]}, true
 	case f64x2Eq:
-		return handleBinaryV128(simdF64x2Eq), nil
+		return instr{fn: opBinV128[f64x2EqOp]}, true
 	case f64x2Ne:
-		return handleBinaryV128(simdF64x2Ne), nil
+		return instr{fn: opBinV128[f64x2NeOp]}, true
 	case f64x2Lt:
-		return handleBinaryV128(simdF64x2Lt), nil
+		return instr{fn: opBinV128[f64x2LtOp]}, true
 	case f64x2Gt:
-		return handleBinaryV128(simdF64x2Gt), nil
+		return instr{fn: opBinV128[f64x2GtOp]}, true
 	case f64x2Le:
-		return handleBinaryV128(simdF64x2Le), nil
+		return instr{fn: opBinV128[f64x2LeOp]}, true
 	case f64x2Ge:
-		return handleBinaryV128(simdF64x2Ge), nil
+		return instr{fn: opBinV128[f64x2GeOp]}, true
 	case v128Not:
-		return handleUnaryV128(simdV128Not), nil
+		return instr{fn: opUnaryV128G[v128NotOp]}, true
 	case v128And:
-		return handleBinaryV128(simdV128And), nil
+		return instr{fn: opBinV128[v128AndOp]}, true
 	case v128Andnot:
-		return handleBinaryV128(simdV128Andnot), nil
+		return instr{fn: opBinV128[v128AndnotOp]}, true
 	case v128Or:
-		return handleBinaryV128(simdV128Or), nil
+		return instr{fn: opBinV128[v128OrOp]}, true
 	case v128Xor:
-		return handleBinaryV128(simdV128Xor), nil
-	case v128Bitselect:
-		return handleSimdTernary(simdV128Bitselect), nil
-	case v128AnyTrue:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(c.vm.stack.popV128())))
-			return advance
-		}, nil
-	case v128Load8Lane:
-		return handleSimdLoadLane(body, pc, 8), nil
-	case v128Load16Lane:
-		return handleSimdLoadLane(body, pc, 16), nil
-	case v128Load32Lane:
-		return handleSimdLoadLane(body, pc, 32), nil
-	case v128Load64Lane:
-		return handleSimdLoadLane(body, pc, 64), nil
-	case v128Store8Lane:
-		return handleSimdStoreLane(body, pc, 8), nil
-	case v128Store16Lane:
-		return handleSimdStoreLane(body, pc, 16), nil
-	case v128Store32Lane:
-		return handleSimdStoreLane(body, pc, 32), nil
-	case v128Store64Lane:
-		return handleSimdStoreLane(body, pc, 64), nil
-	case v128Load32Zero:
-		return handleLoadV128FromBytes(body, pc, simdV128Load32Zero, 4), nil
-	case v128Load64Zero:
-		return handleLoadV128FromBytes(body, pc, simdV128Load64Zero, 8), nil
+		return instr{fn: opBinV128[v128XorOp]}, true
 	case f32x4DemoteF64x2Zero:
-		return handleUnaryV128(simdF32x4DemoteF64x2Zero), nil
+		return instr{fn: opUnaryV128G[f32x4DemoteF64x2ZeroOp]}, true
 	case f64x2PromoteLowF32x4:
-		return handleUnaryV128(simdF64x2PromoteLowF32x4), nil
+		return instr{fn: opUnaryV128G[f64x2PromoteLowF32x4Op]}, true
 	case i8x16Abs:
-		return handleUnaryV128(simdI8x16Abs), nil
+		return instr{fn: opUnaryV128G[i8x16AbsOp]}, true
 	case i8x16Neg:
-		return handleUnaryV128(simdI8x16Neg), nil
+		return instr{fn: opUnaryV128G[i8x16NegOp]}, true
 	case i8x16Popcnt:
-		return handleUnaryV128(simdI8x16Popcnt), nil
-	case i8x16AllTrue:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(simdI8x16AllTrue(c.vm.stack.popV128())))
-			return advance
-		}, nil
-	case i8x16Bitmask:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(simdI8x16Bitmask(c.vm.stack.popV128()))
-			return advance
-		}, nil
+		return instr{fn: opUnaryV128G[i8x16PopcntOp]}, true
 	case i8x16NarrowI16x8S:
-		return handleBinaryV128(simdI8x16NarrowI16x8S), nil
+		return instr{fn: opBinV128[i8x16NarrowI16x8SOp]}, true
 	case i8x16NarrowI16x8U:
-		return handleBinaryV128(simdI8x16NarrowI16x8U), nil
+		return instr{fn: opBinV128[i8x16NarrowI16x8UOp]}, true
 	case f32x4Ceil:
-		return handleUnaryV128(simdF32x4Ceil), nil
+		return instr{fn: opUnaryV128G[f32x4CeilOp]}, true
 	case f32x4Floor:
-		return handleUnaryV128(simdF32x4Floor), nil
+		return instr{fn: opUnaryV128G[f32x4FloorOp]}, true
 	case f32x4Trunc:
-		return handleUnaryV128(simdF32x4Trunc), nil
+		return instr{fn: opUnaryV128G[f32x4TruncOp]}, true
 	case f32x4Nearest:
-		return handleUnaryV128(simdF32x4Nearest), nil
+		return instr{fn: opUnaryV128G[f32x4NearestOp]}, true
 	case i8x16Shl:
-		return handleSimdShift(simdI8x16Shl), nil
+		return instr{fn: opShiftV128[i8x16ShlOp]}, true
 	case i8x16ShrU:
-		return handleSimdShift(simdI8x16ShrU), nil
+		return instr{fn: opShiftV128[i8x16ShrUOp]}, true
 	case i8x16ShrS:
-		return handleSimdShift(simdI8x16ShrS), nil
+		return instr{fn: opShiftV128[i8x16ShrSOp]}, true
 	case i8x16Add:
-		return handleBinaryV128(simdI8x16Add), nil
+		return instr{fn: opBinV128[i8x16AddOp]}, true
 	case i8x16AddSatS:
-		return handleBinaryV128(simdI8x16AddSatS), nil
+		return instr{fn: opBinV128[i8x16AddSatSOp]}, true
 	case i8x16AddSatU:
-		return handleBinaryV128(simdI8x16AddSatU), nil
+		return instr{fn: opBinV128[i8x16AddSatUOp]}, true
 	case i8x16Sub:
-		return handleBinaryV128(simdI8x16Sub), nil
+		return instr{fn: opBinV128[i8x16SubOp]}, true
 	case i8x16SubSatS:
-		return handleBinaryV128(simdI8x16SubSatS), nil
+		return instr{fn: opBinV128[i8x16SubSatSOp]}, true
 	case i8x16SubSatU:
-		return handleBinaryV128(simdI8x16SubSatU), nil
+		return instr{fn: opBinV128[i8x16SubSatUOp]}, true
 	case f64x2Ceil:
-		return handleUnaryV128(simdF64x2Ceil), nil
+		return instr{fn: opUnaryV128G[f64x2CeilOp]}, true
 	case f64x2Floor:
-		return handleUnaryV128(simdF64x2Floor), nil
+		return instr{fn: opUnaryV128G[f64x2FloorOp]}, true
 	case i8x16MinS:
-		return handleBinaryV128(simdI8x16MinS), nil
+		return instr{fn: opBinV128[i8x16MinSOp]}, true
 	case i8x16MinU:
-		return handleBinaryV128(simdI8x16MinU), nil
+		return instr{fn: opBinV128[i8x16MinUOp]}, true
 	case i8x16MaxS:
-		return handleBinaryV128(simdI8x16MaxS), nil
+		return instr{fn: opBinV128[i8x16MaxSOp]}, true
 	case i8x16MaxU:
-		return handleBinaryV128(simdI8x16MaxU), nil
+		return instr{fn: opBinV128[i8x16MaxUOp]}, true
 	case f64x2Trunc:
-		return handleUnaryV128(simdF64x2Trunc), nil
+		return instr{fn: opUnaryV128G[f64x2TruncOp]}, true
 	case i8x16AvgrU:
-		return handleBinaryV128(simdI8x16AvgrU), nil
+		return instr{fn: opBinV128[i8x16AvgrUOp]}, true
 	case i16x8ExtaddPairwiseI8x16S:
-		return handleUnaryV128(simdI16x8ExtaddPairwiseI8x16S), nil
+		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16SOp]}, true
 	case i16x8ExtaddPairwiseI8x16U:
-		return handleUnaryV128(simdI16x8ExtaddPairwiseI8x16U), nil
+		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16UOp]}, true
 	case i32x4ExtaddPairwiseI16x8S:
-		return handleUnaryV128(simdI32x4ExtaddPairwiseI16x8S), nil
+		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8SOp]}, true
 	case i32x4ExtaddPairwiseI16x8U:
-		return handleUnaryV128(simdI32x4ExtaddPairwiseI16x8U), nil
+		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8UOp]}, true
 	case i16x8Abs:
-		return handleUnaryV128(simdI16x8Abs), nil
+		return instr{fn: opUnaryV128G[i16x8AbsOp]}, true
 	case i16x8Neg:
-		return handleUnaryV128(simdI16x8Neg), nil
+		return instr{fn: opUnaryV128G[i16x8NegOp]}, true
 	case i16x8Q15mulrSatS:
-		return handleBinaryV128(simdI16x8Q15mulrSatS), nil
-	case i16x8AllTrue:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(c.vm.stack.popV128())))
-			return advance
-		}, nil
-	case i16x8Bitmask:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(simdI16x8Bitmask(c.vm.stack.popV128()))
-			return advance
-		}, nil
+		return instr{fn: opBinV128[i16x8Q15mulrSatSOp]}, true
 	case i16x8NarrowI32x4S:
-		return handleBinaryV128(simdI16x8NarrowI32x4S), nil
+		return instr{fn: opBinV128[i16x8NarrowI32x4SOp]}, true
 	case i16x8NarrowI32x4U:
-		return handleBinaryV128(simdI16x8NarrowI32x4U), nil
+		return instr{fn: opBinV128[i16x8NarrowI32x4UOp]}, true
 	case i16x8ExtendLowI8x16S:
-		return handleUnaryV128(simdI16x8ExtendLowI8x16S), nil
+		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16SOp]}, true
 	case i16x8ExtendHighI8x16S:
-		return handleUnaryV128(simdI16x8ExtendHighI8x16S), nil
+		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16SOp]}, true
 	case i16x8ExtendLowI8x16U:
-		return handleUnaryV128(simdI16x8ExtendLowI8x16U), nil
+		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16UOp]}, true
 	case i16x8ExtendHighI8x16U:
-		return handleUnaryV128(simdI16x8ExtendHighI8x16U), nil
+		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16UOp]}, true
 	case i16x8Shl:
-		return handleSimdShift(simdI16x8Shl), nil
+		return instr{fn: opShiftV128[i16x8ShlOp]}, true
 	case i16x8ShrS:
-		return handleSimdShift(simdI16x8ShrS), nil
+		return instr{fn: opShiftV128[i16x8ShrSOp]}, true
 	case i16x8ShrU:
-		return handleSimdShift(simdI16x8ShrU), nil
+		return instr{fn: opShiftV128[i16x8ShrUOp]}, true
 	case i16x8Add:
-		return handleBinaryV128(simdI16x8Add), nil
+		return instr{fn: opBinV128[i16x8AddOp]}, true
 	case i16x8AddSatS:
-		return handleBinaryV128(simdI16x8AddSatS), nil
+		return instr{fn: opBinV128[i16x8AddSatSOp]}, true
 	case i16x8AddSatU:
-		return handleBinaryV128(simdI16x8AddSatU), nil
+		return instr{fn: opBinV128[i16x8AddSatUOp]}, true
 	case i16x8Sub:
-		return handleBinaryV128(simdI16x8Sub), nil
+		return instr{fn: opBinV128[i16x8SubOp]}, true
 	case i16x8SubSatS:
-		return handleBinaryV128(simdI16x8SubSatS), nil
+		return instr{fn: opBinV128[i16x8SubSatSOp]}, true
 	case i16x8SubSatU:
-		return handleBinaryV128(simdI16x8SubSatU), nil
+		return instr{fn: opBinV128[i16x8SubSatUOp]}, true
 	case f64x2Nearest:
-		return handleUnaryV128(simdF64x2Nearest), nil
+		return instr{fn: opUnaryV128G[f64x2NearestOp]}, true
 	case i16x8Mul:
-		return handleBinaryV128(simdI16x8Mul), nil
+		return instr{fn: opBinV128[i16x8MulOp]}, true
 	case i16x8MinS:
-		return handleBinaryV128(simdI16x8MinS), nil
+		return instr{fn: opBinV128[i16x8MinSOp]}, true
 	case i16x8MinU:
-		return handleBinaryV128(simdI16x8MinU), nil
+		return instr{fn: opBinV128[i16x8MinUOp]}, true
 	case i16x8MaxS:
-		return handleBinaryV128(simdI16x8MaxS), nil
+		return instr{fn: opBinV128[i16x8MaxSOp]}, true
 	case i16x8MaxU:
-		return handleBinaryV128(simdI16x8MaxU), nil
+		return instr{fn: opBinV128[i16x8MaxUOp]}, true
 	case i16x8AvgrU:
-		return handleBinaryV128(simdI16x8AvgrU), nil
+		return instr{fn: opBinV128[i16x8AvgrUOp]}, true
 	case i16x8ExtmulLowI8x16S:
-		return handleBinaryV128(simdI16x8ExtmulLowI8x16S), nil
+		return instr{fn: opBinV128[i16x8ExtmulLowI8x16SOp]}, true
 	case i16x8ExtmulHighI8x16S:
-		return handleBinaryV128(simdI16x8ExtmulHighI8x16S), nil
+		return instr{fn: opBinV128[i16x8ExtmulHighI8x16SOp]}, true
 	case i16x8ExtmulLowI8x16U:
-		return handleBinaryV128(simdI16x8ExtmulLowI8x16U), nil
+		return instr{fn: opBinV128[i16x8ExtmulLowI8x16UOp]}, true
 	case i16x8ExtmulHighI8x16U:
-		return handleBinaryV128(simdI16x8ExtmulHighI8x16U), nil
+		return instr{fn: opBinV128[i16x8ExtmulHighI8x16UOp]}, true
 	case i32x4Abs:
-		return handleUnaryV128(simdI32x4Abs), nil
+		return instr{fn: opUnaryV128G[i32x4AbsOp]}, true
 	case i32x4Neg:
-		return handleUnaryV128(simdI32x4Neg), nil
-	case i32x4AllTrue:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(simdI32x4AllTrue(c.vm.stack.popV128())))
-			return advance
-		}, nil
-	case i32x4Bitmask:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(simdI32x4Bitmask(c.vm.stack.popV128()))
-			return advance
-		}, nil
+		return instr{fn: opUnaryV128G[i32x4NegOp]}, true
 	case i32x4ExtendLowI16x8S:
-		return handleUnaryV128(simdI32x4ExtendLowI16x8S), nil
+		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8SOp]}, true
 	case i32x4ExtendHighI16x8S:
-		return handleUnaryV128(simdI32x4ExtendHighI16x8S), nil
+		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8SOp]}, true
 	case i32x4ExtendLowI16x8U:
-		return handleUnaryV128(simdI32x4ExtendLowI16x8U), nil
+		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8UOp]}, true
 	case i32x4ExtendHighI16x8U:
-		return handleUnaryV128(simdI32x4ExtendHighI16x8U), nil
+		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8UOp]}, true
 	case i32x4Shl:
-		return handleSimdShift(simdI32x4Shl), nil
+		return instr{fn: opShiftV128[i32x4ShlOp]}, true
 	case i32x4ShrS:
-		return handleSimdShift(simdI32x4ShrS), nil
+		return instr{fn: opShiftV128[i32x4ShrSOp]}, true
 	case i32x4ShrU:
-		return handleSimdShift(simdI32x4ShrU), nil
+		return instr{fn: opShiftV128[i32x4ShrUOp]}, true
 	case i32x4Add:
-		return handleBinaryV128(simdI32x4Add), nil
+		return instr{fn: opBinV128[i32x4AddOp]}, true
 	case i32x4Sub:
-		return handleBinaryV128(simdI32x4Sub), nil
+		return instr{fn: opBinV128[i32x4SubOp]}, true
 	case i32x4Mul:
-		return handleBinaryV128(simdI32x4Mul), nil
+		return instr{fn: opBinV128[i32x4MulOp]}, true
 	case i32x4MinS:
-		return handleBinaryV128(simdI32x4MinS), nil
+		return instr{fn: opBinV128[i32x4MinSOp]}, true
 	case i32x4MinU:
-		return handleBinaryV128(simdI32x4MinU), nil
+		return instr{fn: opBinV128[i32x4MinUOp]}, true
 	case i32x4MaxS:
-		return handleBinaryV128(simdI32x4MaxS), nil
+		return instr{fn: opBinV128[i32x4MaxSOp]}, true
 	case i32x4MaxU:
-		return handleBinaryV128(simdI32x4MaxU), nil
+		return instr{fn: opBinV128[i32x4MaxUOp]}, true
 	case i32x4DotI16x8S:
-		return handleBinaryV128(simdI32x4DotI16x8S), nil
+		return instr{fn: opBinV128[i32x4DotI16x8SOp]}, true
 	case i32x4ExtmulLowI16x8S:
-		return handleBinaryV128(simdI32x4ExtmulLowI16x8S), nil
+		return instr{fn: opBinV128[i32x4ExtmulLowI16x8SOp]}, true
 	case i32x4ExtmulHighI16x8S:
-		return handleBinaryV128(simdI32x4ExtmulHighI16x8S), nil
+		return instr{fn: opBinV128[i32x4ExtmulHighI16x8SOp]}, true
 	case i32x4ExtmulLowI16x8U:
-		return handleBinaryV128(simdI32x4ExtmulLowI16x8U), nil
+		return instr{fn: opBinV128[i32x4ExtmulLowI16x8UOp]}, true
 	case i32x4ExtmulHighI16x8U:
-		return handleBinaryV128(simdI32x4ExtmulHighI16x8U), nil
+		return instr{fn: opBinV128[i32x4ExtmulHighI16x8UOp]}, true
 	case i64x2Abs:
-		return handleUnaryV128(simdI64x2Abs), nil
+		return instr{fn: opUnaryV128G[i64x2AbsOp]}, true
 	case i64x2Neg:
-		return handleUnaryV128(simdI64x2Neg), nil
-	case i64x2AllTrue:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(boolToInt32(simdI64x2AllTrue(c.vm.stack.popV128())))
-			return advance
-		}, nil
-	case i64x2Bitmask:
-		return func(c *callFrame) int {
-			c.vm.stack.pushInt32(simdI64x2Bitmask(c.vm.stack.popV128()))
-			return advance
-		}, nil
+		return instr{fn: opUnaryV128G[i64x2NegOp]}, true
 	case i64x2ExtendLowI32x4S:
-		return handleUnaryV128(simdI64x2ExtendLowI32x4S), nil
+		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4SOp]}, true
 	case i64x2ExtendHighI32x4S:
-		return handleUnaryV128(simdI64x2ExtendHighI32x4S), nil
+		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4SOp]}, true
 	case i64x2ExtendLowI32x4U:
-		return handleUnaryV128(simdI64x2ExtendLowI32x4U), nil
+		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4UOp]}, true
 	case i64x2ExtendHighI32x4U:
-		return handleUnaryV128(simdI64x2ExtendHighI32x4U), nil
+		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4UOp]}, true
 	case i64x2Shl:
-		return handleSimdShift(simdI64x2Shl), nil
+		return instr{fn: opShiftV128[i64x2ShlOp]}, true
 	case i64x2ShrS:
-		return handleSimdShift(simdI64x2ShrS), nil
+		return instr{fn: opShiftV128[i64x2ShrSOp]}, true
 	case i64x2ShrU:
-		return handleSimdShift(simdI64x2ShrU), nil
+		return instr{fn: opShiftV128[i64x2ShrUOp]}, true
 	case i64x2Add:
-		return handleBinaryV128(simdI64x2Add), nil
+		return instr{fn: opBinV128[i64x2AddOp]}, true
 	case i64x2Sub:
-		return handleBinaryV128(simdI64x2Sub), nil
+		return instr{fn: opBinV128[i64x2SubOp]}, true
 	case i64x2Mul:
-		return handleBinaryV128(simdI64x2Mul), nil
+		return instr{fn: opBinV128[i64x2MulOp]}, true
 	case i64x2Eq:
-		return handleBinaryV128(simdI64x2Eq), nil
+		return instr{fn: opBinV128[i64x2EqOp]}, true
 	case i64x2Ne:
-		return handleBinaryV128(simdI64x2Ne), nil
+		return instr{fn: opBinV128[i64x2NeOp]}, true
 	case i64x2LtS:
-		return handleBinaryV128(simdI64x2LtS), nil
+		return instr{fn: opBinV128[i64x2LtSOp]}, true
 	case i64x2GtS:
-		return handleBinaryV128(simdI64x2GtS), nil
+		return instr{fn: opBinV128[i64x2GtSOp]}, true
 	case i64x2LeS:
-		return handleBinaryV128(simdI64x2LeS), nil
+		return instr{fn: opBinV128[i64x2LeSOp]}, true
 	case i64x2GeS:
-		return handleBinaryV128(simdI64x2GeS), nil
+		return instr{fn: opBinV128[i64x2GeSOp]}, true
 	case i64x2ExtmulLowI32x4S:
-		return handleBinaryV128(simdI64x2ExtmulLowI32x4S), nil
+		return instr{fn: opBinV128[i64x2ExtmulLowI32x4SOp]}, true
 	case i64x2ExtmulHighI32x4S:
-		return handleBinaryV128(simdI64x2ExtmulHighI32x4S), nil
+		return instr{fn: opBinV128[i64x2ExtmulHighI32x4SOp]}, true
 	case i64x2ExtmulLowI32x4U:
-		return handleBinaryV128(simdI64x2ExtmulLowI32x4U), nil
+		return instr{fn: opBinV128[i64x2ExtmulLowI32x4UOp]}, true
 	case i64x2ExtmulHighI32x4U:
-		return handleBinaryV128(simdI64x2ExtmulHighI32x4U), nil
+		return instr{fn: opBinV128[i64x2ExtmulHighI32x4UOp]}, true
 	case f32x4Abs:
-		return handleUnaryV128(simdF32x4Abs), nil
+		return instr{fn: opUnaryV128G[f32x4AbsOp]}, true
 	case f32x4Neg:
-		return handleUnaryV128(simdF32x4Neg), nil
+		return instr{fn: opUnaryV128G[f32x4NegOp]}, true
 	case f32x4Sqrt:
-		return handleUnaryV128(simdF32x4Sqrt), nil
+		return instr{fn: opUnaryV128G[f32x4SqrtOp]}, true
 	case f32x4Add:
-		return handleBinaryV128(simdF32x4Add), nil
+		return instr{fn: opBinV128[f32x4AddOp]}, true
 	case f32x4Sub:
-		return handleBinaryV128(simdF32x4Sub), nil
+		return instr{fn: opBinV128[f32x4SubOp]}, true
 	case f32x4Mul:
-		return handleBinaryV128(simdF32x4Mul), nil
+		return instr{fn: opBinV128[f32x4MulOp]}, true
 	case f32x4Div:
-		return handleBinaryV128(simdF32x4Div), nil
+		return instr{fn: opBinV128[f32x4DivOp]}, true
 	case f32x4Min:
-		return handleBinaryV128(simdF32x4Min), nil
+		return instr{fn: opBinV128[f32x4MinOp]}, true
 	case f32x4Max:
-		return handleBinaryV128(simdF32x4Max), nil
+		return instr{fn: opBinV128[f32x4MaxOp]}, true
 	case f32x4Pmin:
-		return handleBinaryV128(simdF32x4Pmin), nil
+		return instr{fn: opBinV128[f32x4PminOp]}, true
 	case f32x4Pmax:
-		return handleBinaryV128(simdF32x4Pmax), nil
+		return instr{fn: opBinV128[f32x4PmaxOp]}, true
 	case f64x2Abs:
-		return handleUnaryV128(simdF64x2Abs), nil
+		return instr{fn: opUnaryV128G[f64x2AbsOp]}, true
 	case f64x2Neg:
-		return handleUnaryV128(simdF64x2Neg), nil
+		return instr{fn: opUnaryV128G[f64x2NegOp]}, true
 	case f64x2Sqrt:
-		return handleUnaryV128(simdF64x2Sqrt), nil
+		return instr{fn: opUnaryV128G[f64x2SqrtOp]}, true
 	case f64x2Add:
-		return handleBinaryV128(simdF64x2Add), nil
+		return instr{fn: opBinV128[f64x2AddOp]}, true
 	case f64x2Sub:
-		return handleBinaryV128(simdF64x2Sub), nil
+		return instr{fn: opBinV128[f64x2SubOp]}, true
 	case f64x2Mul:
-		return handleBinaryV128(simdF64x2Mul), nil
+		return instr{fn: opBinV128[f64x2MulOp]}, true
 	case f64x2Div:
-		return handleBinaryV128(simdF64x2Div), nil
+		return instr{fn: opBinV128[f64x2DivOp]}, true
 	case f64x2Min:
-		return handleBinaryV128(simdF64x2Min), nil
+		return instr{fn: opBinV128[f64x2MinOp]}, true
 	case f64x2Max:
-		return handleBinaryV128(simdF64x2Max), nil
+		return instr{fn: opBinV128[f64x2MaxOp]}, true
 	case f64x2Pmin:
-		return handleBinaryV128(simdF64x2Pmin), nil
+		return instr{fn: opBinV128[f64x2PminOp]}, true
 	case f64x2Pmax:
-		return handleBinaryV128(simdF64x2Pmax), nil
+		return instr{fn: opBinV128[f64x2PmaxOp]}, true
 	case i32x4TruncSatF32x4S:
-		return handleUnaryV128(simdI32x4TruncSatF32x4S), nil
+		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4SOp]}, true
 	case i32x4TruncSatF32x4U:
-		return handleUnaryV128(simdI32x4TruncSatF32x4U), nil
+		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4UOp]}, true
 	case f32x4ConvertI32x4S:
-		return handleUnaryV128(simdF32x4ConvertI32x4S), nil
+		return instr{fn: opUnaryV128G[f32x4ConvertI32x4SOp]}, true
 	case f32x4ConvertI32x4U:
-		return handleUnaryV128(simdF32x4ConvertI32x4U), nil
+		return instr{fn: opUnaryV128G[f32x4ConvertI32x4UOp]}, true
 	case i32x4TruncSatF64x2SZero:
-		return handleUnaryV128(simdI32x4TruncSatF64x2SZero), nil
+		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2SZeroOp]}, true
 	case i32x4TruncSatF64x2UZero:
-		return handleUnaryV128(simdI32x4TruncSatF64x2UZero), nil
+		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2UZeroOp]}, true
 	case f64x2ConvertLowI32x4S:
-		return handleUnaryV128(simdF64x2ConvertLowI32x4S), nil
+		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4SOp]}, true
 	case f64x2ConvertLowI32x4U:
-		return handleUnaryV128(simdF64x2ConvertLowI32x4U), nil
+		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4UOp]}, true
+	case i32Load:
+		return instr{fn: opI32Load, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load:
+		return instr{fn: opI64Load, a: body[pc+2], b: body[pc+3]}, true
+	case f32Load:
+		return instr{fn: opF32Load, a: body[pc+2], b: body[pc+3]}, true
+	case f64Load:
+		return instr{fn: opF64Load, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load8S:
+		return instr{fn: opI32Load8S, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load8U:
+		return instr{fn: opI32Load8U, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load16S:
+		return instr{fn: opI32Load16S, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load16U:
+		return instr{fn: opI32Load16U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load8S:
+		return instr{fn: opI64Load8S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load8U:
+		return instr{fn: opI64Load8U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load16S:
+		return instr{fn: opI64Load16S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load16U:
+		return instr{fn: opI64Load16U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load32S:
+		return instr{fn: opI64Load32S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load32U:
+		return instr{fn: opI64Load32U, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store:
+		return instr{fn: opI32Store, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store:
+		return instr{fn: opI64Store, a: body[pc+2], b: body[pc+3]}, true
+	case f32Store:
+		return instr{fn: opF32Store, a: body[pc+2], b: body[pc+3]}, true
+	case f64Store:
+		return instr{fn: opF64Store, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store8:
+		return instr{fn: opI32Store8, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store16:
+		return instr{fn: opI32Store16, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store8:
+		return instr{fn: opI64Store8, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store16:
+		return instr{fn: opI64Store16, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store32:
+		return instr{fn: opI64Store32, a: body[pc+2], b: body[pc+3]}, true
+	case i32Clz:
+		return instr{fn: opI32Clz}, true
+	case i32Ctz:
+		return instr{fn: opI32Ctz}, true
+	case i32Popcnt:
+		return instr{fn: opI32Popcnt}, true
+	case i32Eqz:
+		return instr{fn: opI32Eqz}, true
+	case i64Clz:
+		return instr{fn: opI64Clz}, true
+	case i64Ctz:
+		return instr{fn: opI64Ctz}, true
+	case i64Popcnt:
+		return instr{fn: opI64Popcnt}, true
+	case i64Eqz:
+		return instr{fn: opI64Eqz}, true
+	case f32Abs:
+		return instr{fn: opF32Abs}, true
+	case f32Neg:
+		return instr{fn: opF32Neg}, true
+	case f32Ceil:
+		return instr{fn: opF32Ceil}, true
+	case f32Floor:
+		return instr{fn: opF32Floor}, true
+	case f32Trunc:
+		return instr{fn: opF32Trunc}, true
+	case f32Nearest:
+		return instr{fn: opF32Nearest}, true
+	case f32Sqrt:
+		return instr{fn: opF32Sqrt}, true
+	case f64Abs:
+		return instr{fn: opF64Abs}, true
+	case f64Neg:
+		return instr{fn: opF64Neg}, true
+	case f64Ceil:
+		return instr{fn: opF64Ceil}, true
+	case f64Floor:
+		return instr{fn: opF64Floor}, true
+	case f64Trunc:
+		return instr{fn: opF64Trunc}, true
+	case f64Nearest:
+		return instr{fn: opF64Nearest}, true
+	case f64Sqrt:
+		return instr{fn: opF64Sqrt}, true
+	case i32WrapI64:
+		return instr{fn: opI32WrapI64}, true
+	case i64ExtendI32S:
+		return instr{fn: opI64ExtendI32S}, true
+	case i64ExtendI32U:
+		return instr{fn: opI64ExtendI32U}, true
+	case i32Extend8S:
+		return instr{fn: opI32Extend8S}, true
+	case i32Extend16S:
+		return instr{fn: opI32Extend16S}, true
+	case i64Extend8S:
+		return instr{fn: opI64Extend8S}, true
+	case i64Extend16S:
+		return instr{fn: opI64Extend16S}, true
+	case i64Extend32S:
+		return instr{fn: opI64Extend32S}, true
+	case f32ConvertI32S:
+		return instr{fn: opF32ConvertI32S}, true
+	case f32ConvertI32U:
+		return instr{fn: opF32ConvertI32U}, true
+	case f32ConvertI64S:
+		return instr{fn: opF32ConvertI64S}, true
+	case f32ConvertI64U:
+		return instr{fn: opF32ConvertI64U}, true
+	case f32DemoteF64:
+		return instr{fn: opF32DemoteF64}, true
+	case f64ConvertI32S:
+		return instr{fn: opF64ConvertI32S}, true
+	case f64ConvertI32U:
+		return instr{fn: opF64ConvertI32U}, true
+	case f64ConvertI64S:
+		return instr{fn: opF64ConvertI64S}, true
+	case f64ConvertI64U:
+		return instr{fn: opF64ConvertI64U}, true
+	case f64PromoteF32:
+		return instr{fn: opF64PromoteF32}, true
+	case i32ReinterpretF32:
+		return instr{fn: opI32ReinterpretF32}, true
+	case i64ReinterpretF64:
+		return instr{fn: opI64ReinterpretF64}, true
+	case f32ReinterpretI32:
+		return instr{fn: opF32ReinterpretI32}, true
+	case f64ReinterpretI64:
+		return instr{fn: opF64ReinterpretI64}, true
+	case i32TruncSatF32S:
+		return instr{fn: opI32TruncSatF32S}, true
+	case i32TruncSatF32U:
+		return instr{fn: opI32TruncSatF32U}, true
+	case i32TruncSatF64S:
+		return instr{fn: opI32TruncSatF64S}, true
+	case i32TruncSatF64U:
+		return instr{fn: opI32TruncSatF64U}, true
+	case i64TruncSatF32S:
+		return instr{fn: opI64TruncSatF32S}, true
+	case i64TruncSatF32U:
+		return instr{fn: opI64TruncSatF32U}, true
+	case i64TruncSatF64S:
+		return instr{fn: opI64TruncSatF64S}, true
+	case i64TruncSatF64U:
+		return instr{fn: opI64TruncSatF64U}, true
+	case i8x16Splat:
+		return instr{fn: opI8x16Splat}, true
+	case i16x8Splat:
+		return instr{fn: opI16x8Splat}, true
+	case i32x4Splat:
+		return instr{fn: opI32x4Splat}, true
+	case i64x2Splat:
+		return instr{fn: opI64x2Splat}, true
+	case f32x4Splat:
+		return instr{fn: opF32x4Splat}, true
+	case f64x2Splat:
+		return instr{fn: opF64x2Splat}, true
+	case v128AnyTrue:
+		return instr{fn: opV128AnyTrue}, true
+	case i8x16AllTrue:
+		return instr{fn: opI8x16AllTrue}, true
+	case i8x16Bitmask:
+		return instr{fn: opI8x16Bitmask}, true
+	case i16x8AllTrue:
+		return instr{fn: opI16x8AllTrue}, true
+	case i16x8Bitmask:
+		return instr{fn: opI16x8Bitmask}, true
+	case i32x4AllTrue:
+		return instr{fn: opI32x4AllTrue}, true
+	case i32x4Bitmask:
+		return instr{fn: opI32x4Bitmask}, true
+	case i64x2AllTrue:
+		return instr{fn: opI64x2AllTrue}, true
+	case i64x2Bitmask:
+		return instr{fn: opI64x2Bitmask}, true
+	case tableGet:
+		return instr{fn: opTableGet, a: body[pc+1]}, true
+	case tableSet:
+		return instr{fn: opTableSet, a: body[pc+1]}, true
+	case memoryInit:
+		return instr{fn: opMemoryInit, a: body[pc+1], b: body[pc+2]}, true
+	case memoryCopy:
+		return instr{fn: opMemoryCopy, a: body[pc+1], b: body[pc+2]}, true
+	case memoryFill:
+		return instr{fn: opMemoryFill, a: body[pc+1]}, true
+	case dataDrop:
+		return instr{fn: opDataDrop, a: body[pc+1]}, true
+	case tableInit:
+		return instr{fn: opTableInit, a: body[pc+1], b: body[pc+2]}, true
+	case elemDrop:
+		return instr{fn: opElemDrop, a: body[pc+1]}, true
+	case tableCopy:
+		return instr{fn: opTableCopy, a: body[pc+1], b: body[pc+2]}, true
+	case tableGrow:
+		return instr{fn: opTableGrow, a: body[pc+1]}, true
+	case tableSize:
+		return instr{fn: opTableSize, a: body[pc+1]}, true
+	case tableFill:
+		return instr{fn: opTableFill, a: body[pc+1]}, true
+	case i8x16ExtractLaneS:
+		return instr{fn: opI8x16ExtractLaneS, a: body[pc+1]}, true
+	case i8x16ExtractLaneU:
+		return instr{fn: opI8x16ExtractLaneU, a: body[pc+1]}, true
+	case i16x8ExtractLaneS:
+		return instr{fn: opI16x8ExtractLaneS, a: body[pc+1]}, true
+	case i16x8ExtractLaneU:
+		return instr{fn: opI16x8ExtractLaneU, a: body[pc+1]}, true
+	case i32x4ExtractLane:
+		return instr{fn: opI32x4ExtractLane, a: body[pc+1]}, true
+	case i64x2ExtractLane:
+		return instr{fn: opI64x2ExtractLane, a: body[pc+1]}, true
+	case f32x4ExtractLane:
+		return instr{fn: opF32x4ExtractLane, a: body[pc+1]}, true
+	case f64x2ExtractLane:
+		return instr{fn: opF64x2ExtractLane, a: body[pc+1]}, true
+	case i8x16ReplaceLane:
+		return instr{fn: opI8x16ReplaceLane, a: body[pc+1]}, true
+	case i16x8ReplaceLane:
+		return instr{fn: opI16x8ReplaceLane, a: body[pc+1]}, true
+	case i32x4ReplaceLane:
+		return instr{fn: opI32x4ReplaceLane, a: body[pc+1]}, true
+	case i64x2ReplaceLane:
+		return instr{fn: opI64x2ReplaceLane, a: body[pc+1]}, true
+	case f32x4ReplaceLane:
+		return instr{fn: opF32x4ReplaceLane, a: body[pc+1]}, true
+	case f64x2ReplaceLane:
+		return instr{fn: opF64x2ReplaceLane, a: body[pc+1]}, true
+	case v128Load8x8S:
+		return instr{fn: opV128Load8x8S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8x8U:
+		return instr{fn: opV128Load8x8U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16x4S:
+		return instr{fn: opV128Load16x4S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16x4U:
+		return instr{fn: opV128Load16x4U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32x2S:
+		return instr{fn: opV128Load32x2S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32x2U:
+		return instr{fn: opV128Load32x2U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8Splat:
+		return instr{fn: opV128Load8Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16Splat:
+		return instr{fn: opV128Load16Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32Splat:
+		return instr{fn: opV128Load32Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load64Splat:
+		return instr{fn: opV128Load64Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32Zero:
+		return instr{fn: opV128Load32Zero, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load64Zero:
+		return instr{fn: opV128Load64Zero, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8Lane:
+		return instr{fn: opV128Load8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load16Lane:
+		return instr{fn: opV128Load16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load32Lane:
+		return instr{fn: opV128Load32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load64Lane:
+		return instr{fn: opV128Load64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store8Lane:
+		return instr{fn: opV128Store8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store16Lane:
+		return instr{fn: opV128Store16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store32Lane:
+		return instr{fn: opV128Store32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store64Lane:
+		return instr{fn: opV128Store64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Const:
+		return instr{fn: opV128Const, a: body[pc+1], b: body[pc+2]}, true
+	case v128Load:
+		return instr{fn: opV128Load, a: body[pc+2], b: body[pc+3]}, true
+	case v128Store:
+		return instr{fn: opV128Store, a: body[pc+2], b: body[pc+3]}, true
+	case v128Bitselect:
+		return instr{fn: opTernaryV128[v128BitselectOp]}, true
+	case i8x16Shuffle:
+		var a, b uint64
+		for i := 0; i < 8; i++ {
+			a |= body[pc+1+i] << (8 * i)
+			b |= body[pc+1+8+i] << (8 * i)
+		}
+		return instr{fn: opI8x16Shuffle, a: a, b: b}, true
 	default:
-		return nil, fmt.Errorf("unknown opcode %d", op)
+		return instr{}, false
 	}
 }
 
-// safe wraps a body that may trap; a non-nil error halts with the trap set.
-func safe(body func(c *callFrame) error) frame {
-	return func(c *callFrame) int {
-		if err := body(c); err != nil {
-			c.trap = err
-			return trap
-		}
-		return advance
-	}
+func opNop(c *callFrame, in *instr) int         { return advance }
+func opUnreachable(c *callFrame, in *instr) int { c.trap = errUnreachable; return trap }
+func opDrop(c *callFrame, in *instr) int        { c.vm.stack.drop(); return advance }
+
+func opI32Const(c *callFrame, in *instr) int { c.vm.stack.pushInt32(int32(in.a)); return advance }
+func opI64Const(c *callFrame, in *instr) int { c.vm.stack.pushInt64(int64(in.a)); return advance }
+func opF32Const(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(math.Float32frombits(uint32(in.a)))
+	return advance
+}
+func opF64Const(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(math.Float64frombits(in.a))
+	return advance
 }
 
-func handleBrTable(labels []uint32, defaultLabel uint32) frame {
-	return func(c *callFrame) int {
-		index := uint32(c.vm.stack.popInt32())
-		if index < uint32(len(labels)) {
-			return c.brToLabel(int(labels[index]))
-		}
-		return c.brToLabel(int(defaultLabel))
-	}
+func opLocalGet(c *callFrame, in *instr) int { c.vm.stack.push(c.locals[in.a]); return advance }
+func opLocalSet(c *callFrame, in *instr) int { c.locals[in.a] = c.vm.stack.pop(); return advance }
+func opLocalTee(c *callFrame, in *instr) int {
+	c.locals[in.a] = c.vm.stack.data[len(c.vm.stack.data)-1]
+	return advance
 }
 
-func handleIf(afterEndIp, elseIp int, inputCount, outputCount uint32) frame {
-	return func(c *callFrame) int {
-		condition := c.vm.stack.popInt32()
-		c.controlStack = append(c.controlStack, controlFrame{
-			targetIp:    int32(afterEndIp),
-			arity:       outputCount,
-			stackHeight: c.vm.stack.size() - inputCount,
-		})
-		if condition == 0 {
-			return elseIp
-		}
-		return advance
-	}
+// Binary integer arithmetic: pop b, apply op to (top, b) in place. The op is a
+// zero-size type parameter, so opBinI32[addI32] is a shared allocation-free
+// handler.
+type binOpI32 interface{ apply(a, b int32) int32 }
+
+func opBinI32[O binOpI32](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt32()
+	data := c.vm.stack.data
+	last := len(data) - 1
+	data[last] = i32(o.apply(data[last].int32(), b))
+	return advance
 }
 
-func handleElse() frame {
-	return func(c *callFrame) int {
-		target := c.controlStack[len(c.controlStack)-1].targetIp
+type binOpI64 interface{ apply(a, b int64) int64 }
+
+func opBinI64[O binOpI64](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt64()
+	data := c.vm.stack.data
+	last := len(data) - 1
+	data[last] = i64(o.apply(data[last].int64(), b))
+	return advance
+}
+
+type cmpOpI32 interface{ apply(a, b int32) bool }
+
+func opCmpI32[O cmpOpI32](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt32()
+	a := c.vm.stack.popInt32()
+	c.vm.stack.pushInt32(boolToInt32(o.apply(a, b)))
+	return advance
+}
+
+type cmpOpI64 interface{ apply(a, b int64) bool }
+
+func opCmpI64[O cmpOpI64](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt64()
+	a := c.vm.stack.popInt64()
+	c.vm.stack.pushInt32(boolToInt32(o.apply(a, b)))
+	return advance
+}
+
+type addI32 struct{}
+type subI32 struct{}
+type mulI32 struct{}
+type andI32 struct{}
+type orI32 struct{}
+type xorI32 struct{}
+type shlI32 struct{}
+type shrSI32 struct{}
+type shrUI32 struct{}
+type rotlI32 struct{}
+type rotrI32 struct{}
+
+func (addI32) apply(a, b int32) int32  { return a + b }
+func (subI32) apply(a, b int32) int32  { return a - b }
+func (mulI32) apply(a, b int32) int32  { return a * b }
+func (andI32) apply(a, b int32) int32  { return a & b }
+func (orI32) apply(a, b int32) int32   { return a | b }
+func (xorI32) apply(a, b int32) int32  { return a ^ b }
+func (shlI32) apply(a, b int32) int32  { return a << (uint32(b) % 32) }
+func (shrSI32) apply(a, b int32) int32 { return a >> (uint32(b) % 32) }
+func (shrUI32) apply(a, b int32) int32 { return shrU32(a, b) }
+func (rotlI32) apply(a, b int32) int32 { return rotl32(a, b) }
+func (rotrI32) apply(a, b int32) int32 { return rotr32(a, b) }
+
+type addI64 struct{}
+type subI64 struct{}
+type mulI64 struct{}
+type andI64 struct{}
+type orI64 struct{}
+type xorI64 struct{}
+type shlI64 struct{}
+type shrSI64 struct{}
+type shrUI64 struct{}
+type rotlI64 struct{}
+type rotrI64 struct{}
+
+func (addI64) apply(a, b int64) int64  { return a + b }
+func (subI64) apply(a, b int64) int64  { return a - b }
+func (mulI64) apply(a, b int64) int64  { return a * b }
+func (andI64) apply(a, b int64) int64  { return a & b }
+func (orI64) apply(a, b int64) int64   { return a | b }
+func (xorI64) apply(a, b int64) int64  { return a ^ b }
+func (shlI64) apply(a, b int64) int64  { return shl64(a, b) }
+func (shrSI64) apply(a, b int64) int64 { return shrS64(a, b) }
+func (shrUI64) apply(a, b int64) int64 { return shrU64(a, b) }
+func (rotlI64) apply(a, b int64) int64 { return rotl64(a, b) }
+func (rotrI64) apply(a, b int64) int64 { return rotr64(a, b) }
+
+type eqI32 struct{}
+type neI32 struct{}
+type ltSI32 struct{}
+type ltUI32 struct{}
+type gtSI32 struct{}
+type gtUI32 struct{}
+type leSI32 struct{}
+type leUI32 struct{}
+type geSI32 struct{}
+type geUI32 struct{}
+
+func (eqI32) apply(a, b int32) bool  { return equal(a, b) }
+func (neI32) apply(a, b int32) bool  { return notEqual(a, b) }
+func (ltSI32) apply(a, b int32) bool { return lessThan(a, b) }
+func (ltUI32) apply(a, b int32) bool { return lessThanU32(a, b) }
+func (gtSI32) apply(a, b int32) bool { return greaterThan(a, b) }
+func (gtUI32) apply(a, b int32) bool { return greaterThanU32(a, b) }
+func (leSI32) apply(a, b int32) bool { return lessOrEqual(a, b) }
+func (leUI32) apply(a, b int32) bool { return lessOrEqualU32(a, b) }
+func (geSI32) apply(a, b int32) bool { return greaterOrEqual(a, b) }
+func (geUI32) apply(a, b int32) bool { return greaterOrEqualU32(a, b) }
+
+type eqI64 struct{}
+type neI64 struct{}
+type ltSI64 struct{}
+type ltUI64 struct{}
+type gtSI64 struct{}
+type gtUI64 struct{}
+type leSI64 struct{}
+type leUI64 struct{}
+type geSI64 struct{}
+type geUI64 struct{}
+
+func (eqI64) apply(a, b int64) bool  { return equal(a, b) }
+func (neI64) apply(a, b int64) bool  { return notEqual(a, b) }
+func (ltSI64) apply(a, b int64) bool { return lessThan(a, b) }
+func (ltUI64) apply(a, b int64) bool { return lessThanU64(a, b) }
+func (gtSI64) apply(a, b int64) bool { return greaterThan(a, b) }
+func (gtUI64) apply(a, b int64) bool { return greaterThanU64(a, b) }
+func (leSI64) apply(a, b int64) bool { return lessOrEqual(a, b) }
+func (leUI64) apply(a, b int64) bool { return lessOrEqualU64(a, b) }
+func (geSI64) apply(a, b int64) bool { return greaterOrEqual(a, b) }
+func (geUI64) apply(a, b int64) bool { return greaterOrEqualU64(a, b) }
+
+// Generic handlers for the remaining operand-free families. Each is shared by
+// every opcode in the family; the operation is the zero-size type parameter.
+
+type binOpF32 interface{ apply(a, b float32) float32 }
+
+func opBinF32[O binOpF32](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popFloat32()
+	a := c.vm.stack.popFloat32()
+	c.vm.stack.pushFloat32(o.apply(a, b))
+	return advance
+}
+
+type binOpF64 interface{ apply(a, b float64) float64 }
+
+func opBinF64[O binOpF64](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popFloat64()
+	a := c.vm.stack.popFloat64()
+	c.vm.stack.pushFloat64(o.apply(a, b))
+	return advance
+}
+
+type cmpOpF32 interface{ apply(a, b float32) bool }
+
+func opCmpF32[O cmpOpF32](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popFloat32()
+	a := c.vm.stack.popFloat32()
+	c.vm.stack.pushInt32(boolToInt32(o.apply(a, b)))
+	return advance
+}
+
+type cmpOpF64 interface{ apply(a, b float64) bool }
+
+func opCmpF64[O cmpOpF64](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popFloat64()
+	a := c.vm.stack.popFloat64()
+	c.vm.stack.pushInt32(boolToInt32(o.apply(a, b)))
+	return advance
+}
+
+type safeOpI32 interface {
+	apply(a, b int32) (int32, error)
+}
+
+func opSafeBinI32[O safeOpI32](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt32()
+	a := c.vm.stack.popInt32()
+	r, err := o.apply(a, b)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt32(r)
+	return advance
+}
+
+type safeOpI64 interface {
+	apply(a, b int64) (int64, error)
+}
+
+func opSafeBinI64[O safeOpI64](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popInt64()
+	a := c.vm.stack.popInt64()
+	r, err := o.apply(a, b)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt64(r)
+	return advance
+}
+
+type usafeOpF32 interface {
+	apply(a float32) (int32, error)
+}
+
+func opUnarySafeF32[O usafeOpF32](c *callFrame, in *instr) int {
+	var o O
+	r, err := o.apply(c.vm.stack.popFloat32())
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt32(r)
+	return advance
+}
+
+type usafeOpF64 interface {
+	apply(a float64) (int32, error)
+}
+
+func opUnarySafeF64[O usafeOpF64](c *callFrame, in *instr) int {
+	var o O
+	r, err := o.apply(c.vm.stack.popFloat64())
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt32(r)
+	return advance
+}
+
+type truncOpF32 interface {
+	apply(a float32) (int64, error)
+}
+
+func opTruncF32I64[O truncOpF32](c *callFrame, in *instr) int {
+	var o O
+	r, err := o.apply(c.vm.stack.popFloat32())
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt64(r)
+	return advance
+}
+
+type truncOpF64 interface {
+	apply(a float64) (int64, error)
+}
+
+func opTruncF64I64[O truncOpF64](c *callFrame, in *instr) int {
+	var o O
+	r, err := o.apply(c.vm.stack.popFloat64())
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt64(r)
+	return advance
+}
+
+type binOpV128 interface {
+	apply(a, b V128Value) V128Value
+}
+
+func opBinV128[O binOpV128](c *callFrame, in *instr) int {
+	var o O
+	b := c.vm.stack.popV128()
+	a := c.vm.stack.popV128()
+	c.vm.stack.pushV128(o.apply(a, b))
+	return advance
+}
+
+type unaryOpV128 interface {
+	apply(a V128Value) V128Value
+}
+
+func opUnaryV128G[O unaryOpV128](c *callFrame, in *instr) int {
+	var o O
+	c.vm.stack.pushV128(o.apply(c.vm.stack.popV128()))
+	return advance
+}
+
+type shiftOpV128 interface {
+	apply(v V128Value, shift int32) V128Value
+}
+
+func opShiftV128[O shiftOpV128](c *callFrame, in *instr) int {
+	var o O
+	shift := c.vm.stack.popInt32()
+	v := c.vm.stack.popV128()
+	c.vm.stack.pushV128(o.apply(v, shift))
+	return advance
+}
+
+func opV128Const(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(V128Value{Low: in.a, High: in.b})
+	return advance
+}
+
+func opV128Load(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadV128(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(identityV128(v))
+	return advance
+}
+
+func opV128Store(c *callFrame, in *instr) int {
+	val := c.vm.stack.popV128()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreV128(uint32(in.b), index, val); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opI8x16Shuffle(c *callFrame, in *instr) int {
+	a, b := in.a, in.b
+	v2 := c.vm.stack.popV128()
+	v1 := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdI8x16Shuffle(v1, v2,
+		byte(a), byte(a>>8), byte(a>>16), byte(a>>24), byte(a>>32), byte(a>>40), byte(a>>48), byte(a>>56),
+		byte(b), byte(b>>8), byte(b>>16), byte(b>>24), byte(b>>32), byte(b>>40), byte(b>>48), byte(b>>56)))
+	return advance
+}
+
+type ternaryOpV128 interface {
+	apply(v1, v2, v3 V128Value) V128Value
+}
+
+func opTernaryV128[O ternaryOpV128](c *callFrame, in *instr) int {
+	var o O
+	v3 := c.vm.stack.popV128()
+	v2 := c.vm.stack.popV128()
+	v1 := c.vm.stack.popV128()
+	c.vm.stack.pushV128(o.apply(v1, v2, v3))
+	return advance
+}
+
+type v128BitselectOp struct{}
+
+func (v128BitselectOp) apply(v1, v2, v3 V128Value) V128Value { return simdV128Bitselect(v1, v2, v3) }
+
+func opI8x16ExtractLaneS(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI8x16ExtractLaneS(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI8x16ExtractLaneU(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI8x16ExtractLaneU(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI16x8ExtractLaneS(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI16x8ExtractLaneS(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI16x8ExtractLaneU(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI16x8ExtractLaneU(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI32x4ExtractLane(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI32x4ExtractLane(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI64x2ExtractLane(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(simdI64x2ExtractLane(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opF32x4ExtractLane(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(simdF32x4ExtractLane(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opF64x2ExtractLane(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(simdF64x2ExtractLane(c.vm.stack.popV128(), uint32(in.a)))
+	return advance
+}
+
+func opI8x16ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popInt32()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdI8x16ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opI16x8ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popInt32()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdI16x8ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opI32x4ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popInt32()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdI32x4ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opI64x2ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popInt64()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdI64x2ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opF32x4ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popFloat32()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdF32x4ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opF64x2ReplaceLane(c *callFrame, in *instr) int {
+	laneValue := c.vm.stack.popFloat64()
+	vector := c.vm.stack.popV128()
+	c.vm.stack.pushV128(simdF64x2ReplaceLane(vector, uint32(in.a), laneValue))
+	return advance
+}
+
+func opV128Load8x8S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load8x8S(data))
+	return advance
+}
+
+func opV128Load8x8U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load8x8U(data))
+	return advance
+}
+
+func opV128Load16x4S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load16x4S(data))
+	return advance
+}
+
+func opV128Load16x4U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load16x4U(data))
+	return advance
+}
+
+func opV128Load32x2S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load32x2S(data))
+	return advance
+}
+
+func opV128Load32x2U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load32x2U(data))
+	return advance
+}
+
+func opV128Load8Splat(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 1)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdI8x16SplatFromBytes(data))
+	return advance
+}
+
+func opV128Load16Splat(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 2)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdI16x8SplatFromBytes(data))
+	return advance
+}
+
+func opV128Load32Splat(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 4)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdI32x4SplatFromBytes(data))
+	return advance
+}
+
+func opV128Load64Splat(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdI64x2SplatFromBytes(data))
+	return advance
+}
+
+func opV128Load32Zero(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 4)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load32Zero(data))
+	return advance
+}
+
+func opV128Load64Zero(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := c.vm.stack.popInt32()
+	data, err := memory.Get(uint32(in.b), uint32(index), 8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdV128Load64Zero(data))
+	return advance
+}
+
+func opV128Load8Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneValue, err := memory.Get(uint32(in.b>>32), uint32(index), 8/8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdLoadLane(v, uint32(in.b), laneValue))
+	return advance
+}
+
+func opV128Load16Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneValue, err := memory.Get(uint32(in.b>>32), uint32(index), 16/8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdLoadLane(v, uint32(in.b), laneValue))
+	return advance
+}
+
+func opV128Load32Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneValue, err := memory.Get(uint32(in.b>>32), uint32(index), 32/8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdLoadLane(v, uint32(in.b), laneValue))
+	return advance
+}
+
+func opV128Load64Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneValue, err := memory.Get(uint32(in.b>>32), uint32(index), 64/8)
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushV128(simdLoadLane(v, uint32(in.b), laneValue))
+	return advance
+}
+
+func opV128Store8Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneIndex := uint32(in.b)
+	lanesPerUint64 := uint32(64 / 8)
+	shift := (laneIndex % lanesPerUint64) * 8
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+	if err := memory.StoreByte(uint32(in.b>>32), uint32(index), byte(val)); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opV128Store16Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneIndex := uint32(in.b)
+	lanesPerUint64 := uint32(64 / 16)
+	shift := (laneIndex % lanesPerUint64) * 16
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+	if err := memory.StoreUint16(uint32(in.b>>32), uint32(index), uint16(val)); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opV128Store32Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneIndex := uint32(in.b)
+	lanesPerUint64 := uint32(64 / 32)
+	shift := (laneIndex % lanesPerUint64) * 32
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+	if err := memory.StoreUint32(uint32(in.b>>32), uint32(index), uint32(val)); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opV128Store64Lane(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	v := c.vm.stack.popV128()
+	index := c.vm.stack.popInt32()
+	laneIndex := uint32(in.b)
+	lanesPerUint64 := uint32(64 / 64)
+	shift := (laneIndex % lanesPerUint64) * 64
+	var val uint64
+	if laneIndex < lanesPerUint64 {
+		val = v.Low >> shift
+	} else {
+		val = v.High >> shift
+	}
+	if err := memory.StoreUint64(uint32(in.b>>32), uint32(index), val); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opTableGet(c *callFrame, in *instr) int {
+	table := c.vm.getTable(c, in.a)
+	element, err := table.Get(c.vm.stack.popInt32())
+	if err != nil {
+		c.trap = err
+		return trap
+	}
+	c.vm.stack.pushInt32(element)
+	return advance
+}
+
+func opTableSet(c *callFrame, in *instr) int {
+	table := c.vm.getTable(c, in.a)
+	reference := c.vm.stack.popInt32()
+	index := c.vm.stack.popInt32()
+	if err := table.Set(index, reference); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opMemoryInit(c *callFrame, in *instr) int {
+	data := c.vm.getData(c, in.a)
+	memory := c.vm.getMemory(c, in.b)
+	n, s, d := c.vm.stack.pop3Int32()
+	if err := memory.Init(uint32(n), uint32(s), uint32(d), data.content); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opMemoryCopy(c *callFrame, in *instr) int {
+	destMemory := c.vm.getMemory(c, in.a)
+	srcMemory := c.vm.getMemory(c, in.b)
+	n, s, d := c.vm.stack.pop3Int32()
+	if err := srcMemory.Copy(destMemory, uint32(n), uint32(s), uint32(d)); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opMemoryFill(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	n, val, offset := c.vm.stack.pop3Int32()
+	if err := memory.Fill(uint32(n), uint32(offset), byte(val)); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opDataDrop(c *callFrame, in *instr) int {
+	c.vm.getData(c, in.a).content = nil
+	return advance
+}
+
+func opTableInit(c *callFrame, in *instr) int {
+	element := c.vm.getElement(c, in.a)
+	table := c.vm.getTable(c, in.b)
+	n, s, d := c.vm.stack.pop3Int32()
+	if err := table.Init(n, d, s, element.functionIndexes); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opElemDrop(c *callFrame, in *instr) int {
+	c.vm.getElement(c, in.a).functionIndexes = nil
+	return advance
+}
+
+func opTableCopy(c *callFrame, in *instr) int {
+	destTable := c.vm.getTable(c, in.a)
+	srcTable := c.vm.getTable(c, in.b)
+	n, s, d := c.vm.stack.pop3Int32()
+	if err := srcTable.Copy(destTable, n, s, d); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opTableGrow(c *callFrame, in *instr) int {
+	table := c.vm.getTable(c, in.a)
+	n := c.vm.stack.popInt32()
+	val := c.vm.stack.popInt32()
+	c.vm.stack.pushInt32(table.Grow(n, val))
+	return advance
+}
+
+func opTableSize(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(int32(c.vm.getTable(c, in.a).Size()))
+	return advance
+}
+
+func opTableFill(c *callFrame, in *instr) int {
+	table := c.vm.getTable(c, in.a)
+	n, val, i := c.vm.stack.pop3Int32()
+	if err := table.Fill(n, i, val); err != nil {
+		c.trap = err
+		return trap
+	}
+	return advance
+}
+
+func opI32Clz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(clz32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32Ctz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(ctz32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32Popcnt(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(popcnt32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32Eqz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt32() == 0))
+	return advance
+}
+
+func opI64Clz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(clz64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64Ctz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(ctz64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64Popcnt(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(popcnt64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64Eqz(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt64() == 0))
+	return advance
+}
+
+func opF32Abs(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(abs(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF32Neg(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(-c.vm.stack.popFloat32())
+	return advance
+}
+
+func opF32Ceil(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(ceil(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF32Floor(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(floor(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF32Trunc(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(trunc(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF32Nearest(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(nearest(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF32Sqrt(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(sqrt(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF64Abs(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(abs(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64Neg(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(-c.vm.stack.popFloat64())
+	return advance
+}
+
+func opF64Ceil(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(ceil(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64Floor(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(floor(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64Trunc(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(trunc(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64Nearest(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(nearest(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64Sqrt(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(sqrt(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opI32WrapI64(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(wrapI64ToI32(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64ExtendI32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(extendI32SToI64(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI64ExtendI32U(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(extendI32UToI64(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32Extend8S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(extend8STo32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32Extend16S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(extend16STo32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI64Extend8S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(extend8STo64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64Extend16S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(extend16STo64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI64Extend32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(extend32STo64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF32ConvertI32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(convertI32SToF32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opF32ConvertI32U(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(convertI32UToF32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opF32ConvertI64S(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(convertI64SToF32(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF32ConvertI64U(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(convertI64UToF32(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF32DemoteF64(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(demoteF64ToF32(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF64ConvertI32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(convertI32SToF64(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opF64ConvertI32U(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(convertI32UToF64(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opF64ConvertI64S(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(convertI64SToF64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF64ConvertI64U(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(convertI64UToF64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF64PromoteF32(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(promoteF32ToF64(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI32ReinterpretF32(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(reinterpretF32ToI32(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI64ReinterpretF64(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(reinterpretF64ToI64(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opF32ReinterpretI32(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat32(reinterpretI32ToF32(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opF64ReinterpretI64(c *callFrame, in *instr) int {
+	c.vm.stack.pushFloat64(reinterpretI64ToF64(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opI32TruncSatF32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(truncSatF32SToI32(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI32TruncSatF32U(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(truncSatF32UToI32(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI32TruncSatF64S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(truncSatF64SToI32(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opI32TruncSatF64U(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(truncSatF64UToI32(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opI64TruncSatF32S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(truncSatF32SToI64(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI64TruncSatF32U(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(truncSatF32UToI64(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opI64TruncSatF64S(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(truncSatF64SToI64(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opI64TruncSatF64U(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt64(truncSatF64UToI64(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opI8x16Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdI8x16Splat(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI16x8Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdI16x8Splat(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI32x4Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdI32x4Splat(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opI64x2Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdI64x2Splat(c.vm.stack.popInt64()))
+	return advance
+}
+
+func opF32x4Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdF32x4Splat(c.vm.stack.popFloat32()))
+	return advance
+}
+
+func opF64x2Splat(c *callFrame, in *instr) int {
+	c.vm.stack.pushV128(simdF64x2Splat(c.vm.stack.popFloat64()))
+	return advance
+}
+
+func opV128AnyTrue(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(c.vm.stack.popV128())))
+	return advance
+}
+
+func opI8x16AllTrue(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(simdI8x16AllTrue(c.vm.stack.popV128())))
+	return advance
+}
+
+func opI8x16Bitmask(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI8x16Bitmask(c.vm.stack.popV128()))
+	return advance
+}
+
+func opI16x8AllTrue(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(c.vm.stack.popV128())))
+	return advance
+}
+
+func opI16x8Bitmask(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI16x8Bitmask(c.vm.stack.popV128()))
+	return advance
+}
+
+func opI32x4AllTrue(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(simdI32x4AllTrue(c.vm.stack.popV128())))
+	return advance
+}
+
+func opI32x4Bitmask(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI32x4Bitmask(c.vm.stack.popV128()))
+	return advance
+}
+
+func opI64x2AllTrue(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(simdI64x2AllTrue(c.vm.stack.popV128())))
+	return advance
+}
+
+func opI64x2Bitmask(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(simdI64x2Bitmask(c.vm.stack.popV128()))
+	return advance
+}
+
+func opBlock(c *callFrame, in *instr) int {
+	c.controlStack = append(c.controlStack, controlFrame{
+		targetIp:    int32(in.a),
+		arity:       uint32(in.b >> 32),
+		stackHeight: c.vm.stack.size() - uint32(in.b),
+	})
+	return advance
+}
+
+func opLoop(c *callFrame, in *instr) int {
+	c.controlStack = append(c.controlStack, controlFrame{
+		isLoop:      true,
+		targetIp:    int32(in.a),
+		arity:       uint32(in.b),
+		stackHeight: c.vm.stack.size() - uint32(in.b),
+	})
+	return advance
+}
+
+func opIf(c *callFrame, in *instr) int {
+	condition := c.vm.stack.popInt32()
+	c.controlStack = append(c.controlStack, controlFrame{
+		targetIp:    int32(in.a >> 32),
+		arity:       uint32(in.b >> 32),
+		stackHeight: c.vm.stack.size() - uint32(in.b),
+	})
+	if condition == 0 {
+		return int(int32(in.a))
+	}
+	return advance
+}
+
+func opElse(c *callFrame, in *instr) int {
+	target := c.controlStack[len(c.controlStack)-1].targetIp
+	c.controlStack = c.controlStack[:len(c.controlStack)-1]
+	return int(target)
+}
+
+func opEnd(c *callFrame, in *instr) int {
+	if len(c.controlStack) > 0 {
 		c.controlStack = c.controlStack[:len(c.controlStack)-1]
-		return int(target)
 	}
+	return advance
 }
 
-func handleEnd() frame {
-	return func(c *callFrame) int {
-		if len(c.controlStack) > 0 {
-			c.controlStack = c.controlStack[:len(c.controlStack)-1]
-		}
-		return advance
+func opBr(c *callFrame, in *instr) int { return c.brToLabel(int(in.a)) }
+
+func opBrTable(c *callFrame, in *instr) int {
+	labels := c.vm.brTables[in.a]
+	index := uint32(c.vm.stack.popInt32())
+	if index < uint32(len(labels)) {
+		return c.brToLabel(int(labels[index]))
 	}
+	return c.brToLabel(int(in.b))
 }
 
-func handleCall(funcIndex uint64) frame {
-	return safe(func(c *callFrame) error {
-		function := c.vm.store.funcs[c.module.funcAddrs[funcIndex]]
-		return c.vm.invokeFunction(function)
-	})
-}
-
-func handleCallIndirect(typeIndex, tableIndex uint64) frame {
-	return safe(func(c *callFrame) error {
-		expectedType := c.module.types[typeIndex]
-		table := c.vm.getTable(c, tableIndex)
-		elementIndex := c.vm.stack.popInt32()
-		tableElement, err := table.Get(elementIndex)
-		if err != nil {
-			return err
-		}
-		if tableElement == NullReference {
-			return fmt.Errorf("uninitialized element %d", elementIndex)
-		}
-		function := c.vm.store.funcs[tableElement]
-		if !function.GetType().Equal(expectedType) {
-			return errIndirectCallTypeMismatch
-		}
-		return c.vm.invokeFunction(function)
-	})
-}
-
-func handleSelect() frame {
-	return func(c *callFrame) int {
-		data := c.vm.stack.data
-		n := len(data)
-		var top value
-		if data[n-1].int32() != 0 {
-			top = data[n-3]
-		} else {
-			top = data[n-2]
-		}
-		data[n-3] = top
-		c.vm.stack.data = data[:n-2]
-
-		return advance
+func opBrIf(c *callFrame, in *instr) int {
+	if c.vm.stack.popInt32() != 0 {
+		return c.brToLabel(int(in.a))
 	}
+	return advance
 }
 
-func handleGlobalGet(idx uint64) frame {
-	return func(c *callFrame) int {
-		global := c.vm.getGlobal(c, idx)
-		c.vm.stack.push(global.value)
+func opReturn(c *callFrame, in *instr) int { return c.brToLabel(len(c.controlStack) - 1) }
 
-		return advance
+func opCall(c *callFrame, in *instr) int {
+	function := c.vm.store.funcs[c.module.funcAddrs[in.a]]
+	if err := c.vm.invokeFunction(function); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-func handleGlobalSet(idx uint64) frame {
-	return func(c *callFrame) int {
-		global := c.vm.getGlobal(c, idx)
-		global.value = c.vm.stack.pop()
-
-		return advance
+func opCallIndirect(c *callFrame, in *instr) int {
+	expectedType := c.module.types[in.a]
+	table := c.vm.getTable(c, in.b)
+	elementIndex := c.vm.stack.popInt32()
+	tableElement, err := table.Get(elementIndex)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
-}
-
-func handleTableGet(idx uint64) frame {
-	return safe(func(c *callFrame) error {
-		table := c.vm.getTable(c, idx)
-		index := c.vm.stack.popInt32()
-		element, err := table.Get(index)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt32(element)
-		return nil
-	})
-}
-
-func handleTableSet(idx uint64) frame {
-	return safe(func(c *callFrame) error {
-		table := c.vm.getTable(c, idx)
-		reference := c.vm.stack.popInt32()
-		index := c.vm.stack.popInt32()
-		return table.Set(index, reference)
-	})
-}
-
-func handleMemorySize(idx uint64) frame {
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, idx)
-		c.vm.stack.pushInt32(memory.Size())
-
-		return advance
+	if tableElement == NullReference {
+		c.trap = fmt.Errorf("uninitialized element %d", elementIndex)
+		return trap
 	}
-}
-
-func handleMemoryGrow(idx uint64) frame {
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, idx)
-		pages := c.vm.stack.popInt32()
-		oldSize := memory.Grow(pages)
-		c.vm.stack.pushInt32(oldSize)
-
-		return advance
+	function := c.vm.store.funcs[tableElement]
+	if !function.GetType().Equal(expectedType) {
+		c.trap = errIndirectCallTypeMismatch
+		return trap
 	}
-}
-
-func handleRefFunc(idx uint64) frame {
-	return func(c *callFrame) int {
-		storeIndex := c.module.funcAddrs[idx]
-		c.vm.stack.pushInt32(int32(storeIndex))
-
-		return advance
+	if err := c.vm.invokeFunction(function); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-func handleRefIsNull() frame {
-	return func(c *callFrame) int {
-		top := c.vm.stack.popInt32()
-		c.vm.stack.pushInt32(boolToInt32(top == NullReference))
-
-		return advance
+func opSelect(c *callFrame, in *instr) int {
+	data := c.vm.stack.data
+	n := len(data)
+	var top value
+	if data[n-1].int32() != 0 {
+		top = data[n-3]
+	} else {
+		top = data[n-2]
 	}
+	data[n-3] = top
+	c.vm.stack.data = data[:n-2]
+	return advance
 }
 
-func handleMemoryInit(dataIdx, memIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		data := c.vm.getData(c, dataIdx)
-		memory := c.vm.getMemory(c, memIdx)
-		n, s, d := c.vm.stack.pop3Int32()
-		return memory.Init(uint32(n), uint32(s), uint32(d), data.content)
-	})
+func opGlobalGet(c *callFrame, in *instr) int {
+	c.vm.stack.push(c.vm.getGlobal(c, in.a).value)
+	return advance
 }
 
-func handleDataDrop(dataIdx uint64) frame {
-	return func(c *callFrame) int {
-		dataSegment := c.vm.getData(c, dataIdx)
-		dataSegment.content = nil
+func opGlobalSet(c *callFrame, in *instr) int {
+	c.vm.getGlobal(c, in.a).value = c.vm.stack.pop()
+	return advance
+}
 
-		return advance
+func opMemorySize(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(c.vm.getMemory(c, in.a).Size())
+	return advance
+}
+
+func opMemoryGrow(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	c.vm.stack.pushInt32(memory.Grow(c.vm.stack.popInt32()))
+	return advance
+}
+
+func opRefIsNull(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(boolToInt32(c.vm.stack.popInt32() == NullReference))
+	return advance
+}
+
+func opRefNull(c *callFrame, in *instr) int { c.vm.stack.pushInt32(NullReference); return advance }
+
+func opRefFunc(c *callFrame, in *instr) int {
+	c.vm.stack.pushInt32(int32(c.module.funcAddrs[in.a]))
+	return advance
+}
+
+func opI32Load(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint32(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt32(uint32ToInt32(v))
+	return advance
 }
 
-func handleMemoryCopy(destIdx, srcIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		destMemory := c.vm.getMemory(c, destIdx)
-		srcMemory := c.vm.getMemory(c, srcIdx)
-		n, s, d := c.vm.stack.pop3Int32()
-		return srcMemory.Copy(destMemory, uint32(n), uint32(s), uint32(d))
-	})
-}
-
-func handleMemoryFill(memIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		memory := c.vm.getMemory(c, memIdx)
-		n, val, offset := c.vm.stack.pop3Int32()
-		return memory.Fill(uint32(n), uint32(offset), byte(val))
-	})
-}
-
-func handleTableInit(elemIdx, tableIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		element := c.vm.getElement(c, elemIdx)
-		table := c.vm.getTable(c, tableIdx)
-		n, s, d := c.vm.stack.pop3Int32()
-		// element.functionIndexes is nil for dropped, active, and declarative
-		// segments; only passive segments retain their entries until elem.drop.
-		return table.Init(n, d, s, element.functionIndexes)
-	})
-}
-
-func handleElemDrop(elemIdx uint64) frame {
-	return func(c *callFrame) int {
-		element := c.vm.getElement(c, elemIdx)
-		element.functionIndexes = nil
-
-		return advance
+func opI64Load(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint64(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(uint64ToInt64(v))
+	return advance
 }
 
-func handleTableCopy(destIdx, srcIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		destTable := c.vm.getTable(c, destIdx)
-		srcTable := c.vm.getTable(c, srcIdx)
-		n, s, d := c.vm.stack.pop3Int32()
-		return srcTable.Copy(destTable, n, s, d)
-	})
-}
-
-func handleTableGrow(tableIdx uint64) frame {
-	return func(c *callFrame) int {
-		table := c.vm.getTable(c, tableIdx)
-		n := c.vm.stack.popInt32()
-		val := c.vm.stack.popInt32()
-		c.vm.stack.pushInt32(table.Grow(n, val))
-
-		return advance
+func opF32Load(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint32(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushFloat32(math.Float32frombits(v))
+	return advance
 }
 
-func handleTableSize(tableIdx uint64) frame {
-	return func(c *callFrame) int {
-		table := c.vm.getTable(c, tableIdx)
-		c.vm.stack.pushInt32(int32(table.Size()))
-
-		return advance
+func opF64Load(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint64(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushFloat64(math.Float64frombits(v))
+	return advance
 }
 
-func handleTableFill(tableIdx uint64) frame {
-	return safe(func(c *callFrame) error {
-		table := c.vm.getTable(c, tableIdx)
-		n, val, i := c.vm.stack.pop3Int32()
-		return table.Fill(n, i, val)
-	})
-}
-
-func handleI8x16Shuffle(lanes [16]byte) frame {
-	return func(c *callFrame) int {
-		v2 := c.vm.stack.popV128()
-		v1 := c.vm.stack.popV128()
-		c.vm.stack.pushV128(simdI8x16Shuffle(v1, v2,
-			lanes[0], lanes[1], lanes[2], lanes[3], lanes[4], lanes[5], lanes[6], lanes[7],
-			lanes[8], lanes[9], lanes[10], lanes[11], lanes[12], lanes[13], lanes[14], lanes[15]))
-
-		return advance
+func opI32Load8S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadByte(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt32(signExtend8To32(v))
+	return advance
 }
 
-func handleBinaryInt32(op func(a, b int32) int32) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popInt32()
-		data := c.vm.stack.data
-		last := len(data) - 1
-		data[last] = i32(op(data[last].int32(), b))
-		return advance
+func opI32Load8U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadByte(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt32(zeroExtend8To32(v))
+	return advance
 }
 
-func handleBinaryInt64(op func(a, b int64) int64) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popInt64()
-		data := c.vm.stack.data
-		last := len(data) - 1
-		data[last] = i64(op(data[last].int64(), b))
-		return advance
+func opI32Load16S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint16(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt32(signExtend16To32(v))
+	return advance
 }
 
-func handleBinaryFloat32(op func(a, b float32) float32) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popFloat32()
-		a := c.vm.stack.popFloat32()
-		c.vm.stack.pushFloat32(op(a, b))
-
-		return advance
+func opI32Load16U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint16(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt32(zeroExtend16To32(v))
+	return advance
 }
 
-func handleBinaryFloat64(op func(a, b float64) float64) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popFloat64()
-		a := c.vm.stack.popFloat64()
-		c.vm.stack.pushFloat64(op(a, b))
-
-		return advance
+func opI64Load8S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadByte(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(signExtend8To64(v))
+	return advance
 }
 
-func handleBinaryV128(op func(a, b V128Value) V128Value) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popV128()
-		a := c.vm.stack.popV128()
-		c.vm.stack.pushV128(op(a, b))
-
-		return advance
+func opI64Load8U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadByte(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(zeroExtend8To64(v))
+	return advance
 }
 
-func handleUnaryV128(op func(V128Value) V128Value) frame {
-	return func(c *callFrame) int {
-		c.vm.stack.pushV128(op(c.vm.stack.popV128()))
-		return advance
+func opI64Load16S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint16(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(signExtend16To64(v))
+	return advance
 }
 
-func handleBinarySafeInt32(op func(a, b int32) (int32, error)) frame {
-	return safe(func(c *callFrame) error {
-		b := c.vm.stack.popInt32()
-		a := c.vm.stack.popInt32()
-		result, err := op(a, b)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt32(result)
-		return nil
-	})
-}
-
-func handleBinarySafeInt64(op func(a, b int64) (int64, error)) frame {
-	return safe(func(c *callFrame) error {
-		b := c.vm.stack.popInt64()
-		a := c.vm.stack.popInt64()
-		result, err := op(a, b)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt64(result)
-		return nil
-	})
-}
-
-func handleBinaryBoolInt32(op func(a, b int32) bool) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popInt32()
-		a := c.vm.stack.popInt32()
-		c.vm.stack.pushInt32(boolToInt32(op(a, b)))
-
-		return advance
+func opI64Load16U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint16(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(zeroExtend16To64(v))
+	return advance
 }
 
-func handleBinaryBoolInt64(op func(a, b int64) bool) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popInt64()
-		a := c.vm.stack.popInt64()
-		c.vm.stack.pushInt32(boolToInt32(op(a, b)))
-
-		return advance
+func opI64Load32S(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint32(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(signExtend32To64(v))
+	return advance
 }
 
-func handleBinaryBoolFloat32(op func(a, b float32) bool) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popFloat32()
-		a := c.vm.stack.popFloat32()
-		c.vm.stack.pushInt32(boolToInt32(op(a, b)))
-
-		return advance
+func opI64Load32U(c *callFrame, in *instr) int {
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	v, err := memory.LoadUint32(uint32(in.b), index)
+	if err != nil {
+		c.trap = err
+		return trap
 	}
+	c.vm.stack.pushInt64(zeroExtend32To64(v))
+	return advance
 }
 
-func handleBinaryBoolFloat64(op func(a, b float64) bool) frame {
-	return func(c *callFrame) int {
-		b := c.vm.stack.popFloat64()
-		a := c.vm.stack.popFloat64()
-		c.vm.stack.pushInt32(boolToInt32(op(a, b)))
-
-		return advance
+func opI32Store(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt32()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint32(uint32(in.b), index, uint32(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-func handleUnarySafeFloat32(op func(a float32) (int32, error)) frame {
-	return safe(func(c *callFrame) error {
-		a := c.vm.stack.popFloat32()
-		result, err := op(a)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt32(result)
-		return nil
-	})
-}
-
-func handleUnarySafeFloat64(op func(a float64) (int32, error)) frame {
-	return safe(func(c *callFrame) error {
-		a := c.vm.stack.popFloat64()
-		result, err := op(a)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt32(result)
-		return nil
-	})
-}
-
-func handleTruncFloat32Int64(op func(a float32) (int64, error)) frame {
-	return safe(func(c *callFrame) error {
-		a := c.vm.stack.popFloat32()
-		result, err := op(a)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt64(result)
-		return nil
-	})
-}
-
-func handleTruncFloat64Int64(op func(a float64) (int64, error)) frame {
-	return safe(func(c *callFrame) error {
-		a := c.vm.stack.popFloat64()
-		result, err := op(a)
-		if err != nil {
-			return err
-		}
-		c.vm.stack.pushInt64(result)
-		return nil
-	})
-}
-
-func handleSimdShift(op func(v V128Value, shift int32) V128Value) frame {
-	return func(c *callFrame) int {
-		shift := c.vm.stack.popInt32()
-		v := c.vm.stack.popV128()
-		c.vm.stack.pushV128(op(v, shift))
-
-		return advance
+func opI64Store(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt64()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint64(uint32(in.b), index, uint64(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-func handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) frame {
-	return func(c *callFrame) int {
-		v3 := c.vm.stack.popV128()
-		v2 := c.vm.stack.popV128()
-		v1 := c.vm.stack.popV128()
-		c.vm.stack.pushV128(op(v1, v2, v3))
-
-		return advance
+func opF32Store(c *callFrame, in *instr) int {
+	val := c.vm.stack.popFloat32()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint32(uint32(in.b), index, math.Float32bits(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleLoad builds a memory-load closure, capturing the memory index and
-// offset from the memarg at body[pc+1..pc+3] (align is unused).
-func handleLoad[T any, R any](
-	body []uint64, pc int,
-	push func(R),
-	load func(*Memory, uint32, uint32) (T, error),
-	convert func(T) R,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, memIdx)
-		index := uint32(c.vm.stack.popInt32())
-		v, err := load(memory, offset, index)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		push(convert(v))
-		return advance
+func opF64Store(c *callFrame, in *instr) int {
+	val := c.vm.stack.popFloat64()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint64(uint32(in.b), index, math.Float64bits(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleStore builds a memory-store closure. The value is popped before the
-// address index.
-func handleStore[T any](
-	body []uint64, pc int,
-	pop func() T,
-	store func(*Memory, uint32, uint32, T) error,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *callFrame) int {
-		val := pop()
-		memory := c.vm.getMemory(c, memIdx)
-		index := uint32(c.vm.stack.popInt32())
-		if err := store(memory, offset, index, val); err != nil {
-			c.trap = err
-			return trap
-		}
-		return advance
+func opI32Store8(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt32()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreByte(uint32(in.b), index, byte(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleLoadV128FromBytes builds a v128 load that converts sizeBytes of memory
-// via fromBytes.
-func handleLoadV128FromBytes(
-	body []uint64, pc int, fromBytes func([]byte) V128Value, sizeBytes uint32,
-) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, memIdx)
-		index := c.vm.stack.popInt32()
-		data, err := memory.Get(offset, uint32(index), sizeBytes)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		c.vm.stack.pushV128(fromBytes(data))
-		return advance
+func opI32Store16(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt32()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint16(uint32(in.b), index, uint16(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleExtractLane builds a lane-extract closure; the lane index is at pc+1.
-func handleExtractLane[R wasmNumber](
-	body []uint64, pc int, push func(R), op func(V128Value, uint32) R,
-) frame {
-	laneIndex := uint32(body[pc+1])
-	return func(c *callFrame) int {
-		push(op(c.vm.stack.popV128(), laneIndex))
-		return advance
+func opI64Store8(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt64()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreByte(uint32(in.b), index, byte(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleReplaceLane builds a lane-replace closure; the lane index is at pc+1.
-func handleReplaceLane[T wasmNumber](
-	body []uint64, pc int, pop func() T, op func(V128Value, uint32, T) V128Value,
-) frame {
-	laneIndex := uint32(body[pc+1])
-	return func(c *callFrame) int {
-		laneValue := pop()
-		vector := c.vm.stack.popV128()
-		c.vm.stack.pushV128(op(vector, laneIndex, laneValue))
-		return advance
+func opI64Store16(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt64()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint16(uint32(in.b), index, uint16(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleSimdLoadLane builds a v128 load-lane closure for a laneSize-bit lane.
-func handleSimdLoadLane(body []uint64, pc int, laneSize uint32) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	laneIndex := uint32(body[pc+4])
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, memIdx)
-		v := c.vm.stack.popV128()
-		index := c.vm.stack.popInt32()
-		laneValue, err := memory.Get(offset, uint32(index), laneSize/8)
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		c.vm.stack.pushV128(simdLoadLane(v, laneIndex, laneValue))
-		return advance
+func opI64Store32(c *callFrame, in *instr) int {
+	val := c.vm.stack.popInt64()
+	memory := c.vm.getMemory(c, in.a)
+	index := uint32(c.vm.stack.popInt32())
+	if err := memory.StoreUint32(uint32(in.b), index, uint32(val)); err != nil {
+		c.trap = err
+		return trap
 	}
+	return advance
 }
 
-// handleSimdStoreLane builds a v128 store-lane closure for a laneSize-bit lane.
-func handleSimdStoreLane(body []uint64, pc int, laneSize uint32) frame {
-	memIdx := body[pc+2]
-	offset := uint32(body[pc+3])
-	laneIndex := uint32(body[pc+4])
-	return func(c *callFrame) int {
-		memory := c.vm.getMemory(c, memIdx)
-		v := c.vm.stack.popV128()
-		index := c.vm.stack.popInt32()
+type f32EqOp struct{}
 
-		lanesPerUint64 := 64 / laneSize
-		shift := (laneIndex % lanesPerUint64) * laneSize
-		var val uint64
-		if laneIndex < lanesPerUint64 {
-			val = v.Low >> shift
-		} else {
-			val = v.High >> shift
-		}
+func (f32EqOp) apply(a, b float32) bool { return equal(a, b) }
 
-		var err error
-		switch laneSize {
-		case 8:
-			err = memory.StoreByte(offset, uint32(index), byte(val))
-		case 16:
-			err = memory.StoreUint16(offset, uint32(index), uint16(val))
-		case 32:
-			err = memory.StoreUint32(offset, uint32(index), uint32(val))
-		case 64:
-			err = memory.StoreUint64(offset, uint32(index), val)
-		}
-		if err != nil {
-			c.trap = err
-			return trap
-		}
-		return advance
-	}
+type f32NeOp struct{}
+
+func (f32NeOp) apply(a, b float32) bool { return notEqual(a, b) }
+
+type f32LtOp struct{}
+
+func (f32LtOp) apply(a, b float32) bool { return lessThan(a, b) }
+
+type f32GtOp struct{}
+
+func (f32GtOp) apply(a, b float32) bool { return greaterThan(a, b) }
+
+type f32LeOp struct{}
+
+func (f32LeOp) apply(a, b float32) bool { return lessOrEqual(a, b) }
+
+type f32GeOp struct{}
+
+func (f32GeOp) apply(a, b float32) bool { return greaterOrEqual(a, b) }
+
+type f64EqOp struct{}
+
+func (f64EqOp) apply(a, b float64) bool { return equal(a, b) }
+
+type f64NeOp struct{}
+
+func (f64NeOp) apply(a, b float64) bool { return notEqual(a, b) }
+
+type f64LtOp struct{}
+
+func (f64LtOp) apply(a, b float64) bool { return lessThan(a, b) }
+
+type f64GtOp struct{}
+
+func (f64GtOp) apply(a, b float64) bool { return greaterThan(a, b) }
+
+type f64LeOp struct{}
+
+func (f64LeOp) apply(a, b float64) bool { return lessOrEqual(a, b) }
+
+type f64GeOp struct{}
+
+func (f64GeOp) apply(a, b float64) bool { return greaterOrEqual(a, b) }
+
+type i32DivSOp struct{}
+
+func (i32DivSOp) apply(a, b int32) (int32, error) { return divS32(a, b) }
+
+type i32DivUOp struct{}
+
+func (i32DivUOp) apply(a, b int32) (int32, error) { return divU32(a, b) }
+
+type i32RemSOp struct{}
+
+func (i32RemSOp) apply(a, b int32) (int32, error) { return remS32(a, b) }
+
+type i32RemUOp struct{}
+
+func (i32RemUOp) apply(a, b int32) (int32, error) { return remU32(a, b) }
+
+type i64DivSOp struct{}
+
+func (i64DivSOp) apply(a, b int64) (int64, error) { return divS64(a, b) }
+
+type i64DivUOp struct{}
+
+func (i64DivUOp) apply(a, b int64) (int64, error) { return divU64(a, b) }
+
+type i64RemSOp struct{}
+
+func (i64RemSOp) apply(a, b int64) (int64, error) { return remS64(a, b) }
+
+type i64RemUOp struct{}
+
+func (i64RemUOp) apply(a, b int64) (int64, error) { return remU64(a, b) }
+
+type f32AddOp struct{}
+
+func (f32AddOp) apply(a, b float32) float32 { return add(a, b) }
+
+type f32SubOp struct{}
+
+func (f32SubOp) apply(a, b float32) float32 { return sub(a, b) }
+
+type f32MulOp struct{}
+
+func (f32MulOp) apply(a, b float32) float32 { return mul(a, b) }
+
+type f32DivOp struct{}
+
+func (f32DivOp) apply(a, b float32) float32 { return div(a, b) }
+
+type f32MinOp struct{}
+
+func (f32MinOp) apply(a, b float32) float32 { return wasmMin(a, b) }
+
+type f32MaxOp struct{}
+
+func (f32MaxOp) apply(a, b float32) float32 { return wasmMax(a, b) }
+
+type f32CopysignOp struct{}
+
+func (f32CopysignOp) apply(a, b float32) float32 { return copysign(a, b) }
+
+type f64AddOp struct{}
+
+func (f64AddOp) apply(a, b float64) float64 { return add(a, b) }
+
+type f64SubOp struct{}
+
+func (f64SubOp) apply(a, b float64) float64 { return sub(a, b) }
+
+type f64MulOp struct{}
+
+func (f64MulOp) apply(a, b float64) float64 { return mul(a, b) }
+
+type f64DivOp struct{}
+
+func (f64DivOp) apply(a, b float64) float64 { return div(a, b) }
+
+type f64MinOp struct{}
+
+func (f64MinOp) apply(a, b float64) float64 { return wasmMin(a, b) }
+
+type f64MaxOp struct{}
+
+func (f64MaxOp) apply(a, b float64) float64 { return wasmMax(a, b) }
+
+type f64CopysignOp struct{}
+
+func (f64CopysignOp) apply(a, b float64) float64 { return copysign(a, b) }
+
+type i32TruncF32SOp struct{}
+
+func (i32TruncF32SOp) apply(a float32) (int32, error) { return truncF32SToI32(a) }
+
+type i32TruncF32UOp struct{}
+
+func (i32TruncF32UOp) apply(a float32) (int32, error) { return truncF32UToI32(a) }
+
+type i32TruncF64SOp struct{}
+
+func (i32TruncF64SOp) apply(a float64) (int32, error) { return truncF64SToI32(a) }
+
+type i32TruncF64UOp struct{}
+
+func (i32TruncF64UOp) apply(a float64) (int32, error) { return truncF64UToI32(a) }
+
+type i64TruncF32SOp struct{}
+
+func (i64TruncF32SOp) apply(a float32) (int64, error) { return truncF32SToI64(a) }
+
+type i64TruncF32UOp struct{}
+
+func (i64TruncF32UOp) apply(a float32) (int64, error) { return truncF32UToI64(a) }
+
+type i64TruncF64SOp struct{}
+
+func (i64TruncF64SOp) apply(a float64) (int64, error) { return truncF64SToI64(a) }
+
+type i64TruncF64UOp struct{}
+
+func (i64TruncF64UOp) apply(a float64) (int64, error) { return truncF64UToI64(a) }
+
+type i8x16SwizzleOp struct{}
+
+func (i8x16SwizzleOp) apply(a, b V128Value) V128Value { return simdI8x16Swizzle(a, b) }
+
+type i8x16EqOp struct{}
+
+func (i8x16EqOp) apply(a, b V128Value) V128Value { return simdI8x16Eq(a, b) }
+
+type i8x16NeOp struct{}
+
+func (i8x16NeOp) apply(a, b V128Value) V128Value { return simdI8x16Ne(a, b) }
+
+type i8x16LtSOp struct{}
+
+func (i8x16LtSOp) apply(a, b V128Value) V128Value { return simdI8x16LtS(a, b) }
+
+type i8x16LtUOp struct{}
+
+func (i8x16LtUOp) apply(a, b V128Value) V128Value { return simdI8x16LtU(a, b) }
+
+type i8x16GtSOp struct{}
+
+func (i8x16GtSOp) apply(a, b V128Value) V128Value { return simdI8x16GtS(a, b) }
+
+type i8x16GtUOp struct{}
+
+func (i8x16GtUOp) apply(a, b V128Value) V128Value { return simdI8x16GtU(a, b) }
+
+type i8x16LeSOp struct{}
+
+func (i8x16LeSOp) apply(a, b V128Value) V128Value { return simdI8x16LeS(a, b) }
+
+type i8x16LeUOp struct{}
+
+func (i8x16LeUOp) apply(a, b V128Value) V128Value { return simdI8x16LeU(a, b) }
+
+type i8x16GeSOp struct{}
+
+func (i8x16GeSOp) apply(a, b V128Value) V128Value { return simdI8x16GeS(a, b) }
+
+type i8x16GeUOp struct{}
+
+func (i8x16GeUOp) apply(a, b V128Value) V128Value { return simdI8x16GeU(a, b) }
+
+type i16x8EqOp struct{}
+
+func (i16x8EqOp) apply(a, b V128Value) V128Value { return simdI16x8Eq(a, b) }
+
+type i16x8NeOp struct{}
+
+func (i16x8NeOp) apply(a, b V128Value) V128Value { return simdI16x8Ne(a, b) }
+
+type i16x8LtSOp struct{}
+
+func (i16x8LtSOp) apply(a, b V128Value) V128Value { return simdI16x8LtS(a, b) }
+
+type i16x8LtUOp struct{}
+
+func (i16x8LtUOp) apply(a, b V128Value) V128Value { return simdI16x8LtU(a, b) }
+
+type i16x8GtSOp struct{}
+
+func (i16x8GtSOp) apply(a, b V128Value) V128Value { return simdI16x8GtS(a, b) }
+
+type i16x8GtUOp struct{}
+
+func (i16x8GtUOp) apply(a, b V128Value) V128Value { return simdI16x8GtU(a, b) }
+
+type i16x8LeSOp struct{}
+
+func (i16x8LeSOp) apply(a, b V128Value) V128Value { return simdI16x8LeS(a, b) }
+
+type i16x8LeUOp struct{}
+
+func (i16x8LeUOp) apply(a, b V128Value) V128Value { return simdI16x8LeU(a, b) }
+
+type i16x8GeSOp struct{}
+
+func (i16x8GeSOp) apply(a, b V128Value) V128Value { return simdI16x8GeS(a, b) }
+
+type i16x8GeUOp struct{}
+
+func (i16x8GeUOp) apply(a, b V128Value) V128Value { return simdI16x8GeU(a, b) }
+
+type i32x4EqOp struct{}
+
+func (i32x4EqOp) apply(a, b V128Value) V128Value { return simdI32x4Eq(a, b) }
+
+type i32x4NeOp struct{}
+
+func (i32x4NeOp) apply(a, b V128Value) V128Value { return simdI32x4Ne(a, b) }
+
+type i32x4LtSOp struct{}
+
+func (i32x4LtSOp) apply(a, b V128Value) V128Value { return simdI32x4LtS(a, b) }
+
+type i32x4LtUOp struct{}
+
+func (i32x4LtUOp) apply(a, b V128Value) V128Value { return simdI32x4LtU(a, b) }
+
+type i32x4GtSOp struct{}
+
+func (i32x4GtSOp) apply(a, b V128Value) V128Value { return simdI32x4GtS(a, b) }
+
+type i32x4GtUOp struct{}
+
+func (i32x4GtUOp) apply(a, b V128Value) V128Value { return simdI32x4GtU(a, b) }
+
+type i32x4LeSOp struct{}
+
+func (i32x4LeSOp) apply(a, b V128Value) V128Value { return simdI32x4LeS(a, b) }
+
+type i32x4LeUOp struct{}
+
+func (i32x4LeUOp) apply(a, b V128Value) V128Value { return simdI32x4LeU(a, b) }
+
+type i32x4GeSOp struct{}
+
+func (i32x4GeSOp) apply(a, b V128Value) V128Value { return simdI32x4GeS(a, b) }
+
+type i32x4GeUOp struct{}
+
+func (i32x4GeUOp) apply(a, b V128Value) V128Value { return simdI32x4GeU(a, b) }
+
+type f32x4EqOp struct{}
+
+func (f32x4EqOp) apply(a, b V128Value) V128Value { return simdF32x4Eq(a, b) }
+
+type f32x4NeOp struct{}
+
+func (f32x4NeOp) apply(a, b V128Value) V128Value { return simdF32x4Ne(a, b) }
+
+type f32x4LtOp struct{}
+
+func (f32x4LtOp) apply(a, b V128Value) V128Value { return simdF32x4Lt(a, b) }
+
+type f32x4GtOp struct{}
+
+func (f32x4GtOp) apply(a, b V128Value) V128Value { return simdF32x4Gt(a, b) }
+
+type f32x4LeOp struct{}
+
+func (f32x4LeOp) apply(a, b V128Value) V128Value { return simdF32x4Le(a, b) }
+
+type f32x4GeOp struct{}
+
+func (f32x4GeOp) apply(a, b V128Value) V128Value { return simdF32x4Ge(a, b) }
+
+type f64x2EqOp struct{}
+
+func (f64x2EqOp) apply(a, b V128Value) V128Value { return simdF64x2Eq(a, b) }
+
+type f64x2NeOp struct{}
+
+func (f64x2NeOp) apply(a, b V128Value) V128Value { return simdF64x2Ne(a, b) }
+
+type f64x2LtOp struct{}
+
+func (f64x2LtOp) apply(a, b V128Value) V128Value { return simdF64x2Lt(a, b) }
+
+type f64x2GtOp struct{}
+
+func (f64x2GtOp) apply(a, b V128Value) V128Value { return simdF64x2Gt(a, b) }
+
+type f64x2LeOp struct{}
+
+func (f64x2LeOp) apply(a, b V128Value) V128Value { return simdF64x2Le(a, b) }
+
+type f64x2GeOp struct{}
+
+func (f64x2GeOp) apply(a, b V128Value) V128Value { return simdF64x2Ge(a, b) }
+
+type v128NotOp struct{}
+
+func (v128NotOp) apply(a V128Value) V128Value { return simdV128Not(a) }
+
+type v128AndOp struct{}
+
+func (v128AndOp) apply(a, b V128Value) V128Value { return simdV128And(a, b) }
+
+type v128AndnotOp struct{}
+
+func (v128AndnotOp) apply(a, b V128Value) V128Value { return simdV128Andnot(a, b) }
+
+type v128OrOp struct{}
+
+func (v128OrOp) apply(a, b V128Value) V128Value { return simdV128Or(a, b) }
+
+type v128XorOp struct{}
+
+func (v128XorOp) apply(a, b V128Value) V128Value { return simdV128Xor(a, b) }
+
+type f32x4DemoteF64x2ZeroOp struct{}
+
+func (f32x4DemoteF64x2ZeroOp) apply(a V128Value) V128Value { return simdF32x4DemoteF64x2Zero(a) }
+
+type f64x2PromoteLowF32x4Op struct{}
+
+func (f64x2PromoteLowF32x4Op) apply(a V128Value) V128Value { return simdF64x2PromoteLowF32x4(a) }
+
+type i8x16AbsOp struct{}
+
+func (i8x16AbsOp) apply(a V128Value) V128Value { return simdI8x16Abs(a) }
+
+type i8x16NegOp struct{}
+
+func (i8x16NegOp) apply(a V128Value) V128Value { return simdI8x16Neg(a) }
+
+type i8x16PopcntOp struct{}
+
+func (i8x16PopcntOp) apply(a V128Value) V128Value { return simdI8x16Popcnt(a) }
+
+type i8x16NarrowI16x8SOp struct{}
+
+func (i8x16NarrowI16x8SOp) apply(a, b V128Value) V128Value { return simdI8x16NarrowI16x8S(a, b) }
+
+type i8x16NarrowI16x8UOp struct{}
+
+func (i8x16NarrowI16x8UOp) apply(a, b V128Value) V128Value { return simdI8x16NarrowI16x8U(a, b) }
+
+type f32x4CeilOp struct{}
+
+func (f32x4CeilOp) apply(a V128Value) V128Value { return simdF32x4Ceil(a) }
+
+type f32x4FloorOp struct{}
+
+func (f32x4FloorOp) apply(a V128Value) V128Value { return simdF32x4Floor(a) }
+
+type f32x4TruncOp struct{}
+
+func (f32x4TruncOp) apply(a V128Value) V128Value { return simdF32x4Trunc(a) }
+
+type f32x4NearestOp struct{}
+
+func (f32x4NearestOp) apply(a V128Value) V128Value { return simdF32x4Nearest(a) }
+
+type i8x16ShlOp struct{}
+
+func (i8x16ShlOp) apply(v V128Value, shift int32) V128Value { return simdI8x16Shl(v, shift) }
+
+type i8x16ShrUOp struct{}
+
+func (i8x16ShrUOp) apply(v V128Value, shift int32) V128Value { return simdI8x16ShrU(v, shift) }
+
+type i8x16ShrSOp struct{}
+
+func (i8x16ShrSOp) apply(v V128Value, shift int32) V128Value { return simdI8x16ShrS(v, shift) }
+
+type i8x16AddOp struct{}
+
+func (i8x16AddOp) apply(a, b V128Value) V128Value { return simdI8x16Add(a, b) }
+
+type i8x16AddSatSOp struct{}
+
+func (i8x16AddSatSOp) apply(a, b V128Value) V128Value { return simdI8x16AddSatS(a, b) }
+
+type i8x16AddSatUOp struct{}
+
+func (i8x16AddSatUOp) apply(a, b V128Value) V128Value { return simdI8x16AddSatU(a, b) }
+
+type i8x16SubOp struct{}
+
+func (i8x16SubOp) apply(a, b V128Value) V128Value { return simdI8x16Sub(a, b) }
+
+type i8x16SubSatSOp struct{}
+
+func (i8x16SubSatSOp) apply(a, b V128Value) V128Value { return simdI8x16SubSatS(a, b) }
+
+type i8x16SubSatUOp struct{}
+
+func (i8x16SubSatUOp) apply(a, b V128Value) V128Value { return simdI8x16SubSatU(a, b) }
+
+type f64x2CeilOp struct{}
+
+func (f64x2CeilOp) apply(a V128Value) V128Value { return simdF64x2Ceil(a) }
+
+type f64x2FloorOp struct{}
+
+func (f64x2FloorOp) apply(a V128Value) V128Value { return simdF64x2Floor(a) }
+
+type i8x16MinSOp struct{}
+
+func (i8x16MinSOp) apply(a, b V128Value) V128Value { return simdI8x16MinS(a, b) }
+
+type i8x16MinUOp struct{}
+
+func (i8x16MinUOp) apply(a, b V128Value) V128Value { return simdI8x16MinU(a, b) }
+
+type i8x16MaxSOp struct{}
+
+func (i8x16MaxSOp) apply(a, b V128Value) V128Value { return simdI8x16MaxS(a, b) }
+
+type i8x16MaxUOp struct{}
+
+func (i8x16MaxUOp) apply(a, b V128Value) V128Value { return simdI8x16MaxU(a, b) }
+
+type f64x2TruncOp struct{}
+
+func (f64x2TruncOp) apply(a V128Value) V128Value { return simdF64x2Trunc(a) }
+
+type i8x16AvgrUOp struct{}
+
+func (i8x16AvgrUOp) apply(a, b V128Value) V128Value { return simdI8x16AvgrU(a, b) }
+
+type i16x8ExtaddPairwiseI8x16SOp struct{}
+
+func (i16x8ExtaddPairwiseI8x16SOp) apply(a V128Value) V128Value {
+	return simdI16x8ExtaddPairwiseI8x16S(a)
 }
+
+type i16x8ExtaddPairwiseI8x16UOp struct{}
+
+func (i16x8ExtaddPairwiseI8x16UOp) apply(a V128Value) V128Value {
+	return simdI16x8ExtaddPairwiseI8x16U(a)
+}
+
+type i32x4ExtaddPairwiseI16x8SOp struct{}
+
+func (i32x4ExtaddPairwiseI16x8SOp) apply(a V128Value) V128Value {
+	return simdI32x4ExtaddPairwiseI16x8S(a)
+}
+
+type i32x4ExtaddPairwiseI16x8UOp struct{}
+
+func (i32x4ExtaddPairwiseI16x8UOp) apply(a V128Value) V128Value {
+	return simdI32x4ExtaddPairwiseI16x8U(a)
+}
+
+type i16x8AbsOp struct{}
+
+func (i16x8AbsOp) apply(a V128Value) V128Value { return simdI16x8Abs(a) }
+
+type i16x8NegOp struct{}
+
+func (i16x8NegOp) apply(a V128Value) V128Value { return simdI16x8Neg(a) }
+
+type i16x8Q15mulrSatSOp struct{}
+
+func (i16x8Q15mulrSatSOp) apply(a, b V128Value) V128Value { return simdI16x8Q15mulrSatS(a, b) }
+
+type i16x8NarrowI32x4SOp struct{}
+
+func (i16x8NarrowI32x4SOp) apply(a, b V128Value) V128Value { return simdI16x8NarrowI32x4S(a, b) }
+
+type i16x8NarrowI32x4UOp struct{}
+
+func (i16x8NarrowI32x4UOp) apply(a, b V128Value) V128Value { return simdI16x8NarrowI32x4U(a, b) }
+
+type i16x8ExtendLowI8x16SOp struct{}
+
+func (i16x8ExtendLowI8x16SOp) apply(a V128Value) V128Value { return simdI16x8ExtendLowI8x16S(a) }
+
+type i16x8ExtendHighI8x16SOp struct{}
+
+func (i16x8ExtendHighI8x16SOp) apply(a V128Value) V128Value { return simdI16x8ExtendHighI8x16S(a) }
+
+type i16x8ExtendLowI8x16UOp struct{}
+
+func (i16x8ExtendLowI8x16UOp) apply(a V128Value) V128Value { return simdI16x8ExtendLowI8x16U(a) }
+
+type i16x8ExtendHighI8x16UOp struct{}
+
+func (i16x8ExtendHighI8x16UOp) apply(a V128Value) V128Value { return simdI16x8ExtendHighI8x16U(a) }
+
+type i16x8ShlOp struct{}
+
+func (i16x8ShlOp) apply(v V128Value, shift int32) V128Value { return simdI16x8Shl(v, shift) }
+
+type i16x8ShrSOp struct{}
+
+func (i16x8ShrSOp) apply(v V128Value, shift int32) V128Value { return simdI16x8ShrS(v, shift) }
+
+type i16x8ShrUOp struct{}
+
+func (i16x8ShrUOp) apply(v V128Value, shift int32) V128Value { return simdI16x8ShrU(v, shift) }
+
+type i16x8AddOp struct{}
+
+func (i16x8AddOp) apply(a, b V128Value) V128Value { return simdI16x8Add(a, b) }
+
+type i16x8AddSatSOp struct{}
+
+func (i16x8AddSatSOp) apply(a, b V128Value) V128Value { return simdI16x8AddSatS(a, b) }
+
+type i16x8AddSatUOp struct{}
+
+func (i16x8AddSatUOp) apply(a, b V128Value) V128Value { return simdI16x8AddSatU(a, b) }
+
+type i16x8SubOp struct{}
+
+func (i16x8SubOp) apply(a, b V128Value) V128Value { return simdI16x8Sub(a, b) }
+
+type i16x8SubSatSOp struct{}
+
+func (i16x8SubSatSOp) apply(a, b V128Value) V128Value { return simdI16x8SubSatS(a, b) }
+
+type i16x8SubSatUOp struct{}
+
+func (i16x8SubSatUOp) apply(a, b V128Value) V128Value { return simdI16x8SubSatU(a, b) }
+
+type f64x2NearestOp struct{}
+
+func (f64x2NearestOp) apply(a V128Value) V128Value { return simdF64x2Nearest(a) }
+
+type i16x8MulOp struct{}
+
+func (i16x8MulOp) apply(a, b V128Value) V128Value { return simdI16x8Mul(a, b) }
+
+type i16x8MinSOp struct{}
+
+func (i16x8MinSOp) apply(a, b V128Value) V128Value { return simdI16x8MinS(a, b) }
+
+type i16x8MinUOp struct{}
+
+func (i16x8MinUOp) apply(a, b V128Value) V128Value { return simdI16x8MinU(a, b) }
+
+type i16x8MaxSOp struct{}
+
+func (i16x8MaxSOp) apply(a, b V128Value) V128Value { return simdI16x8MaxS(a, b) }
+
+type i16x8MaxUOp struct{}
+
+func (i16x8MaxUOp) apply(a, b V128Value) V128Value { return simdI16x8MaxU(a, b) }
+
+type i16x8AvgrUOp struct{}
+
+func (i16x8AvgrUOp) apply(a, b V128Value) V128Value { return simdI16x8AvgrU(a, b) }
+
+type i16x8ExtmulLowI8x16SOp struct{}
+
+func (i16x8ExtmulLowI8x16SOp) apply(a, b V128Value) V128Value { return simdI16x8ExtmulLowI8x16S(a, b) }
+
+type i16x8ExtmulHighI8x16SOp struct{}
+
+func (i16x8ExtmulHighI8x16SOp) apply(a, b V128Value) V128Value {
+	return simdI16x8ExtmulHighI8x16S(a, b)
+}
+
+type i16x8ExtmulLowI8x16UOp struct{}
+
+func (i16x8ExtmulLowI8x16UOp) apply(a, b V128Value) V128Value { return simdI16x8ExtmulLowI8x16U(a, b) }
+
+type i16x8ExtmulHighI8x16UOp struct{}
+
+func (i16x8ExtmulHighI8x16UOp) apply(a, b V128Value) V128Value {
+	return simdI16x8ExtmulHighI8x16U(a, b)
+}
+
+type i32x4AbsOp struct{}
+
+func (i32x4AbsOp) apply(a V128Value) V128Value { return simdI32x4Abs(a) }
+
+type i32x4NegOp struct{}
+
+func (i32x4NegOp) apply(a V128Value) V128Value { return simdI32x4Neg(a) }
+
+type i32x4ExtendLowI16x8SOp struct{}
+
+func (i32x4ExtendLowI16x8SOp) apply(a V128Value) V128Value { return simdI32x4ExtendLowI16x8S(a) }
+
+type i32x4ExtendHighI16x8SOp struct{}
+
+func (i32x4ExtendHighI16x8SOp) apply(a V128Value) V128Value { return simdI32x4ExtendHighI16x8S(a) }
+
+type i32x4ExtendLowI16x8UOp struct{}
+
+func (i32x4ExtendLowI16x8UOp) apply(a V128Value) V128Value { return simdI32x4ExtendLowI16x8U(a) }
+
+type i32x4ExtendHighI16x8UOp struct{}
+
+func (i32x4ExtendHighI16x8UOp) apply(a V128Value) V128Value { return simdI32x4ExtendHighI16x8U(a) }
+
+type i32x4ShlOp struct{}
+
+func (i32x4ShlOp) apply(v V128Value, shift int32) V128Value { return simdI32x4Shl(v, shift) }
+
+type i32x4ShrSOp struct{}
+
+func (i32x4ShrSOp) apply(v V128Value, shift int32) V128Value { return simdI32x4ShrS(v, shift) }
+
+type i32x4ShrUOp struct{}
+
+func (i32x4ShrUOp) apply(v V128Value, shift int32) V128Value { return simdI32x4ShrU(v, shift) }
+
+type i32x4AddOp struct{}
+
+func (i32x4AddOp) apply(a, b V128Value) V128Value { return simdI32x4Add(a, b) }
+
+type i32x4SubOp struct{}
+
+func (i32x4SubOp) apply(a, b V128Value) V128Value { return simdI32x4Sub(a, b) }
+
+type i32x4MulOp struct{}
+
+func (i32x4MulOp) apply(a, b V128Value) V128Value { return simdI32x4Mul(a, b) }
+
+type i32x4MinSOp struct{}
+
+func (i32x4MinSOp) apply(a, b V128Value) V128Value { return simdI32x4MinS(a, b) }
+
+type i32x4MinUOp struct{}
+
+func (i32x4MinUOp) apply(a, b V128Value) V128Value { return simdI32x4MinU(a, b) }
+
+type i32x4MaxSOp struct{}
+
+func (i32x4MaxSOp) apply(a, b V128Value) V128Value { return simdI32x4MaxS(a, b) }
+
+type i32x4MaxUOp struct{}
+
+func (i32x4MaxUOp) apply(a, b V128Value) V128Value { return simdI32x4MaxU(a, b) }
+
+type i32x4DotI16x8SOp struct{}
+
+func (i32x4DotI16x8SOp) apply(a, b V128Value) V128Value { return simdI32x4DotI16x8S(a, b) }
+
+type i32x4ExtmulLowI16x8SOp struct{}
+
+func (i32x4ExtmulLowI16x8SOp) apply(a, b V128Value) V128Value { return simdI32x4ExtmulLowI16x8S(a, b) }
+
+type i32x4ExtmulHighI16x8SOp struct{}
+
+func (i32x4ExtmulHighI16x8SOp) apply(a, b V128Value) V128Value {
+	return simdI32x4ExtmulHighI16x8S(a, b)
+}
+
+type i32x4ExtmulLowI16x8UOp struct{}
+
+func (i32x4ExtmulLowI16x8UOp) apply(a, b V128Value) V128Value { return simdI32x4ExtmulLowI16x8U(a, b) }
+
+type i32x4ExtmulHighI16x8UOp struct{}
+
+func (i32x4ExtmulHighI16x8UOp) apply(a, b V128Value) V128Value {
+	return simdI32x4ExtmulHighI16x8U(a, b)
+}
+
+type i64x2AbsOp struct{}
+
+func (i64x2AbsOp) apply(a V128Value) V128Value { return simdI64x2Abs(a) }
+
+type i64x2NegOp struct{}
+
+func (i64x2NegOp) apply(a V128Value) V128Value { return simdI64x2Neg(a) }
+
+type i64x2ExtendLowI32x4SOp struct{}
+
+func (i64x2ExtendLowI32x4SOp) apply(a V128Value) V128Value { return simdI64x2ExtendLowI32x4S(a) }
+
+type i64x2ExtendHighI32x4SOp struct{}
+
+func (i64x2ExtendHighI32x4SOp) apply(a V128Value) V128Value { return simdI64x2ExtendHighI32x4S(a) }
+
+type i64x2ExtendLowI32x4UOp struct{}
+
+func (i64x2ExtendLowI32x4UOp) apply(a V128Value) V128Value { return simdI64x2ExtendLowI32x4U(a) }
+
+type i64x2ExtendHighI32x4UOp struct{}
+
+func (i64x2ExtendHighI32x4UOp) apply(a V128Value) V128Value { return simdI64x2ExtendHighI32x4U(a) }
+
+type i64x2ShlOp struct{}
+
+func (i64x2ShlOp) apply(v V128Value, shift int32) V128Value { return simdI64x2Shl(v, shift) }
+
+type i64x2ShrSOp struct{}
+
+func (i64x2ShrSOp) apply(v V128Value, shift int32) V128Value { return simdI64x2ShrS(v, shift) }
+
+type i64x2ShrUOp struct{}
+
+func (i64x2ShrUOp) apply(v V128Value, shift int32) V128Value { return simdI64x2ShrU(v, shift) }
+
+type i64x2AddOp struct{}
+
+func (i64x2AddOp) apply(a, b V128Value) V128Value { return simdI64x2Add(a, b) }
+
+type i64x2SubOp struct{}
+
+func (i64x2SubOp) apply(a, b V128Value) V128Value { return simdI64x2Sub(a, b) }
+
+type i64x2MulOp struct{}
+
+func (i64x2MulOp) apply(a, b V128Value) V128Value { return simdI64x2Mul(a, b) }
+
+type i64x2EqOp struct{}
+
+func (i64x2EqOp) apply(a, b V128Value) V128Value { return simdI64x2Eq(a, b) }
+
+type i64x2NeOp struct{}
+
+func (i64x2NeOp) apply(a, b V128Value) V128Value { return simdI64x2Ne(a, b) }
+
+type i64x2LtSOp struct{}
+
+func (i64x2LtSOp) apply(a, b V128Value) V128Value { return simdI64x2LtS(a, b) }
+
+type i64x2GtSOp struct{}
+
+func (i64x2GtSOp) apply(a, b V128Value) V128Value { return simdI64x2GtS(a, b) }
+
+type i64x2LeSOp struct{}
+
+func (i64x2LeSOp) apply(a, b V128Value) V128Value { return simdI64x2LeS(a, b) }
+
+type i64x2GeSOp struct{}
+
+func (i64x2GeSOp) apply(a, b V128Value) V128Value { return simdI64x2GeS(a, b) }
+
+type i64x2ExtmulLowI32x4SOp struct{}
+
+func (i64x2ExtmulLowI32x4SOp) apply(a, b V128Value) V128Value { return simdI64x2ExtmulLowI32x4S(a, b) }
+
+type i64x2ExtmulHighI32x4SOp struct{}
+
+func (i64x2ExtmulHighI32x4SOp) apply(a, b V128Value) V128Value {
+	return simdI64x2ExtmulHighI32x4S(a, b)
+}
+
+type i64x2ExtmulLowI32x4UOp struct{}
+
+func (i64x2ExtmulLowI32x4UOp) apply(a, b V128Value) V128Value { return simdI64x2ExtmulLowI32x4U(a, b) }
+
+type i64x2ExtmulHighI32x4UOp struct{}
+
+func (i64x2ExtmulHighI32x4UOp) apply(a, b V128Value) V128Value {
+	return simdI64x2ExtmulHighI32x4U(a, b)
+}
+
+type f32x4AbsOp struct{}
+
+func (f32x4AbsOp) apply(a V128Value) V128Value { return simdF32x4Abs(a) }
+
+type f32x4NegOp struct{}
+
+func (f32x4NegOp) apply(a V128Value) V128Value { return simdF32x4Neg(a) }
+
+type f32x4SqrtOp struct{}
+
+func (f32x4SqrtOp) apply(a V128Value) V128Value { return simdF32x4Sqrt(a) }
+
+type f32x4AddOp struct{}
+
+func (f32x4AddOp) apply(a, b V128Value) V128Value { return simdF32x4Add(a, b) }
+
+type f32x4SubOp struct{}
+
+func (f32x4SubOp) apply(a, b V128Value) V128Value { return simdF32x4Sub(a, b) }
+
+type f32x4MulOp struct{}
+
+func (f32x4MulOp) apply(a, b V128Value) V128Value { return simdF32x4Mul(a, b) }
+
+type f32x4DivOp struct{}
+
+func (f32x4DivOp) apply(a, b V128Value) V128Value { return simdF32x4Div(a, b) }
+
+type f32x4MinOp struct{}
+
+func (f32x4MinOp) apply(a, b V128Value) V128Value { return simdF32x4Min(a, b) }
+
+type f32x4MaxOp struct{}
+
+func (f32x4MaxOp) apply(a, b V128Value) V128Value { return simdF32x4Max(a, b) }
+
+type f32x4PminOp struct{}
+
+func (f32x4PminOp) apply(a, b V128Value) V128Value { return simdF32x4Pmin(a, b) }
+
+type f32x4PmaxOp struct{}
+
+func (f32x4PmaxOp) apply(a, b V128Value) V128Value { return simdF32x4Pmax(a, b) }
+
+type f64x2AbsOp struct{}
+
+func (f64x2AbsOp) apply(a V128Value) V128Value { return simdF64x2Abs(a) }
+
+type f64x2NegOp struct{}
+
+func (f64x2NegOp) apply(a V128Value) V128Value { return simdF64x2Neg(a) }
+
+type f64x2SqrtOp struct{}
+
+func (f64x2SqrtOp) apply(a V128Value) V128Value { return simdF64x2Sqrt(a) }
+
+type f64x2AddOp struct{}
+
+func (f64x2AddOp) apply(a, b V128Value) V128Value { return simdF64x2Add(a, b) }
+
+type f64x2SubOp struct{}
+
+func (f64x2SubOp) apply(a, b V128Value) V128Value { return simdF64x2Sub(a, b) }
+
+type f64x2MulOp struct{}
+
+func (f64x2MulOp) apply(a, b V128Value) V128Value { return simdF64x2Mul(a, b) }
+
+type f64x2DivOp struct{}
+
+func (f64x2DivOp) apply(a, b V128Value) V128Value { return simdF64x2Div(a, b) }
+
+type f64x2MinOp struct{}
+
+func (f64x2MinOp) apply(a, b V128Value) V128Value { return simdF64x2Min(a, b) }
+
+type f64x2MaxOp struct{}
+
+func (f64x2MaxOp) apply(a, b V128Value) V128Value { return simdF64x2Max(a, b) }
+
+type f64x2PminOp struct{}
+
+func (f64x2PminOp) apply(a, b V128Value) V128Value { return simdF64x2Pmin(a, b) }
+
+type f64x2PmaxOp struct{}
+
+func (f64x2PmaxOp) apply(a, b V128Value) V128Value { return simdF64x2Pmax(a, b) }
+
+type i32x4TruncSatF32x4SOp struct{}
+
+func (i32x4TruncSatF32x4SOp) apply(a V128Value) V128Value { return simdI32x4TruncSatF32x4S(a) }
+
+type i32x4TruncSatF32x4UOp struct{}
+
+func (i32x4TruncSatF32x4UOp) apply(a V128Value) V128Value { return simdI32x4TruncSatF32x4U(a) }
+
+type f32x4ConvertI32x4SOp struct{}
+
+func (f32x4ConvertI32x4SOp) apply(a V128Value) V128Value { return simdF32x4ConvertI32x4S(a) }
+
+type f32x4ConvertI32x4UOp struct{}
+
+func (f32x4ConvertI32x4UOp) apply(a V128Value) V128Value { return simdF32x4ConvertI32x4U(a) }
+
+type i32x4TruncSatF64x2SZeroOp struct{}
+
+func (i32x4TruncSatF64x2SZeroOp) apply(a V128Value) V128Value { return simdI32x4TruncSatF64x2SZero(a) }
+
+type i32x4TruncSatF64x2UZeroOp struct{}
+
+func (i32x4TruncSatF64x2UZeroOp) apply(a V128Value) V128Value { return simdI32x4TruncSatF64x2UZero(a) }
+
+type f64x2ConvertLowI32x4SOp struct{}
+
+func (f64x2ConvertLowI32x4SOp) apply(a V128Value) V128Value { return simdF64x2ConvertLowI32x4S(a) }
+
+type f64x2ConvertLowI32x4UOp struct{}
+
+func (f64x2ConvertLowI32x4UOp) apply(a V128Value) V128Value { return simdF64x2ConvertLowI32x4U(a) }
 
 func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
 	// Empty (-0x40) and value-type block types both consume no inputs.

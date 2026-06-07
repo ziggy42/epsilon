@@ -180,7 +180,7 @@ type wasmFunction struct {
 	// frames is the compilation of the function body. It is populated by
 	// vm.compile at instantiation (before the function can be invoked); the
 	// interpreter runs this directly.
-	frames []frame
+	frames []instr
 }
 
 func (wf *wasmFunction) GetType() *FunctionType { return &wf.functionType }
