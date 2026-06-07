@@ -131,6 +131,7 @@ Targets:
   run-example           Run the basic example (smoke check)
   fmt                   Run gofmt across the tree
   fmt-md                Format repo-owned Markdown
+  fmt-c                 Format benchmark C sources
   vet                   Run go vet across the tree
   clean                 Remove built artifacts (keeps the wasi-sdk toolchain)
   distclean             Remove built artifacts AND the wasi-sdk toolchain
