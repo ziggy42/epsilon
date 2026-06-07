@@ -6,13 +6,15 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/ziggy42/epsilon)](https://github.com/ziggy42/epsilon/blob/main/go.mod)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-**Epsilon** is a pure Go WebAssembly runtime with zero dependencies. 
+**Epsilon** is a pure Go WebAssembly runtime with zero dependencies.
 
-* Fully supports [WebAssembly 2.0 Specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
-* Runs on any architecture supported by Go (amd64, arm64, etc.) without requiring CGo
-* Allows embedding WebAssembly modules in Go applications
-* Includes experimental [WASI Preview 1](wasip1/README.md) support
-* Includes a command-line interface
+- Fully supports
+  [WebAssembly 2.0 Specification](https://webassembly.github.io/spec/versions/core/WebAssembly-2.0.pdf)
+- Runs on any architecture supported by Go (amd64, arm64, etc.) without
+  requiring CGo
+- Allows embedding WebAssembly modules in Go applications
+- Includes experimental [WASI Preview 1](wasip1/README.md) support
+- Includes a command-line interface
 
 ## Installation
 
@@ -64,7 +66,7 @@ func main() {
 
 ### Using Host Functions
 
-Extend your WebAssembly modules with custom Go functions and more using 
+Extend your WebAssembly modules with custom Go functions and more using
 `ModuleImports`:
 
 ```go
@@ -116,7 +118,8 @@ $ epsilon https://github.com/mdn/webassembly-examples/raw/refs/heads/main/unders
 
 ## Development
 
-A complete set of development targets is defined in the `Makefile`. Run `make` (or `make help`) to view the available targets:
+A complete set of development targets is defined in the `Makefile`. Run `make`
+(or `make help`) to view the available targets:
 
 ```text
 Usage: make <target>
@@ -147,10 +150,9 @@ Common overrides:
   WASI_SDK_DIR=<p>      wasi-sdk path (default: .toolchain/wasi-sdk)
 ```
 
-Targets that need external toolchains (`wasi-sdk` for `build-wasm`, `wabt`
-for the spec tests) auto-install them into `.toolchain/` on first run.
-`test-wasi` additionally needs [`uv`](https://docs.astral.sh/uv/) installed
-on the host.
+Targets that need external toolchains (`wasi-sdk` for `build-wasm`, `wabt` for
+the spec tests) auto-install them into `.toolchain/` on first run. `test-wasi`
+additionally needs [`uv`](https://docs.astral.sh/uv/) installed on the host.
 
 ## Contributing
 
@@ -162,6 +164,6 @@ Apache 2.0; see [`LICENSE`](LICENSE) for details.
 
 ## Disclaimer
 
-This is not an officially supported Google product. This project is not
-eligible for the [Google Open Source Software Vulnerability Rewards
-Program](https://bughunters.google.com/open-source-security).
+This is not an officially supported Google product. This project is not eligible
+for the
+[Google Open Source Software Vulnerability Rewards Program](https://bughunters.google.com/open-source-security).

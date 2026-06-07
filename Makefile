@@ -97,6 +97,11 @@ run-example: ## Run the basic example (smoke check)
 fmt: ## Run gofmt across the tree
 	go fmt ./...
 
+fmt-md: ## Format repo-owned Markdown
+	git ls-files -z '*.md' ':!:CONTRIBUTING.md' ':!:CLAUDE.md' | \
+		xargs -0 uvx --with mdformat-gfm --with mdformat-frontmatter \
+		mdformat --wrap 80 --number
+
 vet: ## Run go vet across the tree
 	go vet ./...
 
@@ -202,6 +207,6 @@ internal/spec_tests/testsuite/.git wasip1/wasi-testsuite/.git:
 
 # ----- phony declarations -----------------------------------------------------
 
-.PHONY: help build build-all run-example fmt vet clean distclean \
+.PHONY: help build build-all run-example fmt fmt-md vet clean distclean \
         test test-spec test-wasi test-all bench bench-compare \
         build-wasm setup-wasi-sdk setup-wabt

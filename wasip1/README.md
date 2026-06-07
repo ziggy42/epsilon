@@ -1,17 +1,18 @@
 # WASI Preview 1 Implementation
 
-This package provides a [WASI Preview 1](https://github.com/WebAssembly/WASI/blob/8d7fb6eff7d5964b2375beb10518d2327a1dcfe8/legacy/README.md) 
+This package provides a
+[WASI Preview 1](https://github.com/WebAssembly/WASI/blob/8d7fb6eff7d5964b2375beb10518d2327a1dcfe8/legacy/README.md)
 (`wasi_snapshot_preview1`) implementation for the Epsilon WebAssembly runtime.
 
 > **Note**: This implementation is experimental, use at your own risk.
 
 ## Platform Support
 
-| Platform | Status |
-|----------|--------|
-| Linux | ✅ Supported |
-| macOS | ✅ Supported |
-| Windows | ❌ Not Supported |
+| Platform | Status           |
+| -------- | ---------------- |
+| Linux    | ✅ Supported     |
+| macOS    | ✅ Supported     |
+| Windows  | ❌ Not Supported |
 
 On non-Unix platforms, `NewWasiModuleBuilder().Build()` returns an error.
 
@@ -60,7 +61,6 @@ func main() {
 }
 ```
 
-
 ## Testing
 
 This implementation is tested against the official
@@ -68,8 +68,8 @@ This implementation is tested against the official
 
 ### Prerequisites
 
-- **[uv](https://docs.astral.sh/uv/)**: Python package manager for running the 
-	test runner
+- **[uv](https://docs.astral.sh/uv/)**: Python package manager for running the
+  test runner
 
 ### Running WASI Spec Tests
 
@@ -86,22 +86,22 @@ limitations:
 
 ### Clocks
 
-- **`clock_time_get`**: The `process_cputime_id` and `thread_cputime_id` clocks 
+- **`clock_time_get`**: The `process_cputime_id` and `thread_cputime_id` clocks
   return `ERRNO_NOTSUP`. Only `realtime` and `monotonic` are supported.
 
 ### Signals
 
-- **`proc_raise`**: Always returns `ERRNO_NOTSUP`. Signal handling is not 
-	implemented.
+- **`proc_raise`**: Always returns `ERRNO_NOTSUP`. Signal handling is not
+  implemented.
 
 ### Sockets
 
-Socket operations work with pre-opened socket file descriptors but have the 
+Socket operations work with pre-opened socket file descriptors but have the
 following limitations:
 
-- **No socket creation**: There is no way to create new sockets from WASM.
-  The host must pre-open a listening socket and pass it to the WASM module.
-- **`sock_recv`**: The `ri_flags` parameter (e.g., `MSG_PEEK`, `MSG_WAITALL`) is 
+- **No socket creation**: There is no way to create new sockets from WASM. The
+  host must pre-open a listening socket and pass it to the WASM module.
+- **`sock_recv`**: The `ri_flags` parameter (e.g., `MSG_PEEK`, `MSG_WAITALL`) is
   ignored. Receive always uses standard blocking read semantics.
 - **`sock_send`**: The `si_flags` parameter (e.g., `MSG_OOB`) is ignored.
 
@@ -111,5 +111,5 @@ following limitations:
   (`select`/`poll`/`epoll`). All file descriptors — including sockets — are
   always reported as immediately ready regardless of actual I/O readiness.
   Modules that poll a socket waiting for data will busy-loop with no sleep,
-  causing 100% CPU usage. Clock subscriptions use `time.Sleep`. Hangup
-  detection (`FD_READWRITE_HANGUP`) for sockets is not implemented.
+  causing 100% CPU usage. Clock subscriptions use `time.Sleep`. Hangup detection
+  (`FD_READWRITE_HANGUP`) for sockets is not implemented.
