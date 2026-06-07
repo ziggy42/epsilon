@@ -104,14 +104,9 @@ func (c *callFrame) brToLabel(labelIndex int) int {
 
 // vm is the WebAssembly Virtual Machine.
 type vm struct {
-	store *store
-	stack *valueStack
-	// callFrameCache holds frames within the preallocated range. It is indexed
-	// by callDepth, guaranteeing a stable memory address for a frame's entire
-	// lifetime. Deeper frames are allocated on the heap. This allows the
-	// execution loop to safely hold a *callFrame pointer across nested WASM
-	// invocations.
-	callFrameCache    []callFrame
+	store             *store
+	stack             *valueStack
+	callStackCache    []callFrame
 	callDepth         int
 	controlStackCache []controlFrame
 	localsCache       []value
@@ -130,7 +125,7 @@ func newVm(config Config) *vm {
 	return &vm{
 		store:             &store{},
 		stack:             newValueStack(),
-		callFrameCache:    make([]callFrame, config.CallStackPreallocationSize),
+		callStackCache:    make([]callFrame, config.CallStackPreallocationSize),
 		controlStackCache: make([]controlFrame, ctrlCacheSize),
 		localsCache:       make([]value, localsCacheSize),
 		config:            config,
@@ -339,16 +334,50 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	copy(locals[:numParams], vm.stack.data[newLen:])
 	vm.stack.data = vm.stack.data[:newLen]
 
-	c := vm.pushCallFrame(function, locals)
+	// Call frames within the preallocated range use a zero-allocation cache
+	// slot, while deeper frames fallback to the heap. Either way, the frame's
+	// memory address remains stable for its entire lifetime, allowing the run
+	// loop to safely hold a *callFrame pointer across nested invocations.
+	var call *callFrame
+	var controlStack []controlFrame
+	if vm.callDepth < vm.config.CallStackPreallocationSize {
+		// Cache hit: fetch a pointer from the preallocated stack.
+		call = &vm.callStackCache[vm.callDepth]
+
+		// Carve out a zero-length slice with a strict capacity bound from the
+		// control stack cache. The 3-index slice prevents appends from leaking
+		// into the next slot's memory.
+		blockDepth := vm.callDepth * controlStackCacheSlotSize
+		max := blockDepth + controlStackCacheSlotSize
+		controlStack = vm.controlStackCache[blockDepth:blockDepth:max]
+	} else {
+		// Cache miss: heap allocate a new frame.
+		call = &callFrame{}
+	}
+	// Initialize the control stack with the function's entry block frame.
+	controlStack = append(controlStack, controlFrame{
+		targetIp:    int32(len(function.frames)),
+		arity:       uint32(len(function.functionType.ResultTypes)),
+		stackHeight: vm.stack.size(),
+	})
+	// Populate the frame. If cached, this overwrites stale data from past calls.
+	*call = callFrame{
+		vm:           vm,
+		controlStack: controlStack,
+		locals:       locals,
+		module:       function.module,
+		trap:         nil,
+	}
+	vm.callDepth++
 
 	// To avoid the performance penalty of checking the fuel limit on every
 	// instruction when fuel is disabled, we provide two separate loop
 	// implementations.
 	var err error
 	if vm.config.EnableFuel {
-		err = vm.runLoopWithFuel(c, function.frames)
+		err = vm.runLoopWithFuel(call, function.frames)
 	} else {
-		err = vm.runLoop(c, function.frames)
+		err = vm.runLoop(call, function.frames)
 	}
 	// The run loop is done with this frame, so its locals slots are free to
 	// reuse. Rewinding the cursor here is a no-op for the heap case.
@@ -428,33 +457,6 @@ func operandWordCount(op opcode, body []uint64, operandStart int) int {
 	default:
 		return 0
 	}
-}
-
-// pushCallFrame reserves a frame for function at the current call depth,
-// initialized with the locals and the base control frame for the function body,
-// and returns it. The frame uses a fixed per-depth cache slot when the depth is
-// within the preallocated range, and heap allocates otherwise; either way its
-// address is stable for the frame's lifetime.
-func (vm *vm) pushCallFrame(function *wasmFunction, locals []value) *callFrame {
-	callDepth := vm.callDepth
-	vm.callDepth++
-
-	var c *callFrame
-	var ctrl []controlFrame
-	if callDepth < vm.config.CallStackPreallocationSize {
-		c = &vm.callFrameCache[callDepth]
-		base := callDepth * controlStackCacheSlotSize
-		ctrl = vm.controlStackCache[base : base : base+controlStackCacheSlotSize]
-	} else {
-		c = &callFrame{}
-	}
-	*c = callFrame{vm: vm, locals: locals, module: function.module}
-	c.controlStack = append(ctrl, controlFrame{
-		targetIp:    int32(len(function.frames)),
-		arity:       uint32(len(function.functionType.ResultTypes)),
-		stackHeight: vm.stack.size(),
-	})
-	return c
 }
 
 // compile lowers a function to its frames; it runs once before the function is
