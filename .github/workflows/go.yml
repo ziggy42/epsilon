@@ -33,6 +33,13 @@ jobs:
         go-version-file: 'go.mod'
     - name: Set up uv
       uses: astral-sh/setup-uv@v5
+    - name: Format check
+      run: |
+        make fmt fmt-md
+        git diff --exit-code \
+          || { echo "::error::Run 'make fmt' and 'make fmt-md', then commit the result."; exit 1; }
+    - name: Vet
+      run: make vet
     - name: Build
       run: make build-all
     - name: Test
