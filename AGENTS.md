@@ -45,7 +45,8 @@ library and as a CLI. Layout:
 
 - **Build & test**: The root `Makefile` is the entry point (`make help` lists
   all targets). Before considering a change complete, run `make fmt`,
-  `make vet`, and `make test-all` and make sure they pass.
+  `make vet`, and `make test-all` and make sure they pass; if you changed
+  Markdown, also run `make fmt-md`.
 - **Performance**:
   - Minimize heap allocations in the hot path (VM instruction loop).
   - Prefer reusing buffers/slices where possible.

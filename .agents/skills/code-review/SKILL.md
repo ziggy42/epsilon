@@ -33,6 +33,8 @@ adherence to project standards.
    - **If any build fails, stop and report the error.**
 2. **Lint & Format**:
    - Run `make fmt`. If any files are modified, **stop and report the error**.
+   - Run `make fmt-md`. If any files are modified, **stop and report the error**
+     (Markdown is not formatted).
    - Run `make vet`. **If any issues are found, stop and report the error.**
 3. **Run All Tests**:
    - Run `make test` to execute Go tests (unit + spec).
