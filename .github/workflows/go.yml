@@ -38,6 +38,15 @@ jobs:
         make fmt fmt-md
         git diff --exit-code \
           || { echo "::error::Run 'make fmt' and 'make fmt-md', then commit the result."; exit 1; }
+    - name: Check Wasm drift
+      run: |
+        touch internal/benchmarks/src/*.c
+        make build-wasm
+        git diff --exit-code \
+          || { \
+            echo "::error::Wasm binaries out of sync. Rebuild and commit."; \
+            exit 1; \
+          }
     - name: Vet
       run: make vet
     - name: Build

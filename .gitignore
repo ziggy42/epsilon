@@ -30,5 +30,3 @@ __pycache__/
 # Local toolchain installs (wasi-sdk, etc.)
 .toolchain/
 
-# Benchmark .wasm artifacts — built on demand via `make build-wasm`
-internal/benchmarks/wasm/

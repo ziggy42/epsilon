@@ -116,7 +116,7 @@ clean: ## Remove built artifacts (keeps the wasi-sdk toolchain)
 	@# `rm -f` errors on a directory. Only fire when it's actually a file.
 	@if [ -f epsilon ]; then rm -f epsilon; fi
 	rm -f internal/benchmarks/benchmarks.test
-	rm -rf $(WASM_OUT_DIR)
+
 
 distclean: clean ## Remove built artifacts AND the wasi-sdk toolchain
 	rm -rf .toolchain
