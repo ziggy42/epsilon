@@ -509,55 +509,53 @@ func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]instr, er
 	}
 	pcToIp[len(body)] = len(starts)
 
-	// Second pass: emit one instr per instruction. Opcodes converted to a shared
-	// threaded handler are built by compileThreaded; the rest fall back to a
-	// per-instruction closure adapted via runLegacy.
+	// Second pass: compile one instr per instruction.
 	code := make([]instr, 0, len(starts))
 	for _, pc := range starts {
-		in, ok := vm.compileThreaded(fn, module, pc, pcToIp)
-		if !ok {
-			return nil, fmt.Errorf("unhandled opcode %d", opcode(fn.body[pc]))
+		in, err := vm.compileInstr(fn, module, pc, pcToIp)
+		if err != nil {
+			return nil, err
 		}
 		code = append(code, in)
 	}
 	return code, nil
 }
 
-// compileThreaded builds the threaded instr for opcodes that have a shared
-// handler. It returns ok=false for opcodes still served by the closure path.
-func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcToIp []int) (instr, bool) {
+// compileInstr compiles the instruction at bytecode index pc into a threaded
+// instr: a shared handler plus its inline operands.
+func (vm *vm) compileInstr(fn *function, module *ModuleInstance, pc int, pcToIp []int) (instr, error) {
 	body := fn.body
 	switch opcode(body[pc]) {
 	case unreachable:
-		return instr{fn: opUnreachable}, true
+		return instr{fn: opUnreachable}, nil
 	case nop:
-		return instr{fn: opNop}, true
+		return instr{fn: opNop}, nil
 	case block:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return instr{fn: opBlock, a: uint64(uint32(afterEndIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, true
+		return instr{fn: opBlock, a: uint64(uint32(afterEndIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, nil
 	case loop:
 		blockType := int32(body[pc+1])
 		bodyIp := pcToIp[uint32(pc+2)]
 		inputCount := vm.getInputCount(module, blockType)
-		return instr{fn: opLoop, a: uint64(uint32(bodyIp)), b: uint64(inputCount)}, true
+		return instr{fn: opLoop, a: uint64(uint32(bodyIp)), b: uint64(inputCount)}, nil
 	case ifOp:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
 		elseIp := pcToIp[fn.jumpElseCache[uint32(pc+2)]]
 		inputCount := vm.getInputCount(module, blockType)
 		outputCount := vm.getOutputCount(module, blockType)
-		return instr{fn: opIf, a: uint64(uint32(afterEndIp))<<32 | uint64(uint32(elseIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, true
+		return instr{fn: opIf, a: uint64(uint32(afterEndIp))<<32 | uint64(uint32(elseIp)), b: uint64(outputCount)<<32 | uint64(inputCount)}, nil
 	case elseOp:
-		return instr{fn: opElse}, true
+		return instr{fn: opElse}, nil
 	case end:
-		return instr{fn: opEnd}, true
+		return instr{fn: opEnd}, nil
 	case br:
-		return instr{fn: opBr, a: body[pc+1]}, true
+		return instr{fn: opBr, a: body[pc+1]}, nil
 	case brIf:
-		return instr{fn: opBrIf, a: body[pc+1]}, true
+		return instr{fn: opBrIf, a: body[pc+1]}, nil
 	case brTable:
 		count := int(body[pc+1])
 		labels := make([]uint32, count)
@@ -566,868 +564,868 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		}
 		idx := len(vm.brTables)
 		vm.brTables = append(vm.brTables, labels)
-		return instr{fn: opBrTable, a: uint64(idx), b: body[pc+2+count]}, true
+		return instr{fn: opBrTable, a: uint64(idx), b: body[pc+2+count]}, nil
 	case returnOp:
-		return instr{fn: opReturn}, true
+		return instr{fn: opReturn}, nil
 	case call:
-		return instr{fn: opCall, a: body[pc+1]}, true
+		return instr{fn: opCall, a: body[pc+1]}, nil
 	case callIndirect:
-		return instr{fn: opCallIndirect, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opCallIndirect, a: body[pc+1], b: body[pc+2]}, nil
 	case drop:
-		return instr{fn: opDrop}, true
+		return instr{fn: opDrop}, nil
 	case selectOp:
-		return instr{fn: opSelect}, true
+		return instr{fn: opSelect}, nil
 	case selectT:
-		return instr{fn: opSelect}, true
+		return instr{fn: opSelect}, nil
 	case localGet:
-		return instr{fn: opLocalGet, a: body[pc+1]}, true
+		return instr{fn: opLocalGet, a: body[pc+1]}, nil
 	case localSet:
-		return instr{fn: opLocalSet, a: body[pc+1]}, true
+		return instr{fn: opLocalSet, a: body[pc+1]}, nil
 	case localTee:
-		return instr{fn: opLocalTee, a: body[pc+1]}, true
+		return instr{fn: opLocalTee, a: body[pc+1]}, nil
 	case globalGet:
-		return instr{fn: opGlobalGet, a: body[pc+1]}, true
+		return instr{fn: opGlobalGet, a: body[pc+1]}, nil
 	case globalSet:
-		return instr{fn: opGlobalSet, a: body[pc+1]}, true
+		return instr{fn: opGlobalSet, a: body[pc+1]}, nil
 	case tableGet:
-		return instr{fn: opTableGet, a: body[pc+1]}, true
+		return instr{fn: opTableGet, a: body[pc+1]}, nil
 	case tableSet:
-		return instr{fn: opTableSet, a: body[pc+1]}, true
+		return instr{fn: opTableSet, a: body[pc+1]}, nil
 	case i32Load:
-		return instr{fn: opI32Load, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Load, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load:
-		return instr{fn: opI64Load, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load, a: body[pc+2], b: body[pc+3]}, nil
 	case f32Load:
-		return instr{fn: opF32Load, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opF32Load, a: body[pc+2], b: body[pc+3]}, nil
 	case f64Load:
-		return instr{fn: opF64Load, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opF64Load, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Load8S:
-		return instr{fn: opI32Load8S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Load8S, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Load8U:
-		return instr{fn: opI32Load8U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Load8U, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Load16S:
-		return instr{fn: opI32Load16S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Load16S, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Load16U:
-		return instr{fn: opI32Load16U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Load16U, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load8S:
-		return instr{fn: opI64Load8S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load8S, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load8U:
-		return instr{fn: opI64Load8U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load8U, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load16S:
-		return instr{fn: opI64Load16S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load16S, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load16U:
-		return instr{fn: opI64Load16U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load16U, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load32S:
-		return instr{fn: opI64Load32S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load32S, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Load32U:
-		return instr{fn: opI64Load32U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Load32U, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Store:
-		return instr{fn: opI32Store, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Store, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Store:
-		return instr{fn: opI64Store, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Store, a: body[pc+2], b: body[pc+3]}, nil
 	case f32Store:
-		return instr{fn: opF32Store, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opF32Store, a: body[pc+2], b: body[pc+3]}, nil
 	case f64Store:
-		return instr{fn: opF64Store, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opF64Store, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Store8:
-		return instr{fn: opI32Store8, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Store8, a: body[pc+2], b: body[pc+3]}, nil
 	case i32Store16:
-		return instr{fn: opI32Store16, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI32Store16, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Store8:
-		return instr{fn: opI64Store8, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Store8, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Store16:
-		return instr{fn: opI64Store16, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Store16, a: body[pc+2], b: body[pc+3]}, nil
 	case i64Store32:
-		return instr{fn: opI64Store32, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opI64Store32, a: body[pc+2], b: body[pc+3]}, nil
 	case memorySize:
-		return instr{fn: opMemorySize, a: body[pc+1]}, true
+		return instr{fn: opMemorySize, a: body[pc+1]}, nil
 	case memoryGrow:
-		return instr{fn: opMemoryGrow, a: body[pc+1]}, true
+		return instr{fn: opMemoryGrow, a: body[pc+1]}, nil
 	case i32Const:
-		return instr{fn: opI32Const, a: body[pc+1]}, true
+		return instr{fn: opI32Const, a: body[pc+1]}, nil
 	case i64Const:
-		return instr{fn: opI64Const, a: body[pc+1]}, true
+		return instr{fn: opI64Const, a: body[pc+1]}, nil
 	case f32Const:
-		return instr{fn: opF32Const, a: body[pc+1]}, true
+		return instr{fn: opF32Const, a: body[pc+1]}, nil
 	case f64Const:
-		return instr{fn: opF64Const, a: body[pc+1]}, true
+		return instr{fn: opF64Const, a: body[pc+1]}, nil
 	case i32Eqz:
-		return instr{fn: opI32Eqz}, true
+		return instr{fn: opI32Eqz}, nil
 	case i32Eq:
-		return instr{fn: opCmpI32[eqI32]}, true
+		return instr{fn: opCmpI32[eqI32]}, nil
 	case i32Ne:
-		return instr{fn: opCmpI32[neI32]}, true
+		return instr{fn: opCmpI32[neI32]}, nil
 	case i32LtS:
-		return instr{fn: opCmpI32[ltSI32]}, true
+		return instr{fn: opCmpI32[ltSI32]}, nil
 	case i32LtU:
-		return instr{fn: opCmpI32[ltUI32]}, true
+		return instr{fn: opCmpI32[ltUI32]}, nil
 	case i32GtS:
-		return instr{fn: opCmpI32[gtSI32]}, true
+		return instr{fn: opCmpI32[gtSI32]}, nil
 	case i32GtU:
-		return instr{fn: opCmpI32[gtUI32]}, true
+		return instr{fn: opCmpI32[gtUI32]}, nil
 	case i32LeS:
-		return instr{fn: opCmpI32[leSI32]}, true
+		return instr{fn: opCmpI32[leSI32]}, nil
 	case i32LeU:
-		return instr{fn: opCmpI32[leUI32]}, true
+		return instr{fn: opCmpI32[leUI32]}, nil
 	case i32GeS:
-		return instr{fn: opCmpI32[geSI32]}, true
+		return instr{fn: opCmpI32[geSI32]}, nil
 	case i32GeU:
-		return instr{fn: opCmpI32[geUI32]}, true
+		return instr{fn: opCmpI32[geUI32]}, nil
 	case i64Eqz:
-		return instr{fn: opI64Eqz}, true
+		return instr{fn: opI64Eqz}, nil
 	case i64Eq:
-		return instr{fn: opCmpI64[eqI64]}, true
+		return instr{fn: opCmpI64[eqI64]}, nil
 	case i64Ne:
-		return instr{fn: opCmpI64[neI64]}, true
+		return instr{fn: opCmpI64[neI64]}, nil
 	case i64LtS:
-		return instr{fn: opCmpI64[ltSI64]}, true
+		return instr{fn: opCmpI64[ltSI64]}, nil
 	case i64LtU:
-		return instr{fn: opCmpI64[ltUI64]}, true
+		return instr{fn: opCmpI64[ltUI64]}, nil
 	case i64GtS:
-		return instr{fn: opCmpI64[gtSI64]}, true
+		return instr{fn: opCmpI64[gtSI64]}, nil
 	case i64GtU:
-		return instr{fn: opCmpI64[gtUI64]}, true
+		return instr{fn: opCmpI64[gtUI64]}, nil
 	case i64LeS:
-		return instr{fn: opCmpI64[leSI64]}, true
+		return instr{fn: opCmpI64[leSI64]}, nil
 	case i64LeU:
-		return instr{fn: opCmpI64[leUI64]}, true
+		return instr{fn: opCmpI64[leUI64]}, nil
 	case i64GeS:
-		return instr{fn: opCmpI64[geSI64]}, true
+		return instr{fn: opCmpI64[geSI64]}, nil
 	case i64GeU:
-		return instr{fn: opCmpI64[geUI64]}, true
+		return instr{fn: opCmpI64[geUI64]}, nil
 	case f32Eq:
-		return instr{fn: opCmpF32[f32EqOp]}, true
+		return instr{fn: opCmpF32[f32EqOp]}, nil
 	case f32Ne:
-		return instr{fn: opCmpF32[f32NeOp]}, true
+		return instr{fn: opCmpF32[f32NeOp]}, nil
 	case f32Lt:
-		return instr{fn: opCmpF32[f32LtOp]}, true
+		return instr{fn: opCmpF32[f32LtOp]}, nil
 	case f32Gt:
-		return instr{fn: opCmpF32[f32GtOp]}, true
+		return instr{fn: opCmpF32[f32GtOp]}, nil
 	case f32Le:
-		return instr{fn: opCmpF32[f32LeOp]}, true
+		return instr{fn: opCmpF32[f32LeOp]}, nil
 	case f32Ge:
-		return instr{fn: opCmpF32[f32GeOp]}, true
+		return instr{fn: opCmpF32[f32GeOp]}, nil
 	case f64Eq:
-		return instr{fn: opCmpF64[f64EqOp]}, true
+		return instr{fn: opCmpF64[f64EqOp]}, nil
 	case f64Ne:
-		return instr{fn: opCmpF64[f64NeOp]}, true
+		return instr{fn: opCmpF64[f64NeOp]}, nil
 	case f64Lt:
-		return instr{fn: opCmpF64[f64LtOp]}, true
+		return instr{fn: opCmpF64[f64LtOp]}, nil
 	case f64Gt:
-		return instr{fn: opCmpF64[f64GtOp]}, true
+		return instr{fn: opCmpF64[f64GtOp]}, nil
 	case f64Le:
-		return instr{fn: opCmpF64[f64LeOp]}, true
+		return instr{fn: opCmpF64[f64LeOp]}, nil
 	case f64Ge:
-		return instr{fn: opCmpF64[f64GeOp]}, true
+		return instr{fn: opCmpF64[f64GeOp]}, nil
 	case i32Clz:
-		return instr{fn: opI32Clz}, true
+		return instr{fn: opI32Clz}, nil
 	case i32Ctz:
-		return instr{fn: opI32Ctz}, true
+		return instr{fn: opI32Ctz}, nil
 	case i32Popcnt:
-		return instr{fn: opI32Popcnt}, true
+		return instr{fn: opI32Popcnt}, nil
 	case i32Add:
-		return instr{fn: opBinI32[addI32]}, true
+		return instr{fn: opBinI32[addI32]}, nil
 	case i32Sub:
-		return instr{fn: opBinI32[subI32]}, true
+		return instr{fn: opBinI32[subI32]}, nil
 	case i32Mul:
-		return instr{fn: opBinI32[mulI32]}, true
+		return instr{fn: opBinI32[mulI32]}, nil
 	case i32DivS:
-		return instr{fn: opSafeBinI32[i32DivSOp]}, true
+		return instr{fn: opSafeBinI32[i32DivSOp]}, nil
 	case i32DivU:
-		return instr{fn: opSafeBinI32[i32DivUOp]}, true
+		return instr{fn: opSafeBinI32[i32DivUOp]}, nil
 	case i32RemS:
-		return instr{fn: opSafeBinI32[i32RemSOp]}, true
+		return instr{fn: opSafeBinI32[i32RemSOp]}, nil
 	case i32RemU:
-		return instr{fn: opSafeBinI32[i32RemUOp]}, true
+		return instr{fn: opSafeBinI32[i32RemUOp]}, nil
 	case i32And:
-		return instr{fn: opBinI32[andI32]}, true
+		return instr{fn: opBinI32[andI32]}, nil
 	case i32Or:
-		return instr{fn: opBinI32[orI32]}, true
+		return instr{fn: opBinI32[orI32]}, nil
 	case i32Xor:
-		return instr{fn: opBinI32[xorI32]}, true
+		return instr{fn: opBinI32[xorI32]}, nil
 	case i32Shl:
-		return instr{fn: opBinI32[shlI32]}, true
+		return instr{fn: opBinI32[shlI32]}, nil
 	case i32ShrS:
-		return instr{fn: opBinI32[shrSI32]}, true
+		return instr{fn: opBinI32[shrSI32]}, nil
 	case i32ShrU:
-		return instr{fn: opBinI32[shrUI32]}, true
+		return instr{fn: opBinI32[shrUI32]}, nil
 	case i32Rotl:
-		return instr{fn: opBinI32[rotlI32]}, true
+		return instr{fn: opBinI32[rotlI32]}, nil
 	case i32Rotr:
-		return instr{fn: opBinI32[rotrI32]}, true
+		return instr{fn: opBinI32[rotrI32]}, nil
 	case i64Clz:
-		return instr{fn: opI64Clz}, true
+		return instr{fn: opI64Clz}, nil
 	case i64Ctz:
-		return instr{fn: opI64Ctz}, true
+		return instr{fn: opI64Ctz}, nil
 	case i64Popcnt:
-		return instr{fn: opI64Popcnt}, true
+		return instr{fn: opI64Popcnt}, nil
 	case i64Add:
-		return instr{fn: opBinI64[addI64]}, true
+		return instr{fn: opBinI64[addI64]}, nil
 	case i64Sub:
-		return instr{fn: opBinI64[subI64]}, true
+		return instr{fn: opBinI64[subI64]}, nil
 	case i64Mul:
-		return instr{fn: opBinI64[mulI64]}, true
+		return instr{fn: opBinI64[mulI64]}, nil
 	case i64DivS:
-		return instr{fn: opSafeBinI64[i64DivSOp]}, true
+		return instr{fn: opSafeBinI64[i64DivSOp]}, nil
 	case i64DivU:
-		return instr{fn: opSafeBinI64[i64DivUOp]}, true
+		return instr{fn: opSafeBinI64[i64DivUOp]}, nil
 	case i64RemS:
-		return instr{fn: opSafeBinI64[i64RemSOp]}, true
+		return instr{fn: opSafeBinI64[i64RemSOp]}, nil
 	case i64RemU:
-		return instr{fn: opSafeBinI64[i64RemUOp]}, true
+		return instr{fn: opSafeBinI64[i64RemUOp]}, nil
 	case i64And:
-		return instr{fn: opBinI64[andI64]}, true
+		return instr{fn: opBinI64[andI64]}, nil
 	case i64Or:
-		return instr{fn: opBinI64[orI64]}, true
+		return instr{fn: opBinI64[orI64]}, nil
 	case i64Xor:
-		return instr{fn: opBinI64[xorI64]}, true
+		return instr{fn: opBinI64[xorI64]}, nil
 	case i64Shl:
-		return instr{fn: opBinI64[shlI64]}, true
+		return instr{fn: opBinI64[shlI64]}, nil
 	case i64ShrS:
-		return instr{fn: opBinI64[shrSI64]}, true
+		return instr{fn: opBinI64[shrSI64]}, nil
 	case i64ShrU:
-		return instr{fn: opBinI64[shrUI64]}, true
+		return instr{fn: opBinI64[shrUI64]}, nil
 	case i64Rotl:
-		return instr{fn: opBinI64[rotlI64]}, true
+		return instr{fn: opBinI64[rotlI64]}, nil
 	case i64Rotr:
-		return instr{fn: opBinI64[rotrI64]}, true
+		return instr{fn: opBinI64[rotrI64]}, nil
 	case f32Abs:
-		return instr{fn: opF32Abs}, true
+		return instr{fn: opF32Abs}, nil
 	case f32Neg:
-		return instr{fn: opF32Neg}, true
+		return instr{fn: opF32Neg}, nil
 	case f32Ceil:
-		return instr{fn: opF32Ceil}, true
+		return instr{fn: opF32Ceil}, nil
 	case f32Floor:
-		return instr{fn: opF32Floor}, true
+		return instr{fn: opF32Floor}, nil
 	case f32Trunc:
-		return instr{fn: opF32Trunc}, true
+		return instr{fn: opF32Trunc}, nil
 	case f32Nearest:
-		return instr{fn: opF32Nearest}, true
+		return instr{fn: opF32Nearest}, nil
 	case f32Sqrt:
-		return instr{fn: opF32Sqrt}, true
+		return instr{fn: opF32Sqrt}, nil
 	case f32Add:
-		return instr{fn: opBinF32[f32AddOp]}, true
+		return instr{fn: opBinF32[f32AddOp]}, nil
 	case f32Sub:
-		return instr{fn: opBinF32[f32SubOp]}, true
+		return instr{fn: opBinF32[f32SubOp]}, nil
 	case f32Mul:
-		return instr{fn: opBinF32[f32MulOp]}, true
+		return instr{fn: opBinF32[f32MulOp]}, nil
 	case f32Div:
-		return instr{fn: opBinF32[f32DivOp]}, true
+		return instr{fn: opBinF32[f32DivOp]}, nil
 	case f32Min:
-		return instr{fn: opBinF32[f32MinOp]}, true
+		return instr{fn: opBinF32[f32MinOp]}, nil
 	case f32Max:
-		return instr{fn: opBinF32[f32MaxOp]}, true
+		return instr{fn: opBinF32[f32MaxOp]}, nil
 	case f32Copysign:
-		return instr{fn: opBinF32[f32CopysignOp]}, true
+		return instr{fn: opBinF32[f32CopysignOp]}, nil
 	case f64Abs:
-		return instr{fn: opF64Abs}, true
+		return instr{fn: opF64Abs}, nil
 	case f64Neg:
-		return instr{fn: opF64Neg}, true
+		return instr{fn: opF64Neg}, nil
 	case f64Ceil:
-		return instr{fn: opF64Ceil}, true
+		return instr{fn: opF64Ceil}, nil
 	case f64Floor:
-		return instr{fn: opF64Floor}, true
+		return instr{fn: opF64Floor}, nil
 	case f64Trunc:
-		return instr{fn: opF64Trunc}, true
+		return instr{fn: opF64Trunc}, nil
 	case f64Nearest:
-		return instr{fn: opF64Nearest}, true
+		return instr{fn: opF64Nearest}, nil
 	case f64Sqrt:
-		return instr{fn: opF64Sqrt}, true
+		return instr{fn: opF64Sqrt}, nil
 	case f64Add:
-		return instr{fn: opBinF64[f64AddOp]}, true
+		return instr{fn: opBinF64[f64AddOp]}, nil
 	case f64Sub:
-		return instr{fn: opBinF64[f64SubOp]}, true
+		return instr{fn: opBinF64[f64SubOp]}, nil
 	case f64Mul:
-		return instr{fn: opBinF64[f64MulOp]}, true
+		return instr{fn: opBinF64[f64MulOp]}, nil
 	case f64Div:
-		return instr{fn: opBinF64[f64DivOp]}, true
+		return instr{fn: opBinF64[f64DivOp]}, nil
 	case f64Min:
-		return instr{fn: opBinF64[f64MinOp]}, true
+		return instr{fn: opBinF64[f64MinOp]}, nil
 	case f64Max:
-		return instr{fn: opBinF64[f64MaxOp]}, true
+		return instr{fn: opBinF64[f64MaxOp]}, nil
 	case f64Copysign:
-		return instr{fn: opBinF64[f64CopysignOp]}, true
+		return instr{fn: opBinF64[f64CopysignOp]}, nil
 	case i32WrapI64:
-		return instr{fn: opI32WrapI64}, true
+		return instr{fn: opI32WrapI64}, nil
 	case i32TruncF32S:
-		return instr{fn: opUnarySafeF32[i32TruncF32SOp]}, true
+		return instr{fn: opUnarySafeF32[i32TruncF32SOp]}, nil
 	case i32TruncF32U:
-		return instr{fn: opUnarySafeF32[i32TruncF32UOp]}, true
+		return instr{fn: opUnarySafeF32[i32TruncF32UOp]}, nil
 	case i32TruncF64S:
-		return instr{fn: opUnarySafeF64[i32TruncF64SOp]}, true
+		return instr{fn: opUnarySafeF64[i32TruncF64SOp]}, nil
 	case i32TruncF64U:
-		return instr{fn: opUnarySafeF64[i32TruncF64UOp]}, true
+		return instr{fn: opUnarySafeF64[i32TruncF64UOp]}, nil
 	case i64ExtendI32S:
-		return instr{fn: opI64ExtendI32S}, true
+		return instr{fn: opI64ExtendI32S}, nil
 	case i64ExtendI32U:
-		return instr{fn: opI64ExtendI32U}, true
+		return instr{fn: opI64ExtendI32U}, nil
 	case i64TruncF32S:
-		return instr{fn: opTruncF32I64[i64TruncF32SOp]}, true
+		return instr{fn: opTruncF32I64[i64TruncF32SOp]}, nil
 	case i64TruncF32U:
-		return instr{fn: opTruncF32I64[i64TruncF32UOp]}, true
+		return instr{fn: opTruncF32I64[i64TruncF32UOp]}, nil
 	case i64TruncF64S:
-		return instr{fn: opTruncF64I64[i64TruncF64SOp]}, true
+		return instr{fn: opTruncF64I64[i64TruncF64SOp]}, nil
 	case i64TruncF64U:
-		return instr{fn: opTruncF64I64[i64TruncF64UOp]}, true
+		return instr{fn: opTruncF64I64[i64TruncF64UOp]}, nil
 	case f32ConvertI32S:
-		return instr{fn: opF32ConvertI32S}, true
+		return instr{fn: opF32ConvertI32S}, nil
 	case f32ConvertI32U:
-		return instr{fn: opF32ConvertI32U}, true
+		return instr{fn: opF32ConvertI32U}, nil
 	case f32ConvertI64S:
-		return instr{fn: opF32ConvertI64S}, true
+		return instr{fn: opF32ConvertI64S}, nil
 	case f32ConvertI64U:
-		return instr{fn: opF32ConvertI64U}, true
+		return instr{fn: opF32ConvertI64U}, nil
 	case f32DemoteF64:
-		return instr{fn: opF32DemoteF64}, true
+		return instr{fn: opF32DemoteF64}, nil
 	case f64ConvertI32S:
-		return instr{fn: opF64ConvertI32S}, true
+		return instr{fn: opF64ConvertI32S}, nil
 	case f64ConvertI32U:
-		return instr{fn: opF64ConvertI32U}, true
+		return instr{fn: opF64ConvertI32U}, nil
 	case f64ConvertI64S:
-		return instr{fn: opF64ConvertI64S}, true
+		return instr{fn: opF64ConvertI64S}, nil
 	case f64ConvertI64U:
-		return instr{fn: opF64ConvertI64U}, true
+		return instr{fn: opF64ConvertI64U}, nil
 	case f64PromoteF32:
-		return instr{fn: opF64PromoteF32}, true
+		return instr{fn: opF64PromoteF32}, nil
 	case i32ReinterpretF32:
-		return instr{fn: opI32ReinterpretF32}, true
+		return instr{fn: opI32ReinterpretF32}, nil
 	case i64ReinterpretF64:
-		return instr{fn: opI64ReinterpretF64}, true
+		return instr{fn: opI64ReinterpretF64}, nil
 	case f32ReinterpretI32:
-		return instr{fn: opF32ReinterpretI32}, true
+		return instr{fn: opF32ReinterpretI32}, nil
 	case f64ReinterpretI64:
-		return instr{fn: opF64ReinterpretI64}, true
+		return instr{fn: opF64ReinterpretI64}, nil
 	case i32Extend8S:
-		return instr{fn: opI32Extend8S}, true
+		return instr{fn: opI32Extend8S}, nil
 	case i32Extend16S:
-		return instr{fn: opI32Extend16S}, true
+		return instr{fn: opI32Extend16S}, nil
 	case i64Extend8S:
-		return instr{fn: opI64Extend8S}, true
+		return instr{fn: opI64Extend8S}, nil
 	case i64Extend16S:
-		return instr{fn: opI64Extend16S}, true
+		return instr{fn: opI64Extend16S}, nil
 	case i64Extend32S:
-		return instr{fn: opI64Extend32S}, true
+		return instr{fn: opI64Extend32S}, nil
 	case refNull:
-		return instr{fn: opRefNull}, true
+		return instr{fn: opRefNull}, nil
 	case refIsNull:
-		return instr{fn: opRefIsNull}, true
+		return instr{fn: opRefIsNull}, nil
 	case refFunc:
-		return instr{fn: opRefFunc, a: body[pc+1]}, true
+		return instr{fn: opRefFunc, a: body[pc+1]}, nil
 	case i32TruncSatF32S:
-		return instr{fn: opI32TruncSatF32S}, true
+		return instr{fn: opI32TruncSatF32S}, nil
 	case i32TruncSatF32U:
-		return instr{fn: opI32TruncSatF32U}, true
+		return instr{fn: opI32TruncSatF32U}, nil
 	case i32TruncSatF64S:
-		return instr{fn: opI32TruncSatF64S}, true
+		return instr{fn: opI32TruncSatF64S}, nil
 	case i32TruncSatF64U:
-		return instr{fn: opI32TruncSatF64U}, true
+		return instr{fn: opI32TruncSatF64U}, nil
 	case i64TruncSatF32S:
-		return instr{fn: opI64TruncSatF32S}, true
+		return instr{fn: opI64TruncSatF32S}, nil
 	case i64TruncSatF32U:
-		return instr{fn: opI64TruncSatF32U}, true
+		return instr{fn: opI64TruncSatF32U}, nil
 	case i64TruncSatF64S:
-		return instr{fn: opI64TruncSatF64S}, true
+		return instr{fn: opI64TruncSatF64S}, nil
 	case i64TruncSatF64U:
-		return instr{fn: opI64TruncSatF64U}, true
+		return instr{fn: opI64TruncSatF64U}, nil
 	case memoryInit:
-		return instr{fn: opMemoryInit, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opMemoryInit, a: body[pc+1], b: body[pc+2]}, nil
 	case dataDrop:
-		return instr{fn: opDataDrop, a: body[pc+1]}, true
+		return instr{fn: opDataDrop, a: body[pc+1]}, nil
 	case memoryCopy:
-		return instr{fn: opMemoryCopy, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opMemoryCopy, a: body[pc+1], b: body[pc+2]}, nil
 	case memoryFill:
-		return instr{fn: opMemoryFill, a: body[pc+1]}, true
+		return instr{fn: opMemoryFill, a: body[pc+1]}, nil
 	case tableInit:
-		return instr{fn: opTableInit, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opTableInit, a: body[pc+1], b: body[pc+2]}, nil
 	case elemDrop:
-		return instr{fn: opElemDrop, a: body[pc+1]}, true
+		return instr{fn: opElemDrop, a: body[pc+1]}, nil
 	case tableCopy:
-		return instr{fn: opTableCopy, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opTableCopy, a: body[pc+1], b: body[pc+2]}, nil
 	case tableGrow:
-		return instr{fn: opTableGrow, a: body[pc+1]}, true
+		return instr{fn: opTableGrow, a: body[pc+1]}, nil
 	case tableSize:
-		return instr{fn: opTableSize, a: body[pc+1]}, true
+		return instr{fn: opTableSize, a: body[pc+1]}, nil
 	case tableFill:
-		return instr{fn: opTableFill, a: body[pc+1]}, true
+		return instr{fn: opTableFill, a: body[pc+1]}, nil
 	case v128Load:
-		return instr{fn: opV128Load, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load8x8S:
-		return instr{fn: opV128Load8x8S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load8x8S, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load8x8U:
-		return instr{fn: opV128Load8x8U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load8x8U, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load16x4S:
-		return instr{fn: opV128Load16x4S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load16x4S, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load16x4U:
-		return instr{fn: opV128Load16x4U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load16x4U, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load32x2S:
-		return instr{fn: opV128Load32x2S, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load32x2S, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load32x2U:
-		return instr{fn: opV128Load32x2U, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load32x2U, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load8Splat:
-		return instr{fn: opV128Load8Splat, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load8Splat, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load16Splat:
-		return instr{fn: opV128Load16Splat, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load16Splat, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load32Splat:
-		return instr{fn: opV128Load32Splat, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load32Splat, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load64Splat:
-		return instr{fn: opV128Load64Splat, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load64Splat, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Store:
-		return instr{fn: opV128Store, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Store, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Const:
-		return instr{fn: opV128Const, a: body[pc+1], b: body[pc+2]}, true
+		return instr{fn: opV128Const, a: body[pc+1], b: body[pc+2]}, nil
 	case i8x16Shuffle:
 		var a, b uint64
 		for i := range 8 {
 			a |= body[pc+1+i] << (8 * i)
 			b |= body[pc+1+8+i] << (8 * i)
 		}
-		return instr{fn: opI8x16Shuffle, a: a, b: b}, true
+		return instr{fn: opI8x16Shuffle, a: a, b: b}, nil
 	case i8x16Swizzle:
-		return instr{fn: opBinV128[i8x16SwizzleOp]}, true
+		return instr{fn: opBinV128[i8x16SwizzleOp]}, nil
 	case i8x16Splat:
-		return instr{fn: opI8x16Splat}, true
+		return instr{fn: opI8x16Splat}, nil
 	case i16x8Splat:
-		return instr{fn: opI16x8Splat}, true
+		return instr{fn: opI16x8Splat}, nil
 	case i32x4Splat:
-		return instr{fn: opI32x4Splat}, true
+		return instr{fn: opI32x4Splat}, nil
 	case i64x2Splat:
-		return instr{fn: opI64x2Splat}, true
+		return instr{fn: opI64x2Splat}, nil
 	case f32x4Splat:
-		return instr{fn: opF32x4Splat}, true
+		return instr{fn: opF32x4Splat}, nil
 	case f64x2Splat:
-		return instr{fn: opF64x2Splat}, true
+		return instr{fn: opF64x2Splat}, nil
 	case i8x16ExtractLaneS:
-		return instr{fn: opI8x16ExtractLaneS, a: body[pc+1]}, true
+		return instr{fn: opI8x16ExtractLaneS, a: body[pc+1]}, nil
 	case i8x16ExtractLaneU:
-		return instr{fn: opI8x16ExtractLaneU, a: body[pc+1]}, true
+		return instr{fn: opI8x16ExtractLaneU, a: body[pc+1]}, nil
 	case i8x16ReplaceLane:
-		return instr{fn: opI8x16ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opI8x16ReplaceLane, a: body[pc+1]}, nil
 	case i16x8ExtractLaneS:
-		return instr{fn: opI16x8ExtractLaneS, a: body[pc+1]}, true
+		return instr{fn: opI16x8ExtractLaneS, a: body[pc+1]}, nil
 	case i16x8ExtractLaneU:
-		return instr{fn: opI16x8ExtractLaneU, a: body[pc+1]}, true
+		return instr{fn: opI16x8ExtractLaneU, a: body[pc+1]}, nil
 	case i16x8ReplaceLane:
-		return instr{fn: opI16x8ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opI16x8ReplaceLane, a: body[pc+1]}, nil
 	case i32x4ExtractLane:
-		return instr{fn: opI32x4ExtractLane, a: body[pc+1]}, true
+		return instr{fn: opI32x4ExtractLane, a: body[pc+1]}, nil
 	case i32x4ReplaceLane:
-		return instr{fn: opI32x4ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opI32x4ReplaceLane, a: body[pc+1]}, nil
 	case i64x2ExtractLane:
-		return instr{fn: opI64x2ExtractLane, a: body[pc+1]}, true
+		return instr{fn: opI64x2ExtractLane, a: body[pc+1]}, nil
 	case i64x2ReplaceLane:
-		return instr{fn: opI64x2ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opI64x2ReplaceLane, a: body[pc+1]}, nil
 	case f32x4ExtractLane:
-		return instr{fn: opF32x4ExtractLane, a: body[pc+1]}, true
+		return instr{fn: opF32x4ExtractLane, a: body[pc+1]}, nil
 	case f32x4ReplaceLane:
-		return instr{fn: opF32x4ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opF32x4ReplaceLane, a: body[pc+1]}, nil
 	case f64x2ExtractLane:
-		return instr{fn: opF64x2ExtractLane, a: body[pc+1]}, true
+		return instr{fn: opF64x2ExtractLane, a: body[pc+1]}, nil
 	case f64x2ReplaceLane:
-		return instr{fn: opF64x2ReplaceLane, a: body[pc+1]}, true
+		return instr{fn: opF64x2ReplaceLane, a: body[pc+1]}, nil
 	case i8x16Eq:
-		return instr{fn: opBinV128[i8x16EqOp]}, true
+		return instr{fn: opBinV128[i8x16EqOp]}, nil
 	case i8x16Ne:
-		return instr{fn: opBinV128[i8x16NeOp]}, true
+		return instr{fn: opBinV128[i8x16NeOp]}, nil
 	case i8x16LtS:
-		return instr{fn: opBinV128[i8x16LtSOp]}, true
+		return instr{fn: opBinV128[i8x16LtSOp]}, nil
 	case i8x16LtU:
-		return instr{fn: opBinV128[i8x16LtUOp]}, true
+		return instr{fn: opBinV128[i8x16LtUOp]}, nil
 	case i8x16GtS:
-		return instr{fn: opBinV128[i8x16GtSOp]}, true
+		return instr{fn: opBinV128[i8x16GtSOp]}, nil
 	case i8x16GtU:
-		return instr{fn: opBinV128[i8x16GtUOp]}, true
+		return instr{fn: opBinV128[i8x16GtUOp]}, nil
 	case i8x16LeS:
-		return instr{fn: opBinV128[i8x16LeSOp]}, true
+		return instr{fn: opBinV128[i8x16LeSOp]}, nil
 	case i8x16LeU:
-		return instr{fn: opBinV128[i8x16LeUOp]}, true
+		return instr{fn: opBinV128[i8x16LeUOp]}, nil
 	case i8x16GeS:
-		return instr{fn: opBinV128[i8x16GeSOp]}, true
+		return instr{fn: opBinV128[i8x16GeSOp]}, nil
 	case i8x16GeU:
-		return instr{fn: opBinV128[i8x16GeUOp]}, true
+		return instr{fn: opBinV128[i8x16GeUOp]}, nil
 	case i16x8Eq:
-		return instr{fn: opBinV128[i16x8EqOp]}, true
+		return instr{fn: opBinV128[i16x8EqOp]}, nil
 	case i16x8Ne:
-		return instr{fn: opBinV128[i16x8NeOp]}, true
+		return instr{fn: opBinV128[i16x8NeOp]}, nil
 	case i16x8LtS:
-		return instr{fn: opBinV128[i16x8LtSOp]}, true
+		return instr{fn: opBinV128[i16x8LtSOp]}, nil
 	case i16x8LtU:
-		return instr{fn: opBinV128[i16x8LtUOp]}, true
+		return instr{fn: opBinV128[i16x8LtUOp]}, nil
 	case i16x8GtS:
-		return instr{fn: opBinV128[i16x8GtSOp]}, true
+		return instr{fn: opBinV128[i16x8GtSOp]}, nil
 	case i16x8GtU:
-		return instr{fn: opBinV128[i16x8GtUOp]}, true
+		return instr{fn: opBinV128[i16x8GtUOp]}, nil
 	case i16x8LeS:
-		return instr{fn: opBinV128[i16x8LeSOp]}, true
+		return instr{fn: opBinV128[i16x8LeSOp]}, nil
 	case i16x8LeU:
-		return instr{fn: opBinV128[i16x8LeUOp]}, true
+		return instr{fn: opBinV128[i16x8LeUOp]}, nil
 	case i16x8GeS:
-		return instr{fn: opBinV128[i16x8GeSOp]}, true
+		return instr{fn: opBinV128[i16x8GeSOp]}, nil
 	case i16x8GeU:
-		return instr{fn: opBinV128[i16x8GeUOp]}, true
+		return instr{fn: opBinV128[i16x8GeUOp]}, nil
 	case i32x4Eq:
-		return instr{fn: opBinV128[i32x4EqOp]}, true
+		return instr{fn: opBinV128[i32x4EqOp]}, nil
 	case i32x4Ne:
-		return instr{fn: opBinV128[i32x4NeOp]}, true
+		return instr{fn: opBinV128[i32x4NeOp]}, nil
 	case i32x4LtS:
-		return instr{fn: opBinV128[i32x4LtSOp]}, true
+		return instr{fn: opBinV128[i32x4LtSOp]}, nil
 	case i32x4LtU:
-		return instr{fn: opBinV128[i32x4LtUOp]}, true
+		return instr{fn: opBinV128[i32x4LtUOp]}, nil
 	case i32x4GtS:
-		return instr{fn: opBinV128[i32x4GtSOp]}, true
+		return instr{fn: opBinV128[i32x4GtSOp]}, nil
 	case i32x4GtU:
-		return instr{fn: opBinV128[i32x4GtUOp]}, true
+		return instr{fn: opBinV128[i32x4GtUOp]}, nil
 	case i32x4LeS:
-		return instr{fn: opBinV128[i32x4LeSOp]}, true
+		return instr{fn: opBinV128[i32x4LeSOp]}, nil
 	case i32x4LeU:
-		return instr{fn: opBinV128[i32x4LeUOp]}, true
+		return instr{fn: opBinV128[i32x4LeUOp]}, nil
 	case i32x4GeS:
-		return instr{fn: opBinV128[i32x4GeSOp]}, true
+		return instr{fn: opBinV128[i32x4GeSOp]}, nil
 	case i32x4GeU:
-		return instr{fn: opBinV128[i32x4GeUOp]}, true
+		return instr{fn: opBinV128[i32x4GeUOp]}, nil
 	case f32x4Eq:
-		return instr{fn: opBinV128[f32x4EqOp]}, true
+		return instr{fn: opBinV128[f32x4EqOp]}, nil
 	case f32x4Ne:
-		return instr{fn: opBinV128[f32x4NeOp]}, true
+		return instr{fn: opBinV128[f32x4NeOp]}, nil
 	case f32x4Lt:
-		return instr{fn: opBinV128[f32x4LtOp]}, true
+		return instr{fn: opBinV128[f32x4LtOp]}, nil
 	case f32x4Gt:
-		return instr{fn: opBinV128[f32x4GtOp]}, true
+		return instr{fn: opBinV128[f32x4GtOp]}, nil
 	case f32x4Le:
-		return instr{fn: opBinV128[f32x4LeOp]}, true
+		return instr{fn: opBinV128[f32x4LeOp]}, nil
 	case f32x4Ge:
-		return instr{fn: opBinV128[f32x4GeOp]}, true
+		return instr{fn: opBinV128[f32x4GeOp]}, nil
 	case f64x2Eq:
-		return instr{fn: opBinV128[f64x2EqOp]}, true
+		return instr{fn: opBinV128[f64x2EqOp]}, nil
 	case f64x2Ne:
-		return instr{fn: opBinV128[f64x2NeOp]}, true
+		return instr{fn: opBinV128[f64x2NeOp]}, nil
 	case f64x2Lt:
-		return instr{fn: opBinV128[f64x2LtOp]}, true
+		return instr{fn: opBinV128[f64x2LtOp]}, nil
 	case f64x2Gt:
-		return instr{fn: opBinV128[f64x2GtOp]}, true
+		return instr{fn: opBinV128[f64x2GtOp]}, nil
 	case f64x2Le:
-		return instr{fn: opBinV128[f64x2LeOp]}, true
+		return instr{fn: opBinV128[f64x2LeOp]}, nil
 	case f64x2Ge:
-		return instr{fn: opBinV128[f64x2GeOp]}, true
+		return instr{fn: opBinV128[f64x2GeOp]}, nil
 	case v128Not:
-		return instr{fn: opUnaryV128G[v128NotOp]}, true
+		return instr{fn: opUnaryV128G[v128NotOp]}, nil
 	case v128And:
-		return instr{fn: opBinV128[v128AndOp]}, true
+		return instr{fn: opBinV128[v128AndOp]}, nil
 	case v128Andnot:
-		return instr{fn: opBinV128[v128AndnotOp]}, true
+		return instr{fn: opBinV128[v128AndnotOp]}, nil
 	case v128Or:
-		return instr{fn: opBinV128[v128OrOp]}, true
+		return instr{fn: opBinV128[v128OrOp]}, nil
 	case v128Xor:
-		return instr{fn: opBinV128[v128XorOp]}, true
+		return instr{fn: opBinV128[v128XorOp]}, nil
 	case v128Bitselect:
-		return instr{fn: opTernaryV128[v128BitselectOp]}, true
+		return instr{fn: opTernaryV128[v128BitselectOp]}, nil
 	case v128AnyTrue:
-		return instr{fn: opV128AnyTrue}, true
+		return instr{fn: opV128AnyTrue}, nil
 	case v128Load8Lane:
-		return instr{fn: opV128Load8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Load8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Load16Lane:
-		return instr{fn: opV128Load16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Load16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Load32Lane:
-		return instr{fn: opV128Load32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Load32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Load64Lane:
-		return instr{fn: opV128Load64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Load64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Store8Lane:
-		return instr{fn: opV128Store8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Store8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Store16Lane:
-		return instr{fn: opV128Store16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Store16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Store32Lane:
-		return instr{fn: opV128Store32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Store32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Store64Lane:
-		return instr{fn: opV128Store64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+		return instr{fn: opV128Store64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, nil
 	case v128Load32Zero:
-		return instr{fn: opV128Load32Zero, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load32Zero, a: body[pc+2], b: body[pc+3]}, nil
 	case v128Load64Zero:
-		return instr{fn: opV128Load64Zero, a: body[pc+2], b: body[pc+3]}, true
+		return instr{fn: opV128Load64Zero, a: body[pc+2], b: body[pc+3]}, nil
 	case f32x4DemoteF64x2Zero:
-		return instr{fn: opUnaryV128G[f32x4DemoteF64x2ZeroOp]}, true
+		return instr{fn: opUnaryV128G[f32x4DemoteF64x2ZeroOp]}, nil
 	case f64x2PromoteLowF32x4:
-		return instr{fn: opUnaryV128G[f64x2PromoteLowF32x4Op]}, true
+		return instr{fn: opUnaryV128G[f64x2PromoteLowF32x4Op]}, nil
 	case i8x16Abs:
-		return instr{fn: opUnaryV128G[i8x16AbsOp]}, true
+		return instr{fn: opUnaryV128G[i8x16AbsOp]}, nil
 	case i8x16Neg:
-		return instr{fn: opUnaryV128G[i8x16NegOp]}, true
+		return instr{fn: opUnaryV128G[i8x16NegOp]}, nil
 	case i8x16Popcnt:
-		return instr{fn: opUnaryV128G[i8x16PopcntOp]}, true
+		return instr{fn: opUnaryV128G[i8x16PopcntOp]}, nil
 	case i8x16AllTrue:
-		return instr{fn: opI8x16AllTrue}, true
+		return instr{fn: opI8x16AllTrue}, nil
 	case i8x16Bitmask:
-		return instr{fn: opI8x16Bitmask}, true
+		return instr{fn: opI8x16Bitmask}, nil
 	case i8x16NarrowI16x8S:
-		return instr{fn: opBinV128[i8x16NarrowI16x8SOp]}, true
+		return instr{fn: opBinV128[i8x16NarrowI16x8SOp]}, nil
 	case i8x16NarrowI16x8U:
-		return instr{fn: opBinV128[i8x16NarrowI16x8UOp]}, true
+		return instr{fn: opBinV128[i8x16NarrowI16x8UOp]}, nil
 	case f32x4Ceil:
-		return instr{fn: opUnaryV128G[f32x4CeilOp]}, true
+		return instr{fn: opUnaryV128G[f32x4CeilOp]}, nil
 	case f32x4Floor:
-		return instr{fn: opUnaryV128G[f32x4FloorOp]}, true
+		return instr{fn: opUnaryV128G[f32x4FloorOp]}, nil
 	case f32x4Trunc:
-		return instr{fn: opUnaryV128G[f32x4TruncOp]}, true
+		return instr{fn: opUnaryV128G[f32x4TruncOp]}, nil
 	case f32x4Nearest:
-		return instr{fn: opUnaryV128G[f32x4NearestOp]}, true
+		return instr{fn: opUnaryV128G[f32x4NearestOp]}, nil
 	case i8x16Shl:
-		return instr{fn: opShiftV128[i8x16ShlOp]}, true
+		return instr{fn: opShiftV128[i8x16ShlOp]}, nil
 	case i8x16ShrU:
-		return instr{fn: opShiftV128[i8x16ShrUOp]}, true
+		return instr{fn: opShiftV128[i8x16ShrUOp]}, nil
 	case i8x16ShrS:
-		return instr{fn: opShiftV128[i8x16ShrSOp]}, true
+		return instr{fn: opShiftV128[i8x16ShrSOp]}, nil
 	case i8x16Add:
-		return instr{fn: opBinV128[i8x16AddOp]}, true
+		return instr{fn: opBinV128[i8x16AddOp]}, nil
 	case i8x16AddSatS:
-		return instr{fn: opBinV128[i8x16AddSatSOp]}, true
+		return instr{fn: opBinV128[i8x16AddSatSOp]}, nil
 	case i8x16AddSatU:
-		return instr{fn: opBinV128[i8x16AddSatUOp]}, true
+		return instr{fn: opBinV128[i8x16AddSatUOp]}, nil
 	case i8x16Sub:
-		return instr{fn: opBinV128[i8x16SubOp]}, true
+		return instr{fn: opBinV128[i8x16SubOp]}, nil
 	case i8x16SubSatS:
-		return instr{fn: opBinV128[i8x16SubSatSOp]}, true
+		return instr{fn: opBinV128[i8x16SubSatSOp]}, nil
 	case i8x16SubSatU:
-		return instr{fn: opBinV128[i8x16SubSatUOp]}, true
+		return instr{fn: opBinV128[i8x16SubSatUOp]}, nil
 	case f64x2Ceil:
-		return instr{fn: opUnaryV128G[f64x2CeilOp]}, true
+		return instr{fn: opUnaryV128G[f64x2CeilOp]}, nil
 	case f64x2Floor:
-		return instr{fn: opUnaryV128G[f64x2FloorOp]}, true
+		return instr{fn: opUnaryV128G[f64x2FloorOp]}, nil
 	case i8x16MinS:
-		return instr{fn: opBinV128[i8x16MinSOp]}, true
+		return instr{fn: opBinV128[i8x16MinSOp]}, nil
 	case i8x16MinU:
-		return instr{fn: opBinV128[i8x16MinUOp]}, true
+		return instr{fn: opBinV128[i8x16MinUOp]}, nil
 	case i8x16MaxS:
-		return instr{fn: opBinV128[i8x16MaxSOp]}, true
+		return instr{fn: opBinV128[i8x16MaxSOp]}, nil
 	case i8x16MaxU:
-		return instr{fn: opBinV128[i8x16MaxUOp]}, true
+		return instr{fn: opBinV128[i8x16MaxUOp]}, nil
 	case f64x2Trunc:
-		return instr{fn: opUnaryV128G[f64x2TruncOp]}, true
+		return instr{fn: opUnaryV128G[f64x2TruncOp]}, nil
 	case i8x16AvgrU:
-		return instr{fn: opBinV128[i8x16AvgrUOp]}, true
+		return instr{fn: opBinV128[i8x16AvgrUOp]}, nil
 	case i16x8ExtaddPairwiseI8x16S:
-		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16SOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16SOp]}, nil
 	case i16x8ExtaddPairwiseI8x16U:
-		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16UOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtaddPairwiseI8x16UOp]}, nil
 	case i32x4ExtaddPairwiseI16x8S:
-		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8SOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8SOp]}, nil
 	case i32x4ExtaddPairwiseI16x8U:
-		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8UOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtaddPairwiseI16x8UOp]}, nil
 	case i16x8Abs:
-		return instr{fn: opUnaryV128G[i16x8AbsOp]}, true
+		return instr{fn: opUnaryV128G[i16x8AbsOp]}, nil
 	case i16x8Neg:
-		return instr{fn: opUnaryV128G[i16x8NegOp]}, true
+		return instr{fn: opUnaryV128G[i16x8NegOp]}, nil
 	case i16x8Q15mulrSatS:
-		return instr{fn: opBinV128[i16x8Q15mulrSatSOp]}, true
+		return instr{fn: opBinV128[i16x8Q15mulrSatSOp]}, nil
 	case i16x8AllTrue:
-		return instr{fn: opI16x8AllTrue}, true
+		return instr{fn: opI16x8AllTrue}, nil
 	case i16x8Bitmask:
-		return instr{fn: opI16x8Bitmask}, true
+		return instr{fn: opI16x8Bitmask}, nil
 	case i16x8NarrowI32x4S:
-		return instr{fn: opBinV128[i16x8NarrowI32x4SOp]}, true
+		return instr{fn: opBinV128[i16x8NarrowI32x4SOp]}, nil
 	case i16x8NarrowI32x4U:
-		return instr{fn: opBinV128[i16x8NarrowI32x4UOp]}, true
+		return instr{fn: opBinV128[i16x8NarrowI32x4UOp]}, nil
 	case i16x8ExtendLowI8x16S:
-		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16SOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16SOp]}, nil
 	case i16x8ExtendHighI8x16S:
-		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16SOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16SOp]}, nil
 	case i16x8ExtendLowI8x16U:
-		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16UOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtendLowI8x16UOp]}, nil
 	case i16x8ExtendHighI8x16U:
-		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16UOp]}, true
+		return instr{fn: opUnaryV128G[i16x8ExtendHighI8x16UOp]}, nil
 	case i16x8Shl:
-		return instr{fn: opShiftV128[i16x8ShlOp]}, true
+		return instr{fn: opShiftV128[i16x8ShlOp]}, nil
 	case i16x8ShrS:
-		return instr{fn: opShiftV128[i16x8ShrSOp]}, true
+		return instr{fn: opShiftV128[i16x8ShrSOp]}, nil
 	case i16x8ShrU:
-		return instr{fn: opShiftV128[i16x8ShrUOp]}, true
+		return instr{fn: opShiftV128[i16x8ShrUOp]}, nil
 	case i16x8Add:
-		return instr{fn: opBinV128[i16x8AddOp]}, true
+		return instr{fn: opBinV128[i16x8AddOp]}, nil
 	case i16x8AddSatS:
-		return instr{fn: opBinV128[i16x8AddSatSOp]}, true
+		return instr{fn: opBinV128[i16x8AddSatSOp]}, nil
 	case i16x8AddSatU:
-		return instr{fn: opBinV128[i16x8AddSatUOp]}, true
+		return instr{fn: opBinV128[i16x8AddSatUOp]}, nil
 	case i16x8Sub:
-		return instr{fn: opBinV128[i16x8SubOp]}, true
+		return instr{fn: opBinV128[i16x8SubOp]}, nil
 	case i16x8SubSatS:
-		return instr{fn: opBinV128[i16x8SubSatSOp]}, true
+		return instr{fn: opBinV128[i16x8SubSatSOp]}, nil
 	case i16x8SubSatU:
-		return instr{fn: opBinV128[i16x8SubSatUOp]}, true
+		return instr{fn: opBinV128[i16x8SubSatUOp]}, nil
 	case f64x2Nearest:
-		return instr{fn: opUnaryV128G[f64x2NearestOp]}, true
+		return instr{fn: opUnaryV128G[f64x2NearestOp]}, nil
 	case i16x8Mul:
-		return instr{fn: opBinV128[i16x8MulOp]}, true
+		return instr{fn: opBinV128[i16x8MulOp]}, nil
 	case i16x8MinS:
-		return instr{fn: opBinV128[i16x8MinSOp]}, true
+		return instr{fn: opBinV128[i16x8MinSOp]}, nil
 	case i16x8MinU:
-		return instr{fn: opBinV128[i16x8MinUOp]}, true
+		return instr{fn: opBinV128[i16x8MinUOp]}, nil
 	case i16x8MaxS:
-		return instr{fn: opBinV128[i16x8MaxSOp]}, true
+		return instr{fn: opBinV128[i16x8MaxSOp]}, nil
 	case i16x8MaxU:
-		return instr{fn: opBinV128[i16x8MaxUOp]}, true
+		return instr{fn: opBinV128[i16x8MaxUOp]}, nil
 	case i16x8AvgrU:
-		return instr{fn: opBinV128[i16x8AvgrUOp]}, true
+		return instr{fn: opBinV128[i16x8AvgrUOp]}, nil
 	case i16x8ExtmulLowI8x16S:
-		return instr{fn: opBinV128[i16x8ExtmulLowI8x16SOp]}, true
+		return instr{fn: opBinV128[i16x8ExtmulLowI8x16SOp]}, nil
 	case i16x8ExtmulHighI8x16S:
-		return instr{fn: opBinV128[i16x8ExtmulHighI8x16SOp]}, true
+		return instr{fn: opBinV128[i16x8ExtmulHighI8x16SOp]}, nil
 	case i16x8ExtmulLowI8x16U:
-		return instr{fn: opBinV128[i16x8ExtmulLowI8x16UOp]}, true
+		return instr{fn: opBinV128[i16x8ExtmulLowI8x16UOp]}, nil
 	case i16x8ExtmulHighI8x16U:
-		return instr{fn: opBinV128[i16x8ExtmulHighI8x16UOp]}, true
+		return instr{fn: opBinV128[i16x8ExtmulHighI8x16UOp]}, nil
 	case i32x4Abs:
-		return instr{fn: opUnaryV128G[i32x4AbsOp]}, true
+		return instr{fn: opUnaryV128G[i32x4AbsOp]}, nil
 	case i32x4Neg:
-		return instr{fn: opUnaryV128G[i32x4NegOp]}, true
+		return instr{fn: opUnaryV128G[i32x4NegOp]}, nil
 	case i32x4AllTrue:
-		return instr{fn: opI32x4AllTrue}, true
+		return instr{fn: opI32x4AllTrue}, nil
 	case i32x4Bitmask:
-		return instr{fn: opI32x4Bitmask}, true
+		return instr{fn: opI32x4Bitmask}, nil
 	case i32x4ExtendLowI16x8S:
-		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8SOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8SOp]}, nil
 	case i32x4ExtendHighI16x8S:
-		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8SOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8SOp]}, nil
 	case i32x4ExtendLowI16x8U:
-		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8UOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8UOp]}, nil
 	case i32x4ExtendHighI16x8U:
-		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8UOp]}, true
+		return instr{fn: opUnaryV128G[i32x4ExtendHighI16x8UOp]}, nil
 	case i32x4Shl:
-		return instr{fn: opShiftV128[i32x4ShlOp]}, true
+		return instr{fn: opShiftV128[i32x4ShlOp]}, nil
 	case i32x4ShrS:
-		return instr{fn: opShiftV128[i32x4ShrSOp]}, true
+		return instr{fn: opShiftV128[i32x4ShrSOp]}, nil
 	case i32x4ShrU:
-		return instr{fn: opShiftV128[i32x4ShrUOp]}, true
+		return instr{fn: opShiftV128[i32x4ShrUOp]}, nil
 	case i32x4Add:
-		return instr{fn: opBinV128[i32x4AddOp]}, true
+		return instr{fn: opBinV128[i32x4AddOp]}, nil
 	case i32x4Sub:
-		return instr{fn: opBinV128[i32x4SubOp]}, true
+		return instr{fn: opBinV128[i32x4SubOp]}, nil
 	case i32x4Mul:
-		return instr{fn: opBinV128[i32x4MulOp]}, true
+		return instr{fn: opBinV128[i32x4MulOp]}, nil
 	case i32x4MinS:
-		return instr{fn: opBinV128[i32x4MinSOp]}, true
+		return instr{fn: opBinV128[i32x4MinSOp]}, nil
 	case i32x4MinU:
-		return instr{fn: opBinV128[i32x4MinUOp]}, true
+		return instr{fn: opBinV128[i32x4MinUOp]}, nil
 	case i32x4MaxS:
-		return instr{fn: opBinV128[i32x4MaxSOp]}, true
+		return instr{fn: opBinV128[i32x4MaxSOp]}, nil
 	case i32x4MaxU:
-		return instr{fn: opBinV128[i32x4MaxUOp]}, true
+		return instr{fn: opBinV128[i32x4MaxUOp]}, nil
 	case i32x4DotI16x8S:
-		return instr{fn: opBinV128[i32x4DotI16x8SOp]}, true
+		return instr{fn: opBinV128[i32x4DotI16x8SOp]}, nil
 	case i32x4ExtmulLowI16x8S:
-		return instr{fn: opBinV128[i32x4ExtmulLowI16x8SOp]}, true
+		return instr{fn: opBinV128[i32x4ExtmulLowI16x8SOp]}, nil
 	case i32x4ExtmulHighI16x8S:
-		return instr{fn: opBinV128[i32x4ExtmulHighI16x8SOp]}, true
+		return instr{fn: opBinV128[i32x4ExtmulHighI16x8SOp]}, nil
 	case i32x4ExtmulLowI16x8U:
-		return instr{fn: opBinV128[i32x4ExtmulLowI16x8UOp]}, true
+		return instr{fn: opBinV128[i32x4ExtmulLowI16x8UOp]}, nil
 	case i32x4ExtmulHighI16x8U:
-		return instr{fn: opBinV128[i32x4ExtmulHighI16x8UOp]}, true
+		return instr{fn: opBinV128[i32x4ExtmulHighI16x8UOp]}, nil
 	case i64x2Abs:
-		return instr{fn: opUnaryV128G[i64x2AbsOp]}, true
+		return instr{fn: opUnaryV128G[i64x2AbsOp]}, nil
 	case i64x2Neg:
-		return instr{fn: opUnaryV128G[i64x2NegOp]}, true
+		return instr{fn: opUnaryV128G[i64x2NegOp]}, nil
 	case i64x2AllTrue:
-		return instr{fn: opI64x2AllTrue}, true
+		return instr{fn: opI64x2AllTrue}, nil
 	case i64x2Bitmask:
-		return instr{fn: opI64x2Bitmask}, true
+		return instr{fn: opI64x2Bitmask}, nil
 	case i64x2ExtendLowI32x4S:
-		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4SOp]}, true
+		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4SOp]}, nil
 	case i64x2ExtendHighI32x4S:
-		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4SOp]}, true
+		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4SOp]}, nil
 	case i64x2ExtendLowI32x4U:
-		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4UOp]}, true
+		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4UOp]}, nil
 	case i64x2ExtendHighI32x4U:
-		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4UOp]}, true
+		return instr{fn: opUnaryV128G[i64x2ExtendHighI32x4UOp]}, nil
 	case i64x2Shl:
-		return instr{fn: opShiftV128[i64x2ShlOp]}, true
+		return instr{fn: opShiftV128[i64x2ShlOp]}, nil
 	case i64x2ShrS:
-		return instr{fn: opShiftV128[i64x2ShrSOp]}, true
+		return instr{fn: opShiftV128[i64x2ShrSOp]}, nil
 	case i64x2ShrU:
-		return instr{fn: opShiftV128[i64x2ShrUOp]}, true
+		return instr{fn: opShiftV128[i64x2ShrUOp]}, nil
 	case i64x2Add:
-		return instr{fn: opBinV128[i64x2AddOp]}, true
+		return instr{fn: opBinV128[i64x2AddOp]}, nil
 	case i64x2Sub:
-		return instr{fn: opBinV128[i64x2SubOp]}, true
+		return instr{fn: opBinV128[i64x2SubOp]}, nil
 	case i64x2Mul:
-		return instr{fn: opBinV128[i64x2MulOp]}, true
+		return instr{fn: opBinV128[i64x2MulOp]}, nil
 	case i64x2Eq:
-		return instr{fn: opBinV128[i64x2EqOp]}, true
+		return instr{fn: opBinV128[i64x2EqOp]}, nil
 	case i64x2Ne:
-		return instr{fn: opBinV128[i64x2NeOp]}, true
+		return instr{fn: opBinV128[i64x2NeOp]}, nil
 	case i64x2LtS:
-		return instr{fn: opBinV128[i64x2LtSOp]}, true
+		return instr{fn: opBinV128[i64x2LtSOp]}, nil
 	case i64x2GtS:
-		return instr{fn: opBinV128[i64x2GtSOp]}, true
+		return instr{fn: opBinV128[i64x2GtSOp]}, nil
 	case i64x2LeS:
-		return instr{fn: opBinV128[i64x2LeSOp]}, true
+		return instr{fn: opBinV128[i64x2LeSOp]}, nil
 	case i64x2GeS:
-		return instr{fn: opBinV128[i64x2GeSOp]}, true
+		return instr{fn: opBinV128[i64x2GeSOp]}, nil
 	case i64x2ExtmulLowI32x4S:
-		return instr{fn: opBinV128[i64x2ExtmulLowI32x4SOp]}, true
+		return instr{fn: opBinV128[i64x2ExtmulLowI32x4SOp]}, nil
 	case i64x2ExtmulHighI32x4S:
-		return instr{fn: opBinV128[i64x2ExtmulHighI32x4SOp]}, true
+		return instr{fn: opBinV128[i64x2ExtmulHighI32x4SOp]}, nil
 	case i64x2ExtmulLowI32x4U:
-		return instr{fn: opBinV128[i64x2ExtmulLowI32x4UOp]}, true
+		return instr{fn: opBinV128[i64x2ExtmulLowI32x4UOp]}, nil
 	case i64x2ExtmulHighI32x4U:
-		return instr{fn: opBinV128[i64x2ExtmulHighI32x4UOp]}, true
+		return instr{fn: opBinV128[i64x2ExtmulHighI32x4UOp]}, nil
 	case f32x4Abs:
-		return instr{fn: opUnaryV128G[f32x4AbsOp]}, true
+		return instr{fn: opUnaryV128G[f32x4AbsOp]}, nil
 	case f32x4Neg:
-		return instr{fn: opUnaryV128G[f32x4NegOp]}, true
+		return instr{fn: opUnaryV128G[f32x4NegOp]}, nil
 	case f32x4Sqrt:
-		return instr{fn: opUnaryV128G[f32x4SqrtOp]}, true
+		return instr{fn: opUnaryV128G[f32x4SqrtOp]}, nil
 	case f32x4Add:
-		return instr{fn: opBinV128[f32x4AddOp]}, true
+		return instr{fn: opBinV128[f32x4AddOp]}, nil
 	case f32x4Sub:
-		return instr{fn: opBinV128[f32x4SubOp]}, true
+		return instr{fn: opBinV128[f32x4SubOp]}, nil
 	case f32x4Mul:
-		return instr{fn: opBinV128[f32x4MulOp]}, true
+		return instr{fn: opBinV128[f32x4MulOp]}, nil
 	case f32x4Div:
-		return instr{fn: opBinV128[f32x4DivOp]}, true
+		return instr{fn: opBinV128[f32x4DivOp]}, nil
 	case f32x4Min:
-		return instr{fn: opBinV128[f32x4MinOp]}, true
+		return instr{fn: opBinV128[f32x4MinOp]}, nil
 	case f32x4Max:
-		return instr{fn: opBinV128[f32x4MaxOp]}, true
+		return instr{fn: opBinV128[f32x4MaxOp]}, nil
 	case f32x4Pmin:
-		return instr{fn: opBinV128[f32x4PminOp]}, true
+		return instr{fn: opBinV128[f32x4PminOp]}, nil
 	case f32x4Pmax:
-		return instr{fn: opBinV128[f32x4PmaxOp]}, true
+		return instr{fn: opBinV128[f32x4PmaxOp]}, nil
 	case f64x2Abs:
-		return instr{fn: opUnaryV128G[f64x2AbsOp]}, true
+		return instr{fn: opUnaryV128G[f64x2AbsOp]}, nil
 	case f64x2Neg:
-		return instr{fn: opUnaryV128G[f64x2NegOp]}, true
+		return instr{fn: opUnaryV128G[f64x2NegOp]}, nil
 	case f64x2Sqrt:
-		return instr{fn: opUnaryV128G[f64x2SqrtOp]}, true
+		return instr{fn: opUnaryV128G[f64x2SqrtOp]}, nil
 	case f64x2Add:
-		return instr{fn: opBinV128[f64x2AddOp]}, true
+		return instr{fn: opBinV128[f64x2AddOp]}, nil
 	case f64x2Sub:
-		return instr{fn: opBinV128[f64x2SubOp]}, true
+		return instr{fn: opBinV128[f64x2SubOp]}, nil
 	case f64x2Mul:
-		return instr{fn: opBinV128[f64x2MulOp]}, true
+		return instr{fn: opBinV128[f64x2MulOp]}, nil
 	case f64x2Div:
-		return instr{fn: opBinV128[f64x2DivOp]}, true
+		return instr{fn: opBinV128[f64x2DivOp]}, nil
 	case f64x2Min:
-		return instr{fn: opBinV128[f64x2MinOp]}, true
+		return instr{fn: opBinV128[f64x2MinOp]}, nil
 	case f64x2Max:
-		return instr{fn: opBinV128[f64x2MaxOp]}, true
+		return instr{fn: opBinV128[f64x2MaxOp]}, nil
 	case f64x2Pmin:
-		return instr{fn: opBinV128[f64x2PminOp]}, true
+		return instr{fn: opBinV128[f64x2PminOp]}, nil
 	case f64x2Pmax:
-		return instr{fn: opBinV128[f64x2PmaxOp]}, true
+		return instr{fn: opBinV128[f64x2PmaxOp]}, nil
 	case i32x4TruncSatF32x4S:
-		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4SOp]}, true
+		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4SOp]}, nil
 	case i32x4TruncSatF32x4U:
-		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4UOp]}, true
+		return instr{fn: opUnaryV128G[i32x4TruncSatF32x4UOp]}, nil
 	case f32x4ConvertI32x4S:
-		return instr{fn: opUnaryV128G[f32x4ConvertI32x4SOp]}, true
+		return instr{fn: opUnaryV128G[f32x4ConvertI32x4SOp]}, nil
 	case f32x4ConvertI32x4U:
-		return instr{fn: opUnaryV128G[f32x4ConvertI32x4UOp]}, true
+		return instr{fn: opUnaryV128G[f32x4ConvertI32x4UOp]}, nil
 	case i32x4TruncSatF64x2SZero:
-		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2SZeroOp]}, true
+		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2SZeroOp]}, nil
 	case i32x4TruncSatF64x2UZero:
-		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2UZeroOp]}, true
+		return instr{fn: opUnaryV128G[i32x4TruncSatF64x2UZeroOp]}, nil
 	case f64x2ConvertLowI32x4S:
-		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4SOp]}, true
+		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4SOp]}, nil
 	case f64x2ConvertLowI32x4U:
-		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4UOp]}, true
+		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4UOp]}, nil
 	default:
-		return instr{}, false
+		return instr{}, fmt.Errorf("unhandled opcode %d", opcode(body[pc]))
 	}
 }
 
