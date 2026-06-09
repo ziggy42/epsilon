@@ -368,7 +368,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	}
 	// Initialize the control stack with the function's entry block frame.
 	controlStack = append(controlStack, controlFrame{
-		targetIp:    int32(len(function.frames)),
+		targetIp:    int32(len(function.instrs)),
 		arity:       uint32(len(function.functionType.ResultTypes)),
 		stackHeight: vm.stack.size(),
 	})
@@ -387,9 +387,9 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	// implementations.
 	var err error
 	if vm.config.EnableFuel {
-		err = vm.runLoopWithFuel(call, function.frames)
+		err = vm.runLoopWithFuel(call, function.instrs)
 	} else {
-		err = vm.runLoop(call, function.frames)
+		err = vm.runLoop(call, function.instrs)
 	}
 	// The run loop is done with this frame, so its locals slots are free to
 	// reuse. Rewinding the cursor here is a no-op for the heap case.
@@ -398,10 +398,10 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	return err
 }
 
-func (vm *vm) runLoop(c *callFrame, frames []instr) error {
+func (vm *vm) runLoop(c *callFrame, instructions []instr) error {
 	ip := 0
-	for ip < len(frames) {
-		in := &frames[ip]
+	for ip < len(instructions) {
+		in := &instructions[ip]
 		switch n := in.fn(c, in); n {
 		case advance:
 			ip++
@@ -414,14 +414,14 @@ func (vm *vm) runLoop(c *callFrame, frames []instr) error {
 	return nil
 }
 
-func (vm *vm) runLoopWithFuel(c *callFrame, frames []instr) error {
+func (vm *vm) runLoopWithFuel(c *callFrame, instructions []instr) error {
 	ip := 0
-	for ip < len(frames) {
+	for ip < len(instructions) {
 		if vm.fuel == 0 {
 			return errFuelExhausted
 		}
 		vm.fuel--
-		in := &frames[ip]
+		in := &instructions[ip]
 		switch n := in.fn(c, in); n {
 		case advance:
 			ip++
@@ -473,23 +473,23 @@ func operandWordCount(op opcode, body []uint64, operandStart int) int {
 	}
 }
 
-// compile lowers a function to its frames; it runs once before the function is
+// compile lowers a function to its instr; it runs once before the function is
 // invoked. An unhandled opcode returns an error: validation has already
 // accepted the module, so that signals a gap in the compiler, not bad input.
 func (vm *vm) compile(fn *wasmFunction) error {
-	frames, err := vm.compileClosures(&fn.code, fn.module)
+	instrs, err := vm.compileClosures(&fn.code, fn.module)
 	if err != nil {
 		return err
 	}
-	fn.frames = frames
-	// Frames are the only runtime representation now; release the compile inputs.
+	fn.instrs = instrs
+	// instrs are the only runtime representation now; release the compile inputs.
 	fn.code.body = nil
 	fn.code.jumpCache = nil
 	fn.code.jumpElseCache = nil
 	return nil
 }
 
-// compileClosures lowers a function body to its frames, returning an error on
+// compileClosures lowers a function body to its instrs, returning an error on
 // an opcode it does not handle.
 func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]instr, error) {
 	body := fn.body
@@ -528,6 +528,10 @@ func (vm *vm) compileClosures(fn *function, module *ModuleInstance) ([]instr, er
 func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcToIp []int) (instr, bool) {
 	body := fn.body
 	switch opcode(body[pc]) {
+	case unreachable:
+		return instr{fn: opUnreachable}, true
+	case nop:
+		return instr{fn: opNop}, true
 	case block:
 		blockType := int32(body[pc+1])
 		afterEndIp := pcToIp[fn.jumpCache[uint32(pc+2)]]
@@ -554,30 +558,6 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opBr, a: body[pc+1]}, true
 	case brIf:
 		return instr{fn: opBrIf, a: body[pc+1]}, true
-	case returnOp:
-		return instr{fn: opReturn}, true
-	case call:
-		return instr{fn: opCall, a: body[pc+1]}, true
-	case callIndirect:
-		return instr{fn: opCallIndirect, a: body[pc+1], b: body[pc+2]}, true
-	case selectOp:
-		return instr{fn: opSelect}, true
-	case selectT:
-		return instr{fn: opSelect}, true
-	case globalGet:
-		return instr{fn: opGlobalGet, a: body[pc+1]}, true
-	case globalSet:
-		return instr{fn: opGlobalSet, a: body[pc+1]}, true
-	case memorySize:
-		return instr{fn: opMemorySize, a: body[pc+1]}, true
-	case memoryGrow:
-		return instr{fn: opMemoryGrow, a: body[pc+1]}, true
-	case refIsNull:
-		return instr{fn: opRefIsNull}, true
-	case refNull:
-		return instr{fn: opRefNull}, true
-	case refFunc:
-		return instr{fn: opRefFunc, a: body[pc+1]}, true
 	case brTable:
 		count := int(body[pc+1])
 		labels := make([]uint32, count)
@@ -587,12 +567,82 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		idx := len(vm.brTables)
 		vm.brTables = append(vm.brTables, labels)
 		return instr{fn: opBrTable, a: uint64(idx), b: body[pc+2+count]}, true
-	case nop:
-		return instr{fn: opNop}, true
-	case unreachable:
-		return instr{fn: opUnreachable}, true
+	case returnOp:
+		return instr{fn: opReturn}, true
+	case call:
+		return instr{fn: opCall, a: body[pc+1]}, true
+	case callIndirect:
+		return instr{fn: opCallIndirect, a: body[pc+1], b: body[pc+2]}, true
 	case drop:
 		return instr{fn: opDrop}, true
+	case selectOp:
+		return instr{fn: opSelect}, true
+	case selectT:
+		return instr{fn: opSelect}, true
+	case localGet:
+		return instr{fn: opLocalGet, a: body[pc+1]}, true
+	case localSet:
+		return instr{fn: opLocalSet, a: body[pc+1]}, true
+	case localTee:
+		return instr{fn: opLocalTee, a: body[pc+1]}, true
+	case globalGet:
+		return instr{fn: opGlobalGet, a: body[pc+1]}, true
+	case globalSet:
+		return instr{fn: opGlobalSet, a: body[pc+1]}, true
+	case tableGet:
+		return instr{fn: opTableGet, a: body[pc+1]}, true
+	case tableSet:
+		return instr{fn: opTableSet, a: body[pc+1]}, true
+	case i32Load:
+		return instr{fn: opI32Load, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load:
+		return instr{fn: opI64Load, a: body[pc+2], b: body[pc+3]}, true
+	case f32Load:
+		return instr{fn: opF32Load, a: body[pc+2], b: body[pc+3]}, true
+	case f64Load:
+		return instr{fn: opF64Load, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load8S:
+		return instr{fn: opI32Load8S, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load8U:
+		return instr{fn: opI32Load8U, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load16S:
+		return instr{fn: opI32Load16S, a: body[pc+2], b: body[pc+3]}, true
+	case i32Load16U:
+		return instr{fn: opI32Load16U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load8S:
+		return instr{fn: opI64Load8S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load8U:
+		return instr{fn: opI64Load8U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load16S:
+		return instr{fn: opI64Load16S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load16U:
+		return instr{fn: opI64Load16U, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load32S:
+		return instr{fn: opI64Load32S, a: body[pc+2], b: body[pc+3]}, true
+	case i64Load32U:
+		return instr{fn: opI64Load32U, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store:
+		return instr{fn: opI32Store, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store:
+		return instr{fn: opI64Store, a: body[pc+2], b: body[pc+3]}, true
+	case f32Store:
+		return instr{fn: opF32Store, a: body[pc+2], b: body[pc+3]}, true
+	case f64Store:
+		return instr{fn: opF64Store, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store8:
+		return instr{fn: opI32Store8, a: body[pc+2], b: body[pc+3]}, true
+	case i32Store16:
+		return instr{fn: opI32Store16, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store8:
+		return instr{fn: opI64Store8, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store16:
+		return instr{fn: opI64Store16, a: body[pc+2], b: body[pc+3]}, true
+	case i64Store32:
+		return instr{fn: opI64Store32, a: body[pc+2], b: body[pc+3]}, true
+	case memorySize:
+		return instr{fn: opMemorySize, a: body[pc+1]}, true
+	case memoryGrow:
+		return instr{fn: opMemoryGrow, a: body[pc+1]}, true
 	case i32Const:
 		return instr{fn: opI32Const, a: body[pc+1]}, true
 	case i64Const:
@@ -601,56 +651,8 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opF32Const, a: body[pc+1]}, true
 	case f64Const:
 		return instr{fn: opF64Const, a: body[pc+1]}, true
-	case localGet:
-		return instr{fn: opLocalGet, a: body[pc+1]}, true
-	case localSet:
-		return instr{fn: opLocalSet, a: body[pc+1]}, true
-	case localTee:
-		return instr{fn: opLocalTee, a: body[pc+1]}, true
-	case i32Add:
-		return instr{fn: opBinI32[addI32]}, true
-	case i32Sub:
-		return instr{fn: opBinI32[subI32]}, true
-	case i32Mul:
-		return instr{fn: opBinI32[mulI32]}, true
-	case i32And:
-		return instr{fn: opBinI32[andI32]}, true
-	case i32Or:
-		return instr{fn: opBinI32[orI32]}, true
-	case i32Xor:
-		return instr{fn: opBinI32[xorI32]}, true
-	case i32Shl:
-		return instr{fn: opBinI32[shlI32]}, true
-	case i32ShrS:
-		return instr{fn: opBinI32[shrSI32]}, true
-	case i32ShrU:
-		return instr{fn: opBinI32[shrUI32]}, true
-	case i32Rotl:
-		return instr{fn: opBinI32[rotlI32]}, true
-	case i32Rotr:
-		return instr{fn: opBinI32[rotrI32]}, true
-	case i64Add:
-		return instr{fn: opBinI64[addI64]}, true
-	case i64Sub:
-		return instr{fn: opBinI64[subI64]}, true
-	case i64Mul:
-		return instr{fn: opBinI64[mulI64]}, true
-	case i64And:
-		return instr{fn: opBinI64[andI64]}, true
-	case i64Or:
-		return instr{fn: opBinI64[orI64]}, true
-	case i64Xor:
-		return instr{fn: opBinI64[xorI64]}, true
-	case i64Shl:
-		return instr{fn: opBinI64[shlI64]}, true
-	case i64ShrS:
-		return instr{fn: opBinI64[shrSI64]}, true
-	case i64ShrU:
-		return instr{fn: opBinI64[shrUI64]}, true
-	case i64Rotl:
-		return instr{fn: opBinI64[rotlI64]}, true
-	case i64Rotr:
-		return instr{fn: opBinI64[rotrI64]}, true
+	case i32Eqz:
+		return instr{fn: opI32Eqz}, true
 	case i32Eq:
 		return instr{fn: opCmpI32[eqI32]}, true
 	case i32Ne:
@@ -671,6 +673,8 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opCmpI32[geSI32]}, true
 	case i32GeU:
 		return instr{fn: opCmpI32[geUI32]}, true
+	case i64Eqz:
+		return instr{fn: opI64Eqz}, true
 	case i64Eq:
 		return instr{fn: opCmpI64[eqI64]}, true
 	case i64Ne:
@@ -715,6 +719,18 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opCmpF64[f64LeOp]}, true
 	case f64Ge:
 		return instr{fn: opCmpF64[f64GeOp]}, true
+	case i32Clz:
+		return instr{fn: opI32Clz}, true
+	case i32Ctz:
+		return instr{fn: opI32Ctz}, true
+	case i32Popcnt:
+		return instr{fn: opI32Popcnt}, true
+	case i32Add:
+		return instr{fn: opBinI32[addI32]}, true
+	case i32Sub:
+		return instr{fn: opBinI32[subI32]}, true
+	case i32Mul:
+		return instr{fn: opBinI32[mulI32]}, true
 	case i32DivS:
 		return instr{fn: opSafeBinI32[i32DivSOp]}, true
 	case i32DivU:
@@ -723,6 +739,34 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opSafeBinI32[i32RemSOp]}, true
 	case i32RemU:
 		return instr{fn: opSafeBinI32[i32RemUOp]}, true
+	case i32And:
+		return instr{fn: opBinI32[andI32]}, true
+	case i32Or:
+		return instr{fn: opBinI32[orI32]}, true
+	case i32Xor:
+		return instr{fn: opBinI32[xorI32]}, true
+	case i32Shl:
+		return instr{fn: opBinI32[shlI32]}, true
+	case i32ShrS:
+		return instr{fn: opBinI32[shrSI32]}, true
+	case i32ShrU:
+		return instr{fn: opBinI32[shrUI32]}, true
+	case i32Rotl:
+		return instr{fn: opBinI32[rotlI32]}, true
+	case i32Rotr:
+		return instr{fn: opBinI32[rotrI32]}, true
+	case i64Clz:
+		return instr{fn: opI64Clz}, true
+	case i64Ctz:
+		return instr{fn: opI64Ctz}, true
+	case i64Popcnt:
+		return instr{fn: opI64Popcnt}, true
+	case i64Add:
+		return instr{fn: opBinI64[addI64]}, true
+	case i64Sub:
+		return instr{fn: opBinI64[subI64]}, true
+	case i64Mul:
+		return instr{fn: opBinI64[mulI64]}, true
 	case i64DivS:
 		return instr{fn: opSafeBinI64[i64DivSOp]}, true
 	case i64DivU:
@@ -731,6 +775,36 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opSafeBinI64[i64RemSOp]}, true
 	case i64RemU:
 		return instr{fn: opSafeBinI64[i64RemUOp]}, true
+	case i64And:
+		return instr{fn: opBinI64[andI64]}, true
+	case i64Or:
+		return instr{fn: opBinI64[orI64]}, true
+	case i64Xor:
+		return instr{fn: opBinI64[xorI64]}, true
+	case i64Shl:
+		return instr{fn: opBinI64[shlI64]}, true
+	case i64ShrS:
+		return instr{fn: opBinI64[shrSI64]}, true
+	case i64ShrU:
+		return instr{fn: opBinI64[shrUI64]}, true
+	case i64Rotl:
+		return instr{fn: opBinI64[rotlI64]}, true
+	case i64Rotr:
+		return instr{fn: opBinI64[rotrI64]}, true
+	case f32Abs:
+		return instr{fn: opF32Abs}, true
+	case f32Neg:
+		return instr{fn: opF32Neg}, true
+	case f32Ceil:
+		return instr{fn: opF32Ceil}, true
+	case f32Floor:
+		return instr{fn: opF32Floor}, true
+	case f32Trunc:
+		return instr{fn: opF32Trunc}, true
+	case f32Nearest:
+		return instr{fn: opF32Nearest}, true
+	case f32Sqrt:
+		return instr{fn: opF32Sqrt}, true
 	case f32Add:
 		return instr{fn: opBinF32[f32AddOp]}, true
 	case f32Sub:
@@ -745,6 +819,20 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opBinF32[f32MaxOp]}, true
 	case f32Copysign:
 		return instr{fn: opBinF32[f32CopysignOp]}, true
+	case f64Abs:
+		return instr{fn: opF64Abs}, true
+	case f64Neg:
+		return instr{fn: opF64Neg}, true
+	case f64Ceil:
+		return instr{fn: opF64Ceil}, true
+	case f64Floor:
+		return instr{fn: opF64Floor}, true
+	case f64Trunc:
+		return instr{fn: opF64Trunc}, true
+	case f64Nearest:
+		return instr{fn: opF64Nearest}, true
+	case f64Sqrt:
+		return instr{fn: opF64Sqrt}, true
 	case f64Add:
 		return instr{fn: opBinF64[f64AddOp]}, true
 	case f64Sub:
@@ -759,6 +847,8 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opBinF64[f64MaxOp]}, true
 	case f64Copysign:
 		return instr{fn: opBinF64[f64CopysignOp]}, true
+	case i32WrapI64:
+		return instr{fn: opI32WrapI64}, true
 	case i32TruncF32S:
 		return instr{fn: opUnarySafeF32[i32TruncF32SOp]}, true
 	case i32TruncF32U:
@@ -767,6 +857,10 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnarySafeF64[i32TruncF64SOp]}, true
 	case i32TruncF64U:
 		return instr{fn: opUnarySafeF64[i32TruncF64UOp]}, true
+	case i64ExtendI32S:
+		return instr{fn: opI64ExtendI32S}, true
+	case i64ExtendI32U:
+		return instr{fn: opI64ExtendI32U}, true
 	case i64TruncF32S:
 		return instr{fn: opTruncF32I64[i64TruncF32SOp]}, true
 	case i64TruncF32U:
@@ -775,8 +869,161 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opTruncF64I64[i64TruncF64SOp]}, true
 	case i64TruncF64U:
 		return instr{fn: opTruncF64I64[i64TruncF64UOp]}, true
+	case f32ConvertI32S:
+		return instr{fn: opF32ConvertI32S}, true
+	case f32ConvertI32U:
+		return instr{fn: opF32ConvertI32U}, true
+	case f32ConvertI64S:
+		return instr{fn: opF32ConvertI64S}, true
+	case f32ConvertI64U:
+		return instr{fn: opF32ConvertI64U}, true
+	case f32DemoteF64:
+		return instr{fn: opF32DemoteF64}, true
+	case f64ConvertI32S:
+		return instr{fn: opF64ConvertI32S}, true
+	case f64ConvertI32U:
+		return instr{fn: opF64ConvertI32U}, true
+	case f64ConvertI64S:
+		return instr{fn: opF64ConvertI64S}, true
+	case f64ConvertI64U:
+		return instr{fn: opF64ConvertI64U}, true
+	case f64PromoteF32:
+		return instr{fn: opF64PromoteF32}, true
+	case i32ReinterpretF32:
+		return instr{fn: opI32ReinterpretF32}, true
+	case i64ReinterpretF64:
+		return instr{fn: opI64ReinterpretF64}, true
+	case f32ReinterpretI32:
+		return instr{fn: opF32ReinterpretI32}, true
+	case f64ReinterpretI64:
+		return instr{fn: opF64ReinterpretI64}, true
+	case i32Extend8S:
+		return instr{fn: opI32Extend8S}, true
+	case i32Extend16S:
+		return instr{fn: opI32Extend16S}, true
+	case i64Extend8S:
+		return instr{fn: opI64Extend8S}, true
+	case i64Extend16S:
+		return instr{fn: opI64Extend16S}, true
+	case i64Extend32S:
+		return instr{fn: opI64Extend32S}, true
+	case refNull:
+		return instr{fn: opRefNull}, true
+	case refIsNull:
+		return instr{fn: opRefIsNull}, true
+	case refFunc:
+		return instr{fn: opRefFunc, a: body[pc+1]}, true
+	case i32TruncSatF32S:
+		return instr{fn: opI32TruncSatF32S}, true
+	case i32TruncSatF32U:
+		return instr{fn: opI32TruncSatF32U}, true
+	case i32TruncSatF64S:
+		return instr{fn: opI32TruncSatF64S}, true
+	case i32TruncSatF64U:
+		return instr{fn: opI32TruncSatF64U}, true
+	case i64TruncSatF32S:
+		return instr{fn: opI64TruncSatF32S}, true
+	case i64TruncSatF32U:
+		return instr{fn: opI64TruncSatF32U}, true
+	case i64TruncSatF64S:
+		return instr{fn: opI64TruncSatF64S}, true
+	case i64TruncSatF64U:
+		return instr{fn: opI64TruncSatF64U}, true
+	case memoryInit:
+		return instr{fn: opMemoryInit, a: body[pc+1], b: body[pc+2]}, true
+	case dataDrop:
+		return instr{fn: opDataDrop, a: body[pc+1]}, true
+	case memoryCopy:
+		return instr{fn: opMemoryCopy, a: body[pc+1], b: body[pc+2]}, true
+	case memoryFill:
+		return instr{fn: opMemoryFill, a: body[pc+1]}, true
+	case tableInit:
+		return instr{fn: opTableInit, a: body[pc+1], b: body[pc+2]}, true
+	case elemDrop:
+		return instr{fn: opElemDrop, a: body[pc+1]}, true
+	case tableCopy:
+		return instr{fn: opTableCopy, a: body[pc+1], b: body[pc+2]}, true
+	case tableGrow:
+		return instr{fn: opTableGrow, a: body[pc+1]}, true
+	case tableSize:
+		return instr{fn: opTableSize, a: body[pc+1]}, true
+	case tableFill:
+		return instr{fn: opTableFill, a: body[pc+1]}, true
+	case v128Load:
+		return instr{fn: opV128Load, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8x8S:
+		return instr{fn: opV128Load8x8S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8x8U:
+		return instr{fn: opV128Load8x8U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16x4S:
+		return instr{fn: opV128Load16x4S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16x4U:
+		return instr{fn: opV128Load16x4U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32x2S:
+		return instr{fn: opV128Load32x2S, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32x2U:
+		return instr{fn: opV128Load32x2U, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load8Splat:
+		return instr{fn: opV128Load8Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load16Splat:
+		return instr{fn: opV128Load16Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load32Splat:
+		return instr{fn: opV128Load32Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load64Splat:
+		return instr{fn: opV128Load64Splat, a: body[pc+2], b: body[pc+3]}, true
+	case v128Store:
+		return instr{fn: opV128Store, a: body[pc+2], b: body[pc+3]}, true
+	case v128Const:
+		return instr{fn: opV128Const, a: body[pc+1], b: body[pc+2]}, true
+	case i8x16Shuffle:
+		var a, b uint64
+		for i := range 8 {
+			a |= body[pc+1+i] << (8 * i)
+			b |= body[pc+1+8+i] << (8 * i)
+		}
+		return instr{fn: opI8x16Shuffle, a: a, b: b}, true
 	case i8x16Swizzle:
 		return instr{fn: opBinV128[i8x16SwizzleOp]}, true
+	case i8x16Splat:
+		return instr{fn: opI8x16Splat}, true
+	case i16x8Splat:
+		return instr{fn: opI16x8Splat}, true
+	case i32x4Splat:
+		return instr{fn: opI32x4Splat}, true
+	case i64x2Splat:
+		return instr{fn: opI64x2Splat}, true
+	case f32x4Splat:
+		return instr{fn: opF32x4Splat}, true
+	case f64x2Splat:
+		return instr{fn: opF64x2Splat}, true
+	case i8x16ExtractLaneS:
+		return instr{fn: opI8x16ExtractLaneS, a: body[pc+1]}, true
+	case i8x16ExtractLaneU:
+		return instr{fn: opI8x16ExtractLaneU, a: body[pc+1]}, true
+	case i8x16ReplaceLane:
+		return instr{fn: opI8x16ReplaceLane, a: body[pc+1]}, true
+	case i16x8ExtractLaneS:
+		return instr{fn: opI16x8ExtractLaneS, a: body[pc+1]}, true
+	case i16x8ExtractLaneU:
+		return instr{fn: opI16x8ExtractLaneU, a: body[pc+1]}, true
+	case i16x8ReplaceLane:
+		return instr{fn: opI16x8ReplaceLane, a: body[pc+1]}, true
+	case i32x4ExtractLane:
+		return instr{fn: opI32x4ExtractLane, a: body[pc+1]}, true
+	case i32x4ReplaceLane:
+		return instr{fn: opI32x4ReplaceLane, a: body[pc+1]}, true
+	case i64x2ExtractLane:
+		return instr{fn: opI64x2ExtractLane, a: body[pc+1]}, true
+	case i64x2ReplaceLane:
+		return instr{fn: opI64x2ReplaceLane, a: body[pc+1]}, true
+	case f32x4ExtractLane:
+		return instr{fn: opF32x4ExtractLane, a: body[pc+1]}, true
+	case f32x4ReplaceLane:
+		return instr{fn: opF32x4ReplaceLane, a: body[pc+1]}, true
+	case f64x2ExtractLane:
+		return instr{fn: opF64x2ExtractLane, a: body[pc+1]}, true
+	case f64x2ReplaceLane:
+		return instr{fn: opF64x2ReplaceLane, a: body[pc+1]}, true
 	case i8x16Eq:
 		return instr{fn: opBinV128[i8x16EqOp]}, true
 	case i8x16Ne:
@@ -871,6 +1118,30 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opBinV128[v128OrOp]}, true
 	case v128Xor:
 		return instr{fn: opBinV128[v128XorOp]}, true
+	case v128Bitselect:
+		return instr{fn: opTernaryV128[v128BitselectOp]}, true
+	case v128AnyTrue:
+		return instr{fn: opV128AnyTrue}, true
+	case v128Load8Lane:
+		return instr{fn: opV128Load8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load16Lane:
+		return instr{fn: opV128Load16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load32Lane:
+		return instr{fn: opV128Load32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load64Lane:
+		return instr{fn: opV128Load64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store8Lane:
+		return instr{fn: opV128Store8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store16Lane:
+		return instr{fn: opV128Store16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store32Lane:
+		return instr{fn: opV128Store32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Store64Lane:
+		return instr{fn: opV128Store64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
+	case v128Load32Zero:
+		return instr{fn: opV128Load32Zero, a: body[pc+2], b: body[pc+3]}, true
+	case v128Load64Zero:
+		return instr{fn: opV128Load64Zero, a: body[pc+2], b: body[pc+3]}, true
 	case f32x4DemoteF64x2Zero:
 		return instr{fn: opUnaryV128G[f32x4DemoteF64x2ZeroOp]}, true
 	case f64x2PromoteLowF32x4:
@@ -881,6 +1152,10 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnaryV128G[i8x16NegOp]}, true
 	case i8x16Popcnt:
 		return instr{fn: opUnaryV128G[i8x16PopcntOp]}, true
+	case i8x16AllTrue:
+		return instr{fn: opI8x16AllTrue}, true
+	case i8x16Bitmask:
+		return instr{fn: opI8x16Bitmask}, true
 	case i8x16NarrowI16x8S:
 		return instr{fn: opBinV128[i8x16NarrowI16x8SOp]}, true
 	case i8x16NarrowI16x8U:
@@ -941,6 +1216,10 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnaryV128G[i16x8NegOp]}, true
 	case i16x8Q15mulrSatS:
 		return instr{fn: opBinV128[i16x8Q15mulrSatSOp]}, true
+	case i16x8AllTrue:
+		return instr{fn: opI16x8AllTrue}, true
+	case i16x8Bitmask:
+		return instr{fn: opI16x8Bitmask}, true
 	case i16x8NarrowI32x4S:
 		return instr{fn: opBinV128[i16x8NarrowI32x4SOp]}, true
 	case i16x8NarrowI32x4U:
@@ -997,6 +1276,10 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnaryV128G[i32x4AbsOp]}, true
 	case i32x4Neg:
 		return instr{fn: opUnaryV128G[i32x4NegOp]}, true
+	case i32x4AllTrue:
+		return instr{fn: opI32x4AllTrue}, true
+	case i32x4Bitmask:
+		return instr{fn: opI32x4Bitmask}, true
 	case i32x4ExtendLowI16x8S:
 		return instr{fn: opUnaryV128G[i32x4ExtendLowI16x8SOp]}, true
 	case i32x4ExtendHighI16x8S:
@@ -1039,6 +1322,10 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnaryV128G[i64x2AbsOp]}, true
 	case i64x2Neg:
 		return instr{fn: opUnaryV128G[i64x2NegOp]}, true
+	case i64x2AllTrue:
+		return instr{fn: opI64x2AllTrue}, true
+	case i64x2Bitmask:
+		return instr{fn: opI64x2Bitmask}, true
 	case i64x2ExtendLowI32x4S:
 		return instr{fn: opUnaryV128G[i64x2ExtendLowI32x4SOp]}, true
 	case i64x2ExtendHighI32x4S:
@@ -1139,293 +1426,6 @@ func (vm *vm) compileThreaded(fn *function, module *ModuleInstance, pc int, pcTo
 		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4SOp]}, true
 	case f64x2ConvertLowI32x4U:
 		return instr{fn: opUnaryV128G[f64x2ConvertLowI32x4UOp]}, true
-	case i32Load:
-		return instr{fn: opI32Load, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load:
-		return instr{fn: opI64Load, a: body[pc+2], b: body[pc+3]}, true
-	case f32Load:
-		return instr{fn: opF32Load, a: body[pc+2], b: body[pc+3]}, true
-	case f64Load:
-		return instr{fn: opF64Load, a: body[pc+2], b: body[pc+3]}, true
-	case i32Load8S:
-		return instr{fn: opI32Load8S, a: body[pc+2], b: body[pc+3]}, true
-	case i32Load8U:
-		return instr{fn: opI32Load8U, a: body[pc+2], b: body[pc+3]}, true
-	case i32Load16S:
-		return instr{fn: opI32Load16S, a: body[pc+2], b: body[pc+3]}, true
-	case i32Load16U:
-		return instr{fn: opI32Load16U, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load8S:
-		return instr{fn: opI64Load8S, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load8U:
-		return instr{fn: opI64Load8U, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load16S:
-		return instr{fn: opI64Load16S, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load16U:
-		return instr{fn: opI64Load16U, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load32S:
-		return instr{fn: opI64Load32S, a: body[pc+2], b: body[pc+3]}, true
-	case i64Load32U:
-		return instr{fn: opI64Load32U, a: body[pc+2], b: body[pc+3]}, true
-	case i32Store:
-		return instr{fn: opI32Store, a: body[pc+2], b: body[pc+3]}, true
-	case i64Store:
-		return instr{fn: opI64Store, a: body[pc+2], b: body[pc+3]}, true
-	case f32Store:
-		return instr{fn: opF32Store, a: body[pc+2], b: body[pc+3]}, true
-	case f64Store:
-		return instr{fn: opF64Store, a: body[pc+2], b: body[pc+3]}, true
-	case i32Store8:
-		return instr{fn: opI32Store8, a: body[pc+2], b: body[pc+3]}, true
-	case i32Store16:
-		return instr{fn: opI32Store16, a: body[pc+2], b: body[pc+3]}, true
-	case i64Store8:
-		return instr{fn: opI64Store8, a: body[pc+2], b: body[pc+3]}, true
-	case i64Store16:
-		return instr{fn: opI64Store16, a: body[pc+2], b: body[pc+3]}, true
-	case i64Store32:
-		return instr{fn: opI64Store32, a: body[pc+2], b: body[pc+3]}, true
-	case i32Clz:
-		return instr{fn: opI32Clz}, true
-	case i32Ctz:
-		return instr{fn: opI32Ctz}, true
-	case i32Popcnt:
-		return instr{fn: opI32Popcnt}, true
-	case i32Eqz:
-		return instr{fn: opI32Eqz}, true
-	case i64Clz:
-		return instr{fn: opI64Clz}, true
-	case i64Ctz:
-		return instr{fn: opI64Ctz}, true
-	case i64Popcnt:
-		return instr{fn: opI64Popcnt}, true
-	case i64Eqz:
-		return instr{fn: opI64Eqz}, true
-	case f32Abs:
-		return instr{fn: opF32Abs}, true
-	case f32Neg:
-		return instr{fn: opF32Neg}, true
-	case f32Ceil:
-		return instr{fn: opF32Ceil}, true
-	case f32Floor:
-		return instr{fn: opF32Floor}, true
-	case f32Trunc:
-		return instr{fn: opF32Trunc}, true
-	case f32Nearest:
-		return instr{fn: opF32Nearest}, true
-	case f32Sqrt:
-		return instr{fn: opF32Sqrt}, true
-	case f64Abs:
-		return instr{fn: opF64Abs}, true
-	case f64Neg:
-		return instr{fn: opF64Neg}, true
-	case f64Ceil:
-		return instr{fn: opF64Ceil}, true
-	case f64Floor:
-		return instr{fn: opF64Floor}, true
-	case f64Trunc:
-		return instr{fn: opF64Trunc}, true
-	case f64Nearest:
-		return instr{fn: opF64Nearest}, true
-	case f64Sqrt:
-		return instr{fn: opF64Sqrt}, true
-	case i32WrapI64:
-		return instr{fn: opI32WrapI64}, true
-	case i64ExtendI32S:
-		return instr{fn: opI64ExtendI32S}, true
-	case i64ExtendI32U:
-		return instr{fn: opI64ExtendI32U}, true
-	case i32Extend8S:
-		return instr{fn: opI32Extend8S}, true
-	case i32Extend16S:
-		return instr{fn: opI32Extend16S}, true
-	case i64Extend8S:
-		return instr{fn: opI64Extend8S}, true
-	case i64Extend16S:
-		return instr{fn: opI64Extend16S}, true
-	case i64Extend32S:
-		return instr{fn: opI64Extend32S}, true
-	case f32ConvertI32S:
-		return instr{fn: opF32ConvertI32S}, true
-	case f32ConvertI32U:
-		return instr{fn: opF32ConvertI32U}, true
-	case f32ConvertI64S:
-		return instr{fn: opF32ConvertI64S}, true
-	case f32ConvertI64U:
-		return instr{fn: opF32ConvertI64U}, true
-	case f32DemoteF64:
-		return instr{fn: opF32DemoteF64}, true
-	case f64ConvertI32S:
-		return instr{fn: opF64ConvertI32S}, true
-	case f64ConvertI32U:
-		return instr{fn: opF64ConvertI32U}, true
-	case f64ConvertI64S:
-		return instr{fn: opF64ConvertI64S}, true
-	case f64ConvertI64U:
-		return instr{fn: opF64ConvertI64U}, true
-	case f64PromoteF32:
-		return instr{fn: opF64PromoteF32}, true
-	case i32ReinterpretF32:
-		return instr{fn: opI32ReinterpretF32}, true
-	case i64ReinterpretF64:
-		return instr{fn: opI64ReinterpretF64}, true
-	case f32ReinterpretI32:
-		return instr{fn: opF32ReinterpretI32}, true
-	case f64ReinterpretI64:
-		return instr{fn: opF64ReinterpretI64}, true
-	case i32TruncSatF32S:
-		return instr{fn: opI32TruncSatF32S}, true
-	case i32TruncSatF32U:
-		return instr{fn: opI32TruncSatF32U}, true
-	case i32TruncSatF64S:
-		return instr{fn: opI32TruncSatF64S}, true
-	case i32TruncSatF64U:
-		return instr{fn: opI32TruncSatF64U}, true
-	case i64TruncSatF32S:
-		return instr{fn: opI64TruncSatF32S}, true
-	case i64TruncSatF32U:
-		return instr{fn: opI64TruncSatF32U}, true
-	case i64TruncSatF64S:
-		return instr{fn: opI64TruncSatF64S}, true
-	case i64TruncSatF64U:
-		return instr{fn: opI64TruncSatF64U}, true
-	case i8x16Splat:
-		return instr{fn: opI8x16Splat}, true
-	case i16x8Splat:
-		return instr{fn: opI16x8Splat}, true
-	case i32x4Splat:
-		return instr{fn: opI32x4Splat}, true
-	case i64x2Splat:
-		return instr{fn: opI64x2Splat}, true
-	case f32x4Splat:
-		return instr{fn: opF32x4Splat}, true
-	case f64x2Splat:
-		return instr{fn: opF64x2Splat}, true
-	case v128AnyTrue:
-		return instr{fn: opV128AnyTrue}, true
-	case i8x16AllTrue:
-		return instr{fn: opI8x16AllTrue}, true
-	case i8x16Bitmask:
-		return instr{fn: opI8x16Bitmask}, true
-	case i16x8AllTrue:
-		return instr{fn: opI16x8AllTrue}, true
-	case i16x8Bitmask:
-		return instr{fn: opI16x8Bitmask}, true
-	case i32x4AllTrue:
-		return instr{fn: opI32x4AllTrue}, true
-	case i32x4Bitmask:
-		return instr{fn: opI32x4Bitmask}, true
-	case i64x2AllTrue:
-		return instr{fn: opI64x2AllTrue}, true
-	case i64x2Bitmask:
-		return instr{fn: opI64x2Bitmask}, true
-	case tableGet:
-		return instr{fn: opTableGet, a: body[pc+1]}, true
-	case tableSet:
-		return instr{fn: opTableSet, a: body[pc+1]}, true
-	case memoryInit:
-		return instr{fn: opMemoryInit, a: body[pc+1], b: body[pc+2]}, true
-	case memoryCopy:
-		return instr{fn: opMemoryCopy, a: body[pc+1], b: body[pc+2]}, true
-	case memoryFill:
-		return instr{fn: opMemoryFill, a: body[pc+1]}, true
-	case dataDrop:
-		return instr{fn: opDataDrop, a: body[pc+1]}, true
-	case tableInit:
-		return instr{fn: opTableInit, a: body[pc+1], b: body[pc+2]}, true
-	case elemDrop:
-		return instr{fn: opElemDrop, a: body[pc+1]}, true
-	case tableCopy:
-		return instr{fn: opTableCopy, a: body[pc+1], b: body[pc+2]}, true
-	case tableGrow:
-		return instr{fn: opTableGrow, a: body[pc+1]}, true
-	case tableSize:
-		return instr{fn: opTableSize, a: body[pc+1]}, true
-	case tableFill:
-		return instr{fn: opTableFill, a: body[pc+1]}, true
-	case i8x16ExtractLaneS:
-		return instr{fn: opI8x16ExtractLaneS, a: body[pc+1]}, true
-	case i8x16ExtractLaneU:
-		return instr{fn: opI8x16ExtractLaneU, a: body[pc+1]}, true
-	case i16x8ExtractLaneS:
-		return instr{fn: opI16x8ExtractLaneS, a: body[pc+1]}, true
-	case i16x8ExtractLaneU:
-		return instr{fn: opI16x8ExtractLaneU, a: body[pc+1]}, true
-	case i32x4ExtractLane:
-		return instr{fn: opI32x4ExtractLane, a: body[pc+1]}, true
-	case i64x2ExtractLane:
-		return instr{fn: opI64x2ExtractLane, a: body[pc+1]}, true
-	case f32x4ExtractLane:
-		return instr{fn: opF32x4ExtractLane, a: body[pc+1]}, true
-	case f64x2ExtractLane:
-		return instr{fn: opF64x2ExtractLane, a: body[pc+1]}, true
-	case i8x16ReplaceLane:
-		return instr{fn: opI8x16ReplaceLane, a: body[pc+1]}, true
-	case i16x8ReplaceLane:
-		return instr{fn: opI16x8ReplaceLane, a: body[pc+1]}, true
-	case i32x4ReplaceLane:
-		return instr{fn: opI32x4ReplaceLane, a: body[pc+1]}, true
-	case i64x2ReplaceLane:
-		return instr{fn: opI64x2ReplaceLane, a: body[pc+1]}, true
-	case f32x4ReplaceLane:
-		return instr{fn: opF32x4ReplaceLane, a: body[pc+1]}, true
-	case f64x2ReplaceLane:
-		return instr{fn: opF64x2ReplaceLane, a: body[pc+1]}, true
-	case v128Load8x8S:
-		return instr{fn: opV128Load8x8S, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load8x8U:
-		return instr{fn: opV128Load8x8U, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load16x4S:
-		return instr{fn: opV128Load16x4S, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load16x4U:
-		return instr{fn: opV128Load16x4U, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load32x2S:
-		return instr{fn: opV128Load32x2S, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load32x2U:
-		return instr{fn: opV128Load32x2U, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load8Splat:
-		return instr{fn: opV128Load8Splat, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load16Splat:
-		return instr{fn: opV128Load16Splat, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load32Splat:
-		return instr{fn: opV128Load32Splat, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load64Splat:
-		return instr{fn: opV128Load64Splat, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load32Zero:
-		return instr{fn: opV128Load32Zero, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load64Zero:
-		return instr{fn: opV128Load64Zero, a: body[pc+2], b: body[pc+3]}, true
-	case v128Load8Lane:
-		return instr{fn: opV128Load8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Load16Lane:
-		return instr{fn: opV128Load16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Load32Lane:
-		return instr{fn: opV128Load32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Load64Lane:
-		return instr{fn: opV128Load64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Store8Lane:
-		return instr{fn: opV128Store8Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Store16Lane:
-		return instr{fn: opV128Store16Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Store32Lane:
-		return instr{fn: opV128Store32Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Store64Lane:
-		return instr{fn: opV128Store64Lane, a: body[pc+2], b: body[pc+3]<<32 | body[pc+4]}, true
-	case v128Const:
-		return instr{fn: opV128Const, a: body[pc+1], b: body[pc+2]}, true
-	case v128Load:
-		return instr{fn: opV128Load, a: body[pc+2], b: body[pc+3]}, true
-	case v128Store:
-		return instr{fn: opV128Store, a: body[pc+2], b: body[pc+3]}, true
-	case v128Bitselect:
-		return instr{fn: opTernaryV128[v128BitselectOp]}, true
-	case i8x16Shuffle:
-		var a, b uint64
-		for i := 0; i < 8; i++ {
-			a |= body[pc+1+i] << (8 * i)
-			b |= body[pc+1+8+i] << (8 * i)
-		}
-		return instr{fn: opI8x16Shuffle, a: a, b: b}, true
 	default:
 		return instr{}, false
 	}
@@ -2159,7 +2159,7 @@ func opV128Store64Lane(c *callFrame, in *instr) int {
 	v := c.vm.stack.popV128()
 	index := c.vm.stack.popInt32()
 	laneIndex := uint32(in.b)
-	lanesPerUint64 := uint32(64 / 64)
+	lanesPerUint64 := uint32(1) // 64 / 64
 	shift := (laneIndex % lanesPerUint64) * 64
 	var val uint64
 	if laneIndex < lanesPerUint64 {
