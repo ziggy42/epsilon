@@ -16,8 +16,7 @@
 
 #include <stdint.h>
 
-__attribute__((noinline))
-static int64_t fac_recursive_impl(int64_t n) {
+__attribute__((noinline)) static int64_t fac_recursive_impl(int64_t n) {
   if (n == 0) {
     return 1;
   }
@@ -29,8 +28,8 @@ static int64_t fac_recursive_impl(int64_t n) {
 
 // `n` is passed in (rather than hardcoded) so LLVM can't fold the inner
 // loop into a closed-form expression.
-__attribute__((export_name("fac_recursive")))
-int64_t fac_recursive(int32_t iterations, int64_t n) {
+__attribute__((export_name("fac_recursive"))) int64_t
+fac_recursive(int32_t iterations, int64_t n) {
   int64_t total = 0;
   for (int32_t i = 0; i < iterations; i++) {
     total += fac_recursive_impl(n);
@@ -38,8 +37,8 @@ int64_t fac_recursive(int32_t iterations, int64_t n) {
   return total;
 }
 
-__attribute__((export_name("fac_iterative")))
-int64_t fac_iterative(int32_t iterations, int64_t n) {
+__attribute__((export_name("fac_iterative"))) int64_t
+fac_iterative(int32_t iterations, int64_t n) {
   int64_t total = 0;
   for (int32_t iter = 0; iter < iterations; iter++) {
     int64_t fac = 1;

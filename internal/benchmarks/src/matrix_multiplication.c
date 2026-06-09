@@ -26,8 +26,7 @@ float matrix_a[DIM][DIM];
 float matrix_b[DIM][DIM];
 float result_matrix[DIM][DIM];
 
-__attribute__((noinline))
-void multiply() {
+__attribute__((noinline)) void multiply() {
   for (int i = 0; i < DIM; i++) {
     for (int j = 0; j < DIM; j++) {
       float sum = 0.0f;
@@ -39,8 +38,8 @@ void multiply() {
   }
 }
 
-__attribute__((export_name("run_matrix_multiplication")))
-float run_matrix_multiplication(int iterations) {
+__attribute__((export_name("run_matrix_multiplication"))) float
+run_matrix_multiplication(int iterations) {
   // Initialize matrices with some values.
   for (int i = 0; i < DIM; i++) {
     for (int j = 0; j < DIM; j++) {

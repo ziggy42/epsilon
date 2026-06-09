@@ -42,10 +42,8 @@ static uint8_t buffer[BUFFER_SIZE];
 static void process_block(uint32_t state[8], const uint8_t block[64]) {
   uint32_t w[64];
   for (int i = 0; i < 16; i++) {
-    w[i] = ((uint32_t)block[i * 4] << 24) |
-           ((uint32_t)block[i * 4 + 1] << 16) |
-           ((uint32_t)block[i * 4 + 2] << 8) |
-           ((uint32_t)block[i * 4 + 3]);
+    w[i] = ((uint32_t)block[i * 4] << 24) | ((uint32_t)block[i * 4 + 1] << 16) |
+           ((uint32_t)block[i * 4 + 2] << 8) | ((uint32_t)block[i * 4 + 3]);
   }
   for (int i = 16; i < 64; i++) {
     uint32_t s0 = ROTR(w[i - 15], 7) ^ ROTR(w[i - 15], 18) ^ (w[i - 15] >> 3);
@@ -101,8 +99,8 @@ static void sha256(uint8_t out[32]) {
   }
 }
 
-__attribute__((export_name("run_sha256")))
-uint32_t run_sha256(int32_t iterations) {
+__attribute__((export_name("run_sha256"))) uint32_t
+run_sha256(int32_t iterations) {
   for (int i = 0; i < BUFFER_SIZE; i++) {
     buffer[i] = (uint8_t)(i * 31 % 251);
   }

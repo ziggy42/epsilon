@@ -6,10 +6,10 @@ All notable changes to this project will be documented in this file.
 
 This release fixes a significant number of security and correctness issues
 throughout the runtime. Background on several of the vulnerabilities is
-available in this [article](https://andreapivetta.com/posts/all-the-bugs-they-found.html).
-Overall performance is roughly unchanged from 0.0.4; one microbenchmark
-exercising `call_indirect` is about 10% slower due to the additional safety
-checks.
+available in this
+[article](https://andreapivetta.com/posts/all-the-bugs-they-found.html). Overall
+performance is roughly unchanged from 0.0.4; one microbenchmark exercising
+`call_indirect` is about 10% slower due to the additional safety checks.
 
 ### New Features
 
@@ -51,6 +51,7 @@ checks.
   ```
 
 - `Default*` constants are exposed for every non-zero `Config` default (#67).
+
 - REPL removed (#38).
 
 ### Security & Correctness Fixes
@@ -92,14 +93,19 @@ checks.
 
 ## [0.0.4] - 2026-02-01
 
-- Added experimental support for [WASI Preview 1](wasip1/README.md) on Linux and macOS.
-- **API Changes**: Host functions now receive `ModuleInstance` as their first argument, enabling context-aware implementations (#32).
+- Added experimental support for [WASI Preview 1](wasip1/README.md) on Linux and
+  macOS.
+- **API Changes**: Host functions now receive `ModuleInstance` as their first
+  argument, enabling context-aware implementations (#32).
 - CLI now invokes `_start` by default if no entry point is specified.
 
 ## [0.0.3] - 2025-12-20
 
-- **API Changes**: `ExperimentalFeatures` has been replaced by `Config`, and `Runtime.WithFeatures` has been renamed to `WithConfig` (#28).
-- `Config` now allows configuring pre-allocated cache sizes and the maximum call stack depth. It also retains support for enabling experimental features like `ExperimentalMultipleMemories` (#28).
+- **API Changes**: `ExperimentalFeatures` has been replaced by `Config`, and
+  `Runtime.WithFeatures` has been renamed to `WithConfig` (#28).
+- `Config` now allows configuring pre-allocated cache sizes and the maximum call
+  stack depth. It also retains support for enabling experimental features like
+  `ExperimentalMultipleMemories` (#28).
 - Major performance improvements (#25, #28, #30).
 
 ## [0.0.2] - 2025-12-14
