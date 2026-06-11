@@ -2147,5 +2147,3 @@ func popcntLanesI8(x uint64) uint64 {
 	x = (x & m2) + ((x >> 2) & m2)
 	return (x + (x >> 4)) & m4
 }
-
-func identityV128(v V128Value) V128Value { return v }

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 )
 
 var (
@@ -35,9 +36,9 @@ const (
 )
 
 // store represents all global state that can be manipulated by the vm. It
-// consists of the runtime representation of all instances of functions,
-// tables, memories, globals, element segments, and data segments that have
-// been allocated during the vm life time.
+// consists of the runtime representation of all instances of functions, tables,
+// memories, globals, element segments, and data segments that have been
+// allocated during the vm life time.
 type store struct {
 	funcs    []FunctionInstance
 	tables   []*Table
@@ -221,10 +222,10 @@ func (vm *vm) instantiate(
 		elem.functionIndexes = nil
 	}
 
-	// Allocate runtime data instances. The byte slice is shared with the
-	// parsed dataSegment: the runtime only ever reads it (memory.init copies
-	// out) and data.drop nils the instance's slice header, never the backing
-	// array, so the moduleDefinition is left untouched and can be reinstantiated.
+	// Allocate runtime data instances. The byte slice is shared with the parsed
+	// dataSegment: the runtime only ever reads it (memory.init copies out) and
+	// data.drop nils the instance's slice header, never the backing array, so the
+	// moduleDefinition is left untouched and can be reinstantiated.
 	for _, segment := range module.dataSegments {
 		storeIndex := uint32(len(vm.store.datas))
 		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
@@ -233,8 +234,8 @@ func (vm *vm) instantiate(
 	}
 
 	// Apply active data segments to their target memories, then drop them. After
-	// this, memory.init against an active segment sees an empty content and
-	// traps for any non-zero size.
+	// this, memory.init against an active segment sees an empty content and traps
+	// for any non-zero size.
 	for i, segment := range module.dataSegments {
 		if segment.mode != activeDataMode {
 			continue
@@ -454,51 +455,51 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case tableSet:
 		err = vm.handleTableSet(frame)
 	case i32Load:
-		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint32, uint32ToInt32)
+		err = vm.handleI32Load(frame)
 	case i64Load:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint64, uint64ToInt64)
+		err = vm.handleI64Load(frame)
 	case f32Load:
-		err = handleLoad(vm, frame, vm.stack.pushFloat32, (*Memory).LoadUint32, math.Float32frombits)
+		err = vm.handleF32Load(frame)
 	case f64Load:
-		err = handleLoad(vm, frame, vm.stack.pushFloat64, (*Memory).LoadUint64, math.Float64frombits)
+		err = vm.handleF64Load(frame)
 	case i32Load8S:
-		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadByte, signExtend8To32)
+		err = vm.handleI32Load8S(frame)
 	case i32Load8U:
-		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadByte, zeroExtend8To32)
+		err = vm.handleI32Load8U(frame)
 	case i32Load16S:
-		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint16, signExtend16To32)
+		err = vm.handleI32Load16S(frame)
 	case i32Load16U:
-		err = handleLoad(vm, frame, vm.stack.pushInt32, (*Memory).LoadUint16, zeroExtend16To32)
+		err = vm.handleI32Load16U(frame)
 	case i64Load8S:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadByte, signExtend8To64)
+		err = vm.handleI64Load8S(frame)
 	case i64Load8U:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadByte, zeroExtend8To64)
+		err = vm.handleI64Load8U(frame)
 	case i64Load16S:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint16, signExtend16To64)
+		err = vm.handleI64Load16S(frame)
 	case i64Load16U:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint16, zeroExtend16To64)
+		err = vm.handleI64Load16U(frame)
 	case i64Load32S:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint32, signExtend32To64)
+		err = vm.handleI64Load32S(frame)
 	case i64Load32U:
-		err = handleLoad(vm, frame, vm.stack.pushInt64, (*Memory).LoadUint32, zeroExtend32To64)
+		err = vm.handleI64Load32U(frame)
 	case i32Store:
-		err = handleStore(vm, frame, uint32(vm.stack.popInt32()), (*Memory).StoreUint32)
+		err = vm.handleI32Store(frame)
 	case i64Store:
-		err = handleStore(vm, frame, uint64(vm.stack.popInt64()), (*Memory).StoreUint64)
+		err = vm.handleI64Store(frame)
 	case f32Store:
-		err = handleStore(vm, frame, math.Float32bits(vm.stack.popFloat32()), (*Memory).StoreUint32)
+		err = vm.handleF32Store(frame)
 	case f64Store:
-		err = handleStore(vm, frame, math.Float64bits(vm.stack.popFloat64()), (*Memory).StoreUint64)
+		err = vm.handleF64Store(frame)
 	case i32Store8:
-		err = handleStore(vm, frame, byte(vm.stack.popInt32()), (*Memory).StoreByte)
+		err = vm.handleI32Store8(frame)
 	case i32Store16:
-		err = handleStore(vm, frame, uint16(vm.stack.popInt32()), (*Memory).StoreUint16)
+		err = vm.handleI32Store16(frame)
 	case i64Store8:
-		err = handleStore(vm, frame, byte(vm.stack.popInt64()), (*Memory).StoreByte)
+		err = vm.handleI64Store8(frame)
 	case i64Store16:
-		err = handleStore(vm, frame, uint16(vm.stack.popInt64()), (*Memory).StoreUint16)
+		err = vm.handleI64Store16(frame)
 	case i64Store32:
-		err = handleStore(vm, frame, uint32(vm.stack.popInt64()), (*Memory).StoreUint32)
+		err = vm.handleI64Store32(frame)
 	case memorySize:
 		vm.handleMemorySize(frame)
 	case memoryGrow:
@@ -514,77 +515,80 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i32Eqz:
 		vm.stack.pushInt32(boolToInt32(vm.stack.popInt32() == 0))
 	case i32Eq:
-		vm.handleBinaryBoolInt32(equal)
+		vm.handleI32Eq()
 	case i32Ne:
-		vm.handleBinaryBoolInt32(notEqual)
+		vm.handleI32Ne()
 	case i32LtS:
-		vm.handleBinaryBoolInt32(lessThan)
+		vm.handleI32LtS()
 	case i32LtU:
-		vm.handleBinaryBoolInt32(lessThanU32)
+		vm.handleI32LtU()
 	case i32GtS:
-		vm.handleBinaryBoolInt32(greaterThan)
+		vm.handleI32GtS()
 	case i32GtU:
-		vm.handleBinaryBoolInt32(greaterThanU32)
+		vm.handleI32GtU()
 	case i32LeS:
-		vm.handleBinaryBoolInt32(lessOrEqual)
+		vm.handleI32LeS()
 	case i32LeU:
-		vm.handleBinaryBoolInt32(lessOrEqualU32)
+		vm.handleI32LeU()
 	case i32GeS:
-		vm.handleBinaryBoolInt32(greaterOrEqual)
+		vm.handleI32GeS()
 	case i32GeU:
-		vm.handleBinaryBoolInt32(greaterOrEqualU32)
+		vm.handleI32GeU()
 	case i64Eqz:
 		vm.stack.pushInt32(boolToInt32(vm.stack.popInt64() == 0))
 	case i64Eq:
-		vm.handleBinaryBoolInt64(equal)
+		vm.handleI64Eq()
 	case i64Ne:
-		vm.handleBinaryBoolInt64(notEqual)
+		vm.handleI64Ne()
 	case i64LtS:
-		vm.handleBinaryBoolInt64(lessThan)
+		vm.handleI64LtS()
 	case i64LtU:
-		vm.handleBinaryBoolInt64(lessThanU64)
+		vm.handleI64LtU()
 	case i64GtS:
-		vm.handleBinaryBoolInt64(greaterThan)
+		vm.handleI64GtS()
 	case i64GtU:
-		vm.handleBinaryBoolInt64(greaterThanU64)
+		vm.handleI64GtU()
 	case i64LeS:
-		vm.handleBinaryBoolInt64(lessOrEqual)
+		vm.handleI64LeS()
 	case i64LeU:
-		vm.handleBinaryBoolInt64(lessOrEqualU64)
+		vm.handleI64LeU()
 	case i64GeS:
-		vm.handleBinaryBoolInt64(greaterOrEqual)
+		vm.handleI64GeS()
 	case i64GeU:
-		vm.handleBinaryBoolInt64(greaterOrEqualU64)
+		vm.handleI64GeU()
 	case f32Eq:
-		vm.handleBinaryBoolFloat32(equal)
+		vm.handleF32Eq()
 	case f32Ne:
-		vm.handleBinaryBoolFloat32(notEqual)
+		vm.handleF32Ne()
 	case f32Lt:
-		vm.handleBinaryBoolFloat32(lessThan)
+		vm.handleF32Lt()
 	case f32Gt:
-		vm.handleBinaryBoolFloat32(greaterThan)
+		vm.handleF32Gt()
 	case f32Le:
-		vm.handleBinaryBoolFloat32(lessOrEqual)
+		vm.handleF32Le()
 	case f32Ge:
-		vm.handleBinaryBoolFloat32(greaterOrEqual)
+		vm.handleF32Ge()
 	case f64Eq:
-		vm.handleBinaryBoolFloat64(equal)
+		vm.handleF64Eq()
 	case f64Ne:
-		vm.handleBinaryBoolFloat64(notEqual)
+		vm.handleF64Ne()
 	case f64Lt:
-		vm.handleBinaryBoolFloat64(lessThan)
+		vm.handleF64Lt()
 	case f64Gt:
-		vm.handleBinaryBoolFloat64(greaterThan)
+		vm.handleF64Gt()
 	case f64Le:
-		vm.handleBinaryBoolFloat64(lessOrEqual)
+		vm.handleF64Le()
 	case f64Ge:
-		vm.handleBinaryBoolFloat64(greaterOrEqual)
+		vm.handleF64Ge()
 	case i32Clz:
-		vm.stack.pushInt32(clz32(vm.stack.popInt32()))
+		a := vm.stack.popInt32()
+		vm.stack.pushInt32(int32(bits.LeadingZeros32(uint32(a))))
 	case i32Ctz:
-		vm.stack.pushInt32(ctz32(vm.stack.popInt32()))
+		a := vm.stack.popInt32()
+		vm.stack.pushInt32(int32(bits.TrailingZeros32(uint32(a))))
 	case i32Popcnt:
-		vm.stack.pushInt32(popcnt32(vm.stack.popInt32()))
+		a := vm.stack.popInt32()
+		vm.stack.pushInt32(int32(bits.OnesCount32(uint32(a))))
 	case i32Add:
 		b := vm.stack.popInt32()
 		res := vm.stack.data[len(vm.stack.data)-1].int32() + b
@@ -598,13 +602,13 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		res := vm.stack.data[len(vm.stack.data)-1].int32() * b
 		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32DivS:
-		err = vm.handleBinarySafeInt32(divS32)
+		err = vm.handleI32DivS()
 	case i32DivU:
-		err = vm.handleBinarySafeInt32(divU32)
+		err = vm.handleI32DivU()
 	case i32RemS:
-		err = vm.handleBinarySafeInt32(remS32)
+		err = vm.handleI32RemS()
 	case i32RemU:
-		err = vm.handleBinarySafeInt32(remU32)
+		err = vm.handleI32RemU()
 	case i32And:
 		b := vm.stack.popInt32()
 		res := vm.stack.data[len(vm.stack.data)-1].int32() & b
@@ -627,22 +631,28 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32ShrU:
 		b := vm.stack.popInt32()
-		res := shrU32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int32()
+		res := int32(uint32(a) >> (uint32(b) % 32))
 		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Rotl:
 		b := vm.stack.popInt32()
-		res := rotl32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int32()
+		res := int32(bits.RotateLeft32(uint32(a), int(b)))
 		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i32Rotr:
 		b := vm.stack.popInt32()
-		res := rotr32(vm.stack.data[len(vm.stack.data)-1].int32(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int32()
+		res := int32(bits.RotateLeft32(uint32(a), -int(b)))
 		vm.stack.data[len(vm.stack.data)-1] = i32(res)
 	case i64Clz:
-		vm.stack.pushInt64(clz64(vm.stack.popInt64()))
+		a := vm.stack.popInt64()
+		vm.stack.pushInt64(int64(bits.LeadingZeros64(uint64(a))))
 	case i64Ctz:
-		vm.stack.pushInt64(ctz64(vm.stack.popInt64()))
+		a := vm.stack.popInt64()
+		vm.stack.pushInt64(int64(bits.TrailingZeros64(uint64(a))))
 	case i64Popcnt:
-		vm.stack.pushInt64(popcnt64(vm.stack.popInt64()))
+		a := vm.stack.popInt64()
+		vm.stack.pushInt64(int64(bits.OnesCount64(uint64(a))))
 	case i64Add:
 		b := vm.stack.popInt64()
 		res := vm.stack.data[len(vm.stack.data)-1].int64() + b
@@ -656,13 +666,13 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		res := vm.stack.data[len(vm.stack.data)-1].int64() * b
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64DivS:
-		err = vm.handleBinarySafeInt64(divS64)
+		err = vm.handleI64DivS()
 	case i64DivU:
-		err = vm.handleBinarySafeInt64(divU64)
+		err = vm.handleI64DivU()
 	case i64RemS:
-		err = vm.handleBinarySafeInt64(remS64)
+		err = vm.handleI64RemS()
 	case i64RemU:
-		err = vm.handleBinarySafeInt64(remU64)
+		err = vm.handleI64RemU()
 	case i64And:
 		b := vm.stack.popInt64()
 		res := vm.stack.data[len(vm.stack.data)-1].int64() & b
@@ -677,23 +687,26 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Shl:
 		b := vm.stack.popInt64()
-		res := shl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		res := vm.stack.data[len(vm.stack.data)-1].int64() << (uint64(b) % 64)
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64ShrS:
 		b := vm.stack.popInt64()
-		res := shrS64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		res := vm.stack.data[len(vm.stack.data)-1].int64() >> (uint64(b) % 64)
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64ShrU:
 		b := vm.stack.popInt64()
-		res := shrU64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int64()
+		res := int64(uint64(a) >> (uint64(b) % 64))
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Rotl:
 		b := vm.stack.popInt64()
-		res := rotl64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int64()
+		res := int64(bits.RotateLeft64(uint64(a), int(b)))
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case i64Rotr:
 		b := vm.stack.popInt64()
-		res := rotr64(vm.stack.data[len(vm.stack.data)-1].int64(), b)
+		a := vm.stack.data[len(vm.stack.data)-1].int64()
+		res := int64(bits.RotateLeft64(uint64(a), -int(b)))
 		vm.stack.data[len(vm.stack.data)-1] = i64(res)
 	case f32Abs:
 		vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
@@ -710,19 +723,19 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f32Sqrt:
 		vm.stack.pushFloat32(sqrt(vm.stack.popFloat32()))
 	case f32Add:
-		vm.handleBinaryFloat32(add[float32])
+		vm.handleF32Add()
 	case f32Sub:
-		vm.handleBinaryFloat32(sub[float32])
+		vm.handleF32Sub()
 	case f32Mul:
-		vm.handleBinaryFloat32(mul[float32])
+		vm.handleF32Mul()
 	case f32Div:
-		vm.handleBinaryFloat32(div[float32])
+		vm.handleF32Div()
 	case f32Min:
-		vm.handleBinaryFloat32(wasmMin[float32])
+		vm.handleF32Min()
 	case f32Max:
-		vm.handleBinaryFloat32(wasmMax[float32])
+		vm.handleF32Max()
 	case f32Copysign:
-		vm.handleBinaryFloat32(copysign[float32])
+		vm.handleF32Copysign()
 	case f64Abs:
 		vm.stack.pushFloat64(abs(vm.stack.popFloat64()))
 	case f64Neg:
@@ -738,79 +751,79 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f64Sqrt:
 		vm.stack.pushFloat64(sqrt(vm.stack.popFloat64()))
 	case f64Add:
-		vm.handleBinaryFloat64(add[float64])
+		vm.handleF64Add()
 	case f64Sub:
-		vm.handleBinaryFloat64(sub[float64])
+		vm.handleF64Sub()
 	case f64Mul:
-		vm.handleBinaryFloat64(mul[float64])
+		vm.handleF64Mul()
 	case f64Div:
-		vm.handleBinaryFloat64(div[float64])
+		vm.handleF64Div()
 	case f64Min:
-		vm.handleBinaryFloat64(wasmMin[float64])
+		vm.handleF64Min()
 	case f64Max:
-		vm.handleBinaryFloat64(wasmMax[float64])
+		vm.handleF64Max()
 	case f64Copysign:
-		vm.handleBinaryFloat64(copysign[float64])
+		vm.handleF64Copysign()
 	case i32WrapI64:
-		vm.stack.pushInt32(wrapI64ToI32(vm.stack.popInt64()))
+		vm.stack.pushInt32(int32(vm.stack.popInt64()))
 	case i32TruncF32S:
-		err = vm.handleUnarySafeFloat32(truncF32SToI32)
+		err = vm.handleI32TruncF32S()
 	case i32TruncF32U:
-		err = vm.handleUnarySafeFloat32(truncF32UToI32)
+		err = vm.handleI32TruncF32U()
 	case i32TruncF64S:
-		err = vm.handleUnarySafeFloat64(truncF64SToI32)
+		err = vm.handleI32TruncF64S()
 	case i32TruncF64U:
-		err = vm.handleUnarySafeFloat64(truncF64UToI32)
+		err = vm.handleI32TruncF64U()
 	case i64ExtendI32S:
-		vm.stack.pushInt64(extendI32SToI64(vm.stack.popInt32()))
+		vm.stack.pushInt64(int64(vm.stack.popInt32()))
 	case i64ExtendI32U:
-		vm.stack.pushInt64(extendI32UToI64(vm.stack.popInt32()))
+		vm.stack.pushInt64(int64(uint32(vm.stack.popInt32())))
 	case i64TruncF32S:
-		err = vm.handleTruncFloat32Int64(truncF32SToI64)
+		err = vm.handleI64TruncF32S()
 	case i64TruncF32U:
-		err = vm.handleTruncFloat32Int64(truncF32UToI64)
+		err = vm.handleI64TruncF32U()
 	case i64TruncF64S:
-		err = vm.handleTruncFloat64Int64(truncF64SToI64)
+		err = vm.handleI64TruncF64S()
 	case i64TruncF64U:
-		err = vm.handleTruncFloat64Int64(truncF64UToI64)
+		err = vm.handleI64TruncF64U()
 	case f32ConvertI32S:
-		vm.stack.pushFloat32(convertI32SToF32(vm.stack.popInt32()))
+		vm.stack.pushFloat32(float32(vm.stack.popInt32()))
 	case f32ConvertI32U:
-		vm.stack.pushFloat32(convertI32UToF32(vm.stack.popInt32()))
+		vm.stack.pushFloat32(float32(uint32(vm.stack.popInt32())))
 	case f32ConvertI64S:
-		vm.stack.pushFloat32(convertI64SToF32(vm.stack.popInt64()))
+		vm.stack.pushFloat32(float32(vm.stack.popInt64()))
 	case f32ConvertI64U:
-		vm.stack.pushFloat32(convertI64UToF32(vm.stack.popInt64()))
+		vm.stack.pushFloat32(float32(uint64(vm.stack.popInt64())))
 	case f32DemoteF64:
-		vm.stack.pushFloat32(demoteF64ToF32(vm.stack.popFloat64()))
+		vm.stack.pushFloat32(float32(vm.stack.popFloat64()))
 	case f64ConvertI32S:
-		vm.stack.pushFloat64(convertI32SToF64(vm.stack.popInt32()))
+		vm.stack.pushFloat64(float64(vm.stack.popInt32()))
 	case f64ConvertI32U:
-		vm.stack.pushFloat64(convertI32UToF64(vm.stack.popInt32()))
+		vm.stack.pushFloat64(float64(uint32(vm.stack.popInt32())))
 	case f64ConvertI64S:
-		vm.stack.pushFloat64(convertI64SToF64(vm.stack.popInt64()))
+		vm.stack.pushFloat64(float64(vm.stack.popInt64()))
 	case f64ConvertI64U:
-		vm.stack.pushFloat64(convertI64UToF64(vm.stack.popInt64()))
+		vm.stack.pushFloat64(float64(uint64(vm.stack.popInt64())))
 	case f64PromoteF32:
-		vm.stack.pushFloat64(promoteF32ToF64(vm.stack.popFloat32()))
+		vm.stack.pushFloat64(float64(vm.stack.popFloat32()))
 	case i32ReinterpretF32:
-		vm.stack.pushInt32(reinterpretF32ToI32(vm.stack.popFloat32()))
+		vm.stack.pushInt32(int32(math.Float32bits(vm.stack.popFloat32())))
 	case i64ReinterpretF64:
-		vm.stack.pushInt64(reinterpretF64ToI64(vm.stack.popFloat64()))
+		vm.stack.pushInt64(int64(math.Float64bits(vm.stack.popFloat64())))
 	case f32ReinterpretI32:
-		vm.stack.pushFloat32(reinterpretI32ToF32(vm.stack.popInt32()))
+		vm.stack.pushFloat32(math.Float32frombits(uint32(vm.stack.popInt32())))
 	case f64ReinterpretI64:
-		vm.stack.pushFloat64(reinterpretI64ToF64(vm.stack.popInt64()))
+		vm.stack.pushFloat64(math.Float64frombits(uint64(vm.stack.popInt64())))
 	case i32Extend8S:
-		vm.stack.pushInt32(extend8STo32(vm.stack.popInt32()))
+		vm.stack.pushInt32(int32(int8(vm.stack.popInt32())))
 	case i32Extend16S:
-		vm.stack.pushInt32(extend16STo32(vm.stack.popInt32()))
+		vm.stack.pushInt32(int32(int16(vm.stack.popInt32())))
 	case i64Extend8S:
-		vm.stack.pushInt64(extend8STo64(vm.stack.popInt64()))
+		vm.stack.pushInt64(int64(int8(vm.stack.popInt64())))
 	case i64Extend16S:
-		vm.stack.pushInt64(extend16STo64(vm.stack.popInt64()))
+		vm.stack.pushInt64(int64(int16(vm.stack.popInt64())))
 	case i64Extend32S:
-		vm.stack.pushInt64(extend32STo64(vm.stack.popInt64()))
+		vm.stack.pushInt64(int64(int32(vm.stack.popInt64())))
 	case refNull:
 		frame.next() // type immediate
 		vm.stack.pushInt32(NullReference)
@@ -855,35 +868,65 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case tableFill:
 		err = vm.handleTableFill(frame)
 	case v128Load:
-		err = handleLoad(vm, frame, vm.stack.pushV128, (*Memory).LoadV128, identityV128)
+		err = vm.handleV128Load(frame)
 	case v128Load8x8S:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load8x8S, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load8x8S(data))
+		}
 	case v128Load8x8U:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load8x8U, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load8x8U(data))
+		}
 	case v128Load16x4S:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load16x4S, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load16x4S(data))
+		}
 	case v128Load16x4U:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load16x4U, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load16x4U(data))
+		}
 	case v128Load32x2S:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load32x2S, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load32x2S(data))
+		}
 	case v128Load32x2U:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load32x2U, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load32x2U(data))
+		}
 	case v128Load8Splat:
-		err = vm.handleLoadV128FromBytes(frame, simdI8x16SplatFromBytes, 1)
+		var data []byte
+		if data, err = vm.memGet(frame, 1); err == nil {
+			vm.stack.pushV128(simdI8x16SplatFromBytes(data))
+		}
 	case v128Load16Splat:
-		err = vm.handleLoadV128FromBytes(frame, simdI16x8SplatFromBytes, 2)
+		var data []byte
+		if data, err = vm.memGet(frame, 2); err == nil {
+			vm.stack.pushV128(simdI16x8SplatFromBytes(data))
+		}
 	case v128Load32Splat:
-		err = vm.handleLoadV128FromBytes(frame, simdI32x4SplatFromBytes, 4)
+		var data []byte
+		if data, err = vm.memGet(frame, 4); err == nil {
+			vm.stack.pushV128(simdI32x4SplatFromBytes(data))
+		}
 	case v128Load64Splat:
-		err = vm.handleLoadV128FromBytes(frame, simdI64x2SplatFromBytes, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdI64x2SplatFromBytes(data))
+		}
 	case v128Store:
-		err = handleStore(vm, frame, vm.stack.popV128(), (*Memory).StoreV128)
+		err = vm.handleV128Store(frame)
 	case v128Const:
 		vm.stack.pushV128(V128Value{Low: frame.next(), High: frame.next()})
 	case i8x16Shuffle:
 		vm.handleI8x16Shuffle(frame)
 	case i8x16Swizzle:
-		vm.handleBinaryV128(simdI8x16Swizzle)
+		vm.handleI8x16Swizzle()
 	case i8x16Splat:
 		vm.stack.pushV128(simdI8x16Splat(vm.stack.popInt32()))
 	case i16x8Splat:
@@ -897,129 +940,129 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f64x2Splat:
 		vm.stack.pushV128(simdF64x2Splat(vm.stack.popFloat64()))
 	case i8x16ExtractLaneS:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI8x16ExtractLaneS)
+		vm.handleI8x16ExtractLaneS(frame)
 	case i8x16ExtractLaneU:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI8x16ExtractLaneU)
+		vm.handleI8x16ExtractLaneU(frame)
 	case i8x16ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI8x16ReplaceLane)
+		vm.handleI8x16ReplaceLane(frame)
 	case i16x8ExtractLaneS:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI16x8ExtractLaneS)
+		vm.handleI16x8ExtractLaneS(frame)
 	case i16x8ExtractLaneU:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI16x8ExtractLaneU)
+		vm.handleI16x8ExtractLaneU(frame)
 	case i16x8ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI16x8ReplaceLane)
+		vm.handleI16x8ReplaceLane(frame)
 	case i32x4ExtractLane:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt32, simdI32x4ExtractLane)
+		vm.handleI32x4ExtractLane(frame)
 	case i32x4ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popInt32, simdI32x4ReplaceLane)
+		vm.handleI32x4ReplaceLane(frame)
 	case i64x2ExtractLane:
-		handleSimdExtractLane(vm, frame, vm.stack.pushInt64, simdI64x2ExtractLane)
+		vm.handleI64x2ExtractLane(frame)
 	case i64x2ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popInt64, simdI64x2ReplaceLane)
+		vm.handleI64x2ReplaceLane(frame)
 	case f32x4ExtractLane:
-		handleSimdExtractLane(vm, frame, vm.stack.pushFloat32, simdF32x4ExtractLane)
+		vm.handleF32x4ExtractLane(frame)
 	case f32x4ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popFloat32, simdF32x4ReplaceLane)
+		vm.handleF32x4ReplaceLane(frame)
 	case f64x2ExtractLane:
-		handleSimdExtractLane(vm, frame, vm.stack.pushFloat64, simdF64x2ExtractLane)
+		vm.handleF64x2ExtractLane(frame)
 	case f64x2ReplaceLane:
-		handleSimdReplaceLane(vm, frame, vm.stack.popFloat64, simdF64x2ReplaceLane)
+		vm.handleF64x2ReplaceLane(frame)
 	case i8x16Eq:
-		vm.handleBinaryV128(simdI8x16Eq)
+		vm.handleI8x16Eq()
 	case i8x16Ne:
-		vm.handleBinaryV128(simdI8x16Ne)
+		vm.handleI8x16Ne()
 	case i8x16LtS:
-		vm.handleBinaryV128(simdI8x16LtS)
+		vm.handleI8x16LtS()
 	case i8x16LtU:
-		vm.handleBinaryV128(simdI8x16LtU)
+		vm.handleI8x16LtU()
 	case i8x16GtS:
-		vm.handleBinaryV128(simdI8x16GtS)
+		vm.handleI8x16GtS()
 	case i8x16GtU:
-		vm.handleBinaryV128(simdI8x16GtU)
+		vm.handleI8x16GtU()
 	case i8x16LeS:
-		vm.handleBinaryV128(simdI8x16LeS)
+		vm.handleI8x16LeS()
 	case i8x16LeU:
-		vm.handleBinaryV128(simdI8x16LeU)
+		vm.handleI8x16LeU()
 	case i8x16GeS:
-		vm.handleBinaryV128(simdI8x16GeS)
+		vm.handleI8x16GeS()
 	case i8x16GeU:
-		vm.handleBinaryV128(simdI8x16GeU)
+		vm.handleI8x16GeU()
 	case i16x8Eq:
-		vm.handleBinaryV128(simdI16x8Eq)
+		vm.handleI16x8Eq()
 	case i16x8Ne:
-		vm.handleBinaryV128(simdI16x8Ne)
+		vm.handleI16x8Ne()
 	case i16x8LtS:
-		vm.handleBinaryV128(simdI16x8LtS)
+		vm.handleI16x8LtS()
 	case i16x8LtU:
-		vm.handleBinaryV128(simdI16x8LtU)
+		vm.handleI16x8LtU()
 	case i16x8GtS:
-		vm.handleBinaryV128(simdI16x8GtS)
+		vm.handleI16x8GtS()
 	case i16x8GtU:
-		vm.handleBinaryV128(simdI16x8GtU)
+		vm.handleI16x8GtU()
 	case i16x8LeS:
-		vm.handleBinaryV128(simdI16x8LeS)
+		vm.handleI16x8LeS()
 	case i16x8LeU:
-		vm.handleBinaryV128(simdI16x8LeU)
+		vm.handleI16x8LeU()
 	case i16x8GeS:
-		vm.handleBinaryV128(simdI16x8GeS)
+		vm.handleI16x8GeS()
 	case i16x8GeU:
-		vm.handleBinaryV128(simdI16x8GeU)
+		vm.handleI16x8GeU()
 	case i32x4Eq:
-		vm.handleBinaryV128(simdI32x4Eq)
+		vm.handleI32x4Eq()
 	case i32x4Ne:
-		vm.handleBinaryV128(simdI32x4Ne)
+		vm.handleI32x4Ne()
 	case i32x4LtS:
-		vm.handleBinaryV128(simdI32x4LtS)
+		vm.handleI32x4LtS()
 	case i32x4LtU:
-		vm.handleBinaryV128(simdI32x4LtU)
+		vm.handleI32x4LtU()
 	case i32x4GtS:
-		vm.handleBinaryV128(simdI32x4GtS)
+		vm.handleI32x4GtS()
 	case i32x4GtU:
-		vm.handleBinaryV128(simdI32x4GtU)
+		vm.handleI32x4GtU()
 	case i32x4LeS:
-		vm.handleBinaryV128(simdI32x4LeS)
+		vm.handleI32x4LeS()
 	case i32x4LeU:
-		vm.handleBinaryV128(simdI32x4LeU)
+		vm.handleI32x4LeU()
 	case i32x4GeS:
-		vm.handleBinaryV128(simdI32x4GeS)
+		vm.handleI32x4GeS()
 	case i32x4GeU:
-		vm.handleBinaryV128(simdI32x4GeU)
+		vm.handleI32x4GeU()
 	case f32x4Eq:
-		vm.handleBinaryV128(simdF32x4Eq)
+		vm.handleF32x4Eq()
 	case f32x4Ne:
-		vm.handleBinaryV128(simdF32x4Ne)
+		vm.handleF32x4Ne()
 	case f32x4Lt:
-		vm.handleBinaryV128(simdF32x4Lt)
+		vm.handleF32x4Lt()
 	case f32x4Gt:
-		vm.handleBinaryV128(simdF32x4Gt)
+		vm.handleF32x4Gt()
 	case f32x4Le:
-		vm.handleBinaryV128(simdF32x4Le)
+		vm.handleF32x4Le()
 	case f32x4Ge:
-		vm.handleBinaryV128(simdF32x4Ge)
+		vm.handleF32x4Ge()
 	case f64x2Eq:
-		vm.handleBinaryV128(simdF64x2Eq)
+		vm.handleF64x2Eq()
 	case f64x2Ne:
-		vm.handleBinaryV128(simdF64x2Ne)
+		vm.handleF64x2Ne()
 	case f64x2Lt:
-		vm.handleBinaryV128(simdF64x2Lt)
+		vm.handleF64x2Lt()
 	case f64x2Gt:
-		vm.handleBinaryV128(simdF64x2Gt)
+		vm.handleF64x2Gt()
 	case f64x2Le:
-		vm.handleBinaryV128(simdF64x2Le)
+		vm.handleF64x2Le()
 	case f64x2Ge:
-		vm.handleBinaryV128(simdF64x2Ge)
+		vm.handleF64x2Ge()
 	case v128Not:
 		vm.stack.pushV128(simdV128Not(vm.stack.popV128()))
 	case v128And:
-		vm.handleBinaryV128(simdV128And)
+		vm.handleV128And()
 	case v128Andnot:
-		vm.handleBinaryV128(simdV128Andnot)
+		vm.handleV128Andnot()
 	case v128Or:
-		vm.handleBinaryV128(simdV128Or)
+		vm.handleV128Or()
 	case v128Xor:
-		vm.handleBinaryV128(simdV128Xor)
+		vm.handleV128Xor()
 	case v128Bitselect:
-		vm.handleSimdTernary(simdV128Bitselect)
+		vm.handleV128Bitselect()
 	case v128AnyTrue:
 		vm.stack.pushInt32(boolToInt32(simdV128AnyTrue(vm.stack.popV128())))
 	case v128Load8Lane:
@@ -1039,9 +1082,15 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case v128Store64Lane:
 		err = vm.handleSimdStoreLane(frame, 64)
 	case v128Load32Zero:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load32Zero, 4)
+		var data []byte
+		if data, err = vm.memGet(frame, 4); err == nil {
+			vm.stack.pushV128(simdV128Load32Zero(data))
+		}
 	case v128Load64Zero:
-		err = vm.handleLoadV128FromBytes(frame, simdV128Load64Zero, 8)
+		var data []byte
+		if data, err = vm.memGet(frame, 8); err == nil {
+			vm.stack.pushV128(simdV128Load64Zero(data))
+		}
 	case f32x4DemoteF64x2Zero:
 		vm.stack.pushV128(simdF32x4DemoteF64x2Zero(vm.stack.popV128()))
 	case f64x2PromoteLowF32x4:
@@ -1057,9 +1106,9 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i8x16Bitmask:
 		vm.stack.pushInt32(simdI8x16Bitmask(vm.stack.popV128()))
 	case i8x16NarrowI16x8S:
-		vm.handleBinaryV128(simdI8x16NarrowI16x8S)
+		vm.handleI8x16NarrowI16x8S()
 	case i8x16NarrowI16x8U:
-		vm.handleBinaryV128(simdI8x16NarrowI16x8U)
+		vm.handleI8x16NarrowI16x8U()
 	case f32x4Ceil:
 		vm.stack.pushV128(simdF32x4Ceil(vm.stack.popV128()))
 	case f32x4Floor:
@@ -1069,39 +1118,39 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f32x4Nearest:
 		vm.stack.pushV128(simdF32x4Nearest(vm.stack.popV128()))
 	case i8x16Shl:
-		vm.handleSimdShift(simdI8x16Shl)
+		vm.handleI8x16Shl()
 	case i8x16ShrU:
-		vm.handleSimdShift(simdI8x16ShrU)
+		vm.handleI8x16ShrU()
 	case i8x16ShrS:
-		vm.handleSimdShift(simdI8x16ShrS)
+		vm.handleI8x16ShrS()
 	case i8x16Add:
-		vm.handleBinaryV128(simdI8x16Add)
+		vm.handleI8x16Add()
 	case i8x16AddSatS:
-		vm.handleBinaryV128(simdI8x16AddSatS)
+		vm.handleI8x16AddSatS()
 	case i8x16AddSatU:
-		vm.handleBinaryV128(simdI8x16AddSatU)
+		vm.handleI8x16AddSatU()
 	case i8x16Sub:
-		vm.handleBinaryV128(simdI8x16Sub)
+		vm.handleI8x16Sub()
 	case i8x16SubSatS:
-		vm.handleBinaryV128(simdI8x16SubSatS)
+		vm.handleI8x16SubSatS()
 	case i8x16SubSatU:
-		vm.handleBinaryV128(simdI8x16SubSatU)
+		vm.handleI8x16SubSatU()
 	case f64x2Ceil:
 		vm.stack.pushV128(simdF64x2Ceil(vm.stack.popV128()))
 	case f64x2Floor:
 		vm.stack.pushV128(simdF64x2Floor(vm.stack.popV128()))
 	case i8x16MinS:
-		vm.handleBinaryV128(simdI8x16MinS)
+		vm.handleI8x16MinS()
 	case i8x16MinU:
-		vm.handleBinaryV128(simdI8x16MinU)
+		vm.handleI8x16MinU()
 	case i8x16MaxS:
-		vm.handleBinaryV128(simdI8x16MaxS)
+		vm.handleI8x16MaxS()
 	case i8x16MaxU:
-		vm.handleBinaryV128(simdI8x16MaxU)
+		vm.handleI8x16MaxU()
 	case f64x2Trunc:
 		vm.stack.pushV128(simdF64x2Trunc(vm.stack.popV128()))
 	case i8x16AvgrU:
-		vm.handleBinaryV128(simdI8x16AvgrU)
+		vm.handleI8x16AvgrU()
 	case i16x8ExtaddPairwiseI8x16S:
 		vm.stack.pushV128(simdI16x8ExtaddPairwiseI8x16S(vm.stack.popV128()))
 	case i16x8ExtaddPairwiseI8x16U:
@@ -1115,15 +1164,15 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i16x8Neg:
 		vm.stack.pushV128(simdI16x8Neg(vm.stack.popV128()))
 	case i16x8Q15mulrSatS:
-		vm.handleBinaryV128(simdI16x8Q15mulrSatS)
+		vm.handleI16x8Q15mulrSatS()
 	case i16x8AllTrue:
 		vm.stack.pushInt32(boolToInt32(simdI16x8AllTrue(vm.stack.popV128())))
 	case i16x8Bitmask:
 		vm.stack.pushInt32(simdI16x8Bitmask(vm.stack.popV128()))
 	case i16x8NarrowI32x4S:
-		vm.handleBinaryV128(simdI16x8NarrowI32x4S)
+		vm.handleI16x8NarrowI32x4S()
 	case i16x8NarrowI32x4U:
-		vm.handleBinaryV128(simdI16x8NarrowI32x4U)
+		vm.handleI16x8NarrowI32x4U()
 	case i16x8ExtendLowI8x16S:
 		vm.stack.pushV128(simdI16x8ExtendLowI8x16S(vm.stack.popV128()))
 	case i16x8ExtendHighI8x16S:
@@ -1133,45 +1182,45 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i16x8ExtendHighI8x16U:
 		vm.stack.pushV128(simdI16x8ExtendHighI8x16U(vm.stack.popV128()))
 	case i16x8Shl:
-		vm.handleSimdShift(simdI16x8Shl)
+		vm.handleI16x8Shl()
 	case i16x8ShrS:
-		vm.handleSimdShift(simdI16x8ShrS)
+		vm.handleI16x8ShrS()
 	case i16x8ShrU:
-		vm.handleSimdShift(simdI16x8ShrU)
+		vm.handleI16x8ShrU()
 	case i16x8Add:
-		vm.handleBinaryV128(simdI16x8Add)
+		vm.handleI16x8Add()
 	case i16x8AddSatS:
-		vm.handleBinaryV128(simdI16x8AddSatS)
+		vm.handleI16x8AddSatS()
 	case i16x8AddSatU:
-		vm.handleBinaryV128(simdI16x8AddSatU)
+		vm.handleI16x8AddSatU()
 	case i16x8Sub:
-		vm.handleBinaryV128(simdI16x8Sub)
+		vm.handleI16x8Sub()
 	case i16x8SubSatS:
-		vm.handleBinaryV128(simdI16x8SubSatS)
+		vm.handleI16x8SubSatS()
 	case i16x8SubSatU:
-		vm.handleBinaryV128(simdI16x8SubSatU)
+		vm.handleI16x8SubSatU()
 	case f64x2Nearest:
 		vm.stack.pushV128(simdF64x2Nearest(vm.stack.popV128()))
 	case i16x8Mul:
-		vm.handleBinaryV128(simdI16x8Mul)
+		vm.handleI16x8Mul()
 	case i16x8MinS:
-		vm.handleBinaryV128(simdI16x8MinS)
+		vm.handleI16x8MinS()
 	case i16x8MinU:
-		vm.handleBinaryV128(simdI16x8MinU)
+		vm.handleI16x8MinU()
 	case i16x8MaxS:
-		vm.handleBinaryV128(simdI16x8MaxS)
+		vm.handleI16x8MaxS()
 	case i16x8MaxU:
-		vm.handleBinaryV128(simdI16x8MaxU)
+		vm.handleI16x8MaxU()
 	case i16x8AvgrU:
-		vm.handleBinaryV128(simdI16x8AvgrU)
+		vm.handleI16x8AvgrU()
 	case i16x8ExtmulLowI8x16S:
-		vm.handleBinaryV128(simdI16x8ExtmulLowI8x16S)
+		vm.handleI16x8ExtmulLowI8x16S()
 	case i16x8ExtmulHighI8x16S:
-		vm.handleBinaryV128(simdI16x8ExtmulHighI8x16S)
+		vm.handleI16x8ExtmulHighI8x16S()
 	case i16x8ExtmulLowI8x16U:
-		vm.handleBinaryV128(simdI16x8ExtmulLowI8x16U)
+		vm.handleI16x8ExtmulLowI8x16U()
 	case i16x8ExtmulHighI8x16U:
-		vm.handleBinaryV128(simdI16x8ExtmulHighI8x16U)
+		vm.handleI16x8ExtmulHighI8x16U()
 	case i32x4Abs:
 		vm.stack.pushV128(simdI32x4Abs(vm.stack.popV128()))
 	case i32x4Neg:
@@ -1189,35 +1238,35 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i32x4ExtendHighI16x8U:
 		vm.stack.pushV128(simdI32x4ExtendHighI16x8U(vm.stack.popV128()))
 	case i32x4Shl:
-		vm.handleSimdShift(simdI32x4Shl)
+		vm.handleI32x4Shl()
 	case i32x4ShrS:
-		vm.handleSimdShift(simdI32x4ShrS)
+		vm.handleI32x4ShrS()
 	case i32x4ShrU:
-		vm.handleSimdShift(simdI32x4ShrU)
+		vm.handleI32x4ShrU()
 	case i32x4Add:
-		vm.handleBinaryV128(simdI32x4Add)
+		vm.handleI32x4Add()
 	case i32x4Sub:
-		vm.handleBinaryV128(simdI32x4Sub)
+		vm.handleI32x4Sub()
 	case i32x4Mul:
-		vm.handleBinaryV128(simdI32x4Mul)
+		vm.handleI32x4Mul()
 	case i32x4MinS:
-		vm.handleBinaryV128(simdI32x4MinS)
+		vm.handleI32x4MinS()
 	case i32x4MinU:
-		vm.handleBinaryV128(simdI32x4MinU)
+		vm.handleI32x4MinU()
 	case i32x4MaxS:
-		vm.handleBinaryV128(simdI32x4MaxS)
+		vm.handleI32x4MaxS()
 	case i32x4MaxU:
-		vm.handleBinaryV128(simdI32x4MaxU)
+		vm.handleI32x4MaxU()
 	case i32x4DotI16x8S:
-		vm.handleBinaryV128(simdI32x4DotI16x8S)
+		vm.handleI32x4DotI16x8S()
 	case i32x4ExtmulLowI16x8S:
-		vm.handleBinaryV128(simdI32x4ExtmulLowI16x8S)
+		vm.handleI32x4ExtmulLowI16x8S()
 	case i32x4ExtmulHighI16x8S:
-		vm.handleBinaryV128(simdI32x4ExtmulHighI16x8S)
+		vm.handleI32x4ExtmulHighI16x8S()
 	case i32x4ExtmulLowI16x8U:
-		vm.handleBinaryV128(simdI32x4ExtmulLowI16x8U)
+		vm.handleI32x4ExtmulLowI16x8U()
 	case i32x4ExtmulHighI16x8U:
-		vm.handleBinaryV128(simdI32x4ExtmulHighI16x8U)
+		vm.handleI32x4ExtmulHighI16x8U()
 	case i64x2Abs:
 		vm.stack.pushV128(simdI64x2Abs(vm.stack.popV128()))
 	case i64x2Neg:
@@ -1235,37 +1284,37 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case i64x2ExtendHighI32x4U:
 		vm.stack.pushV128(simdI64x2ExtendHighI32x4U(vm.stack.popV128()))
 	case i64x2Shl:
-		vm.handleSimdShift(simdI64x2Shl)
+		vm.handleI64x2Shl()
 	case i64x2ShrS:
-		vm.handleSimdShift(simdI64x2ShrS)
+		vm.handleI64x2ShrS()
 	case i64x2ShrU:
-		vm.handleSimdShift(simdI64x2ShrU)
+		vm.handleI64x2ShrU()
 	case i64x2Add:
-		vm.handleBinaryV128(simdI64x2Add)
+		vm.handleI64x2Add()
 	case i64x2Sub:
-		vm.handleBinaryV128(simdI64x2Sub)
+		vm.handleI64x2Sub()
 	case i64x2Mul:
-		vm.handleBinaryV128(simdI64x2Mul)
+		vm.handleI64x2Mul()
 	case i64x2Eq:
-		vm.handleBinaryV128(simdI64x2Eq)
+		vm.handleI64x2Eq()
 	case i64x2Ne:
-		vm.handleBinaryV128(simdI64x2Ne)
+		vm.handleI64x2Ne()
 	case i64x2LtS:
-		vm.handleBinaryV128(simdI64x2LtS)
+		vm.handleI64x2LtS()
 	case i64x2GtS:
-		vm.handleBinaryV128(simdI64x2GtS)
+		vm.handleI64x2GtS()
 	case i64x2LeS:
-		vm.handleBinaryV128(simdI64x2LeS)
+		vm.handleI64x2LeS()
 	case i64x2GeS:
-		vm.handleBinaryV128(simdI64x2GeS)
+		vm.handleI64x2GeS()
 	case i64x2ExtmulLowI32x4S:
-		vm.handleBinaryV128(simdI64x2ExtmulLowI32x4S)
+		vm.handleI64x2ExtmulLowI32x4S()
 	case i64x2ExtmulHighI32x4S:
-		vm.handleBinaryV128(simdI64x2ExtmulHighI32x4S)
+		vm.handleI64x2ExtmulHighI32x4S()
 	case i64x2ExtmulLowI32x4U:
-		vm.handleBinaryV128(simdI64x2ExtmulLowI32x4U)
+		vm.handleI64x2ExtmulLowI32x4U()
 	case i64x2ExtmulHighI32x4U:
-		vm.handleBinaryV128(simdI64x2ExtmulHighI32x4U)
+		vm.handleI64x2ExtmulHighI32x4U()
 	case f32x4Abs:
 		vm.stack.pushV128(simdF32x4Abs(vm.stack.popV128()))
 	case f32x4Neg:
@@ -1273,21 +1322,21 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f32x4Sqrt:
 		vm.stack.pushV128(simdF32x4Sqrt(vm.stack.popV128()))
 	case f32x4Add:
-		vm.handleBinaryV128(simdF32x4Add)
+		vm.handleF32x4Add()
 	case f32x4Sub:
-		vm.handleBinaryV128(simdF32x4Sub)
+		vm.handleF32x4Sub()
 	case f32x4Mul:
-		vm.handleBinaryV128(simdF32x4Mul)
+		vm.handleF32x4Mul()
 	case f32x4Div:
-		vm.handleBinaryV128(simdF32x4Div)
+		vm.handleF32x4Div()
 	case f32x4Min:
-		vm.handleBinaryV128(simdF32x4Min)
+		vm.handleF32x4Min()
 	case f32x4Max:
-		vm.handleBinaryV128(simdF32x4Max)
+		vm.handleF32x4Max()
 	case f32x4Pmin:
-		vm.handleBinaryV128(simdF32x4Pmin)
+		vm.handleF32x4Pmin()
 	case f32x4Pmax:
-		vm.handleBinaryV128(simdF32x4Pmax)
+		vm.handleF32x4Pmax()
 	case f64x2Abs:
 		vm.stack.pushV128(simdF64x2Abs(vm.stack.popV128()))
 	case f64x2Neg:
@@ -1295,21 +1344,21 @@ func (vm *vm) executeInstruction(frame *callFrame) error {
 	case f64x2Sqrt:
 		vm.stack.pushV128(simdF64x2Sqrt(vm.stack.popV128()))
 	case f64x2Add:
-		vm.handleBinaryV128(simdF64x2Add)
+		vm.handleF64x2Add()
 	case f64x2Sub:
-		vm.handleBinaryV128(simdF64x2Sub)
+		vm.handleF64x2Sub()
 	case f64x2Mul:
-		vm.handleBinaryV128(simdF64x2Mul)
+		vm.handleF64x2Mul()
 	case f64x2Div:
-		vm.handleBinaryV128(simdF64x2Div)
+		vm.handleF64x2Div()
 	case f64x2Min:
-		vm.handleBinaryV128(simdF64x2Min)
+		vm.handleF64x2Min()
 	case f64x2Max:
-		vm.handleBinaryV128(simdF64x2Max)
+		vm.handleF64x2Max()
 	case f64x2Pmin:
-		vm.handleBinaryV128(simdF64x2Pmin)
+		vm.handleF64x2Pmin()
 	case f64x2Pmax:
-		vm.handleBinaryV128(simdF64x2Pmax)
+		vm.handleF64x2Pmax()
 	case i32x4TruncSatF32x4S:
 		vm.stack.pushV128(simdI32x4TruncSatF32x4S(vm.stack.popV128()))
 	case i32x4TruncSatF32x4U:
@@ -1573,6 +1622,709 @@ func (vm *vm) handleTableFill(frame *callFrame) error {
 	return table.Fill(n, i, val)
 }
 
+// The load/store handlers below repeat the memarg decoding inline rather than
+// sharing a helper: a shared decoder exceeds the inlining budget (the embedded
+// stack pop alone is most of it), and an extra call per memory instruction is
+// measurable in the dispatch hot path.
+func (vm *vm) handleI32Load(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint32(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(int32(v))
+	return nil
+}
+
+func (vm *vm) handleI64Load(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint64(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(v))
+	return nil
+}
+
+func (vm *vm) handleF32Load(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint32(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushFloat32(math.Float32frombits(v))
+	return nil
+}
+
+func (vm *vm) handleF64Load(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint64(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushFloat64(math.Float64frombits(v))
+	return nil
+}
+
+func (vm *vm) handleI32Load8S(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadByte(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(int32(int8(v)))
+	return nil
+}
+
+func (vm *vm) handleI32Load8U(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadByte(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(int32(v))
+	return nil
+}
+
+func (vm *vm) handleI32Load16S(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint16(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(int32(int16(v)))
+	return nil
+}
+
+func (vm *vm) handleI32Load16U(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint16(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(int32(v))
+	return nil
+}
+
+func (vm *vm) handleI64Load8S(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadByte(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(int8(v)))
+	return nil
+}
+
+func (vm *vm) handleI64Load8U(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadByte(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(v))
+	return nil
+}
+
+func (vm *vm) handleI64Load16S(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint16(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(int16(v)))
+	return nil
+}
+
+func (vm *vm) handleI64Load16U(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint16(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(v))
+	return nil
+}
+
+func (vm *vm) handleI64Load32S(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint32(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(int32(v)))
+	return nil
+}
+
+func (vm *vm) handleI64Load32U(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadUint32(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(int64(v))
+	return nil
+}
+
+func (vm *vm) handleI32Store(frame *callFrame) error {
+	val := uint32(vm.stack.popInt32())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint32(offset, index, val)
+}
+
+func (vm *vm) handleI64Store(frame *callFrame) error {
+	val := uint64(vm.stack.popInt64())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint64(offset, index, val)
+}
+
+func (vm *vm) handleF32Store(frame *callFrame) error {
+	val := math.Float32bits(vm.stack.popFloat32())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint32(offset, index, val)
+}
+
+func (vm *vm) handleF64Store(frame *callFrame) error {
+	val := math.Float64bits(vm.stack.popFloat64())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint64(offset, index, val)
+}
+
+func (vm *vm) handleI32Store8(frame *callFrame) error {
+	val := byte(vm.stack.popInt32())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreByte(offset, index, val)
+}
+
+func (vm *vm) handleI32Store16(frame *callFrame) error {
+	val := uint16(vm.stack.popInt32())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint16(offset, index, val)
+}
+
+func (vm *vm) handleI64Store8(frame *callFrame) error {
+	val := byte(vm.stack.popInt64())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreByte(offset, index, val)
+}
+
+func (vm *vm) handleI64Store16(frame *callFrame) error {
+	val := uint16(vm.stack.popInt64())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint16(offset, index, val)
+}
+
+func (vm *vm) handleI64Store32(frame *callFrame) error {
+	val := uint32(vm.stack.popInt64())
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreUint32(offset, index, val)
+}
+
+func (vm *vm) handleI32Eq() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a == b))
+}
+
+func (vm *vm) handleI32Ne() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a != b))
+}
+
+func (vm *vm) handleI32LtS() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a < b))
+}
+
+func (vm *vm) handleI32LtU() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(uint32(a) < uint32(b)))
+}
+
+func (vm *vm) handleI32GtS() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a > b))
+}
+
+func (vm *vm) handleI32GtU() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(uint32(a) > uint32(b)))
+}
+
+func (vm *vm) handleI32LeS() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a <= b))
+}
+
+func (vm *vm) handleI32LeU() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(uint32(a) <= uint32(b)))
+}
+
+func (vm *vm) handleI32GeS() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(a >= b))
+}
+
+func (vm *vm) handleI32GeU() {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	vm.stack.pushInt32(boolToInt32(uint32(a) >= uint32(b)))
+}
+
+func (vm *vm) handleI64Eq() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a == b))
+}
+
+func (vm *vm) handleI64Ne() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a != b))
+}
+
+func (vm *vm) handleI64LtS() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a < b))
+}
+
+func (vm *vm) handleI64LtU() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(uint64(a) < uint64(b)))
+}
+
+func (vm *vm) handleI64GtS() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a > b))
+}
+
+func (vm *vm) handleI64GtU() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(uint64(a) > uint64(b)))
+}
+
+func (vm *vm) handleI64LeS() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a <= b))
+}
+
+func (vm *vm) handleI64LeU() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(uint64(a) <= uint64(b)))
+}
+
+func (vm *vm) handleI64GeS() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(a >= b))
+}
+
+func (vm *vm) handleI64GeU() {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	vm.stack.pushInt32(boolToInt32(uint64(a) >= uint64(b)))
+}
+
+func (vm *vm) handleF32Eq() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a == b))
+}
+
+func (vm *vm) handleF32Ne() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a != b))
+}
+
+func (vm *vm) handleF32Lt() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a < b))
+}
+
+func (vm *vm) handleF32Gt() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a > b))
+}
+
+func (vm *vm) handleF32Le() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a <= b))
+}
+
+func (vm *vm) handleF32Ge() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushInt32(boolToInt32(a >= b))
+}
+
+func (vm *vm) handleF64Eq() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a == b))
+}
+
+func (vm *vm) handleF64Ne() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a != b))
+}
+
+func (vm *vm) handleF64Lt() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a < b))
+}
+
+func (vm *vm) handleF64Gt() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a > b))
+}
+
+func (vm *vm) handleF64Le() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a <= b))
+}
+
+func (vm *vm) handleF64Ge() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushInt32(boolToInt32(a >= b))
+}
+
+func (vm *vm) handleI32DivS() error {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	res, err := divS32(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32DivU() error {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	res, err := divU32(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32RemS() error {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	res, err := remS32(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32RemU() error {
+	b := vm.stack.popInt32()
+	a := vm.stack.popInt32()
+	res, err := remU32(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI64DivS() error {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	res, err := divS64(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64DivU() error {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	res, err := divU64(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64RemS() error {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	res, err := remS64(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64RemU() error {
+	b := vm.stack.popInt64()
+	a := vm.stack.popInt64()
+	res, err := remU64(a, b)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleF32Add() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(a + b)
+}
+
+func (vm *vm) handleF32Sub() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(a - b)
+}
+
+func (vm *vm) handleF32Mul() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(a * b)
+}
+
+func (vm *vm) handleF32Div() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(a / b)
+}
+
+func (vm *vm) handleF32Min() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(min(a, b))
+}
+
+func (vm *vm) handleF32Max() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(max(a, b))
+}
+
+func (vm *vm) handleF32Copysign() {
+	b := vm.stack.popFloat32()
+	a := vm.stack.popFloat32()
+	vm.stack.pushFloat32(copysign(a, b))
+}
+
+func (vm *vm) handleF64Add() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(a + b)
+}
+
+func (vm *vm) handleF64Sub() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(a - b)
+}
+
+func (vm *vm) handleF64Mul() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(a * b)
+}
+
+func (vm *vm) handleF64Div() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(a / b)
+}
+
+func (vm *vm) handleF64Min() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(min(a, b))
+}
+
+func (vm *vm) handleF64Max() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(max(a, b))
+}
+
+func (vm *vm) handleF64Copysign() {
+	b := vm.stack.popFloat64()
+	a := vm.stack.popFloat64()
+	vm.stack.pushFloat64(copysign(a, b))
+}
+
+func (vm *vm) handleI32TruncF32S() error {
+	res, err := truncF32SToI32(vm.stack.popFloat32())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32TruncF32U() error {
+	res, err := truncF32UToI32(vm.stack.popFloat32())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32TruncF64S() error {
+	res, err := truncF64SToI32(vm.stack.popFloat64())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI32TruncF64U() error {
+	res, err := truncF64UToI32(vm.stack.popFloat64())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt32(res)
+	return nil
+}
+
+func (vm *vm) handleI64TruncF32S() error {
+	res, err := truncF32SToI64(vm.stack.popFloat32())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64TruncF32U() error {
+	res, err := truncF32UToI64(vm.stack.popFloat32())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64TruncF64S() error {
+	res, err := truncF64SToI64(vm.stack.popFloat64())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
+func (vm *vm) handleI64TruncF64U() error {
+	res, err := truncF64UToI64(vm.stack.popFloat64())
+	if err != nil {
+		return err
+	}
+	vm.stack.pushInt64(res)
+	return nil
+}
+
 func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
@@ -1588,182 +2340,923 @@ func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 	frame.pc += 16
 }
 
-func (vm *vm) handleBinaryFloat32(op func(a, b float32) float32) {
-	b := vm.stack.popFloat32()
-	a := vm.stack.popFloat32()
-	vm.stack.pushFloat32(op(a, b))
+func (vm *vm) handleV128Load(frame *callFrame) error {
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	v, err := memory.LoadV128(offset, index)
+	if err != nil {
+		return err
+	}
+	vm.stack.pushV128(v)
+	return nil
 }
 
-func (vm *vm) handleBinaryFloat64(op func(a, b float64) float64) {
-	b := vm.stack.popFloat64()
-	a := vm.stack.popFloat64()
-	vm.stack.pushFloat64(op(a, b))
+func (vm *vm) handleV128Store(frame *callFrame) error {
+	val := vm.stack.popV128()
+	_ = frame.next() // align (unused)
+	memory := vm.getMemory(frame, frame.next())
+	offset := uint32(frame.next())
+	index := uint32(vm.stack.popInt32())
+	return memory.StoreV128(offset, index, val)
 }
 
-func (vm *vm) handleBinaryV128(op func(a, b V128Value) V128Value) {
+func (vm *vm) handleI8x16Swizzle() {
 	b := vm.stack.popV128()
 	a := vm.stack.popV128()
-	vm.stack.pushV128(op(a, b))
+	vm.stack.pushV128(simdI8x16Swizzle(a, b))
 }
 
-func (vm *vm) handleBinarySafeInt32(op func(a, b int32) (int32, error)) error {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	result, err := op(a, b)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt32(result)
-	return nil
+func (vm *vm) handleI8x16Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16Eq(a, b))
 }
 
-func (vm *vm) handleBinarySafeInt64(op func(a, b int64) (int64, error)) error {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	result, err := op(a, b)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt64(result)
-	return nil
+func (vm *vm) handleI8x16Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16Ne(a, b))
 }
 
-func (vm *vm) handleBinaryBoolInt32(op func(a, b int32) bool) {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(op(a, b)))
+func (vm *vm) handleI8x16LtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16LtS(a, b))
 }
 
-func (vm *vm) handleBinaryBoolInt64(op func(a, b int64) bool) {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(op(a, b)))
+func (vm *vm) handleI8x16LtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16LtU(a, b))
 }
 
-func (vm *vm) handleBinaryBoolFloat32(op func(a, b float32) bool) {
-	b := vm.stack.popFloat32()
-	a := vm.stack.popFloat32()
-	vm.stack.pushInt32(boolToInt32(op(a, b)))
+func (vm *vm) handleI8x16GtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16GtS(a, b))
 }
 
-func (vm *vm) handleBinaryBoolFloat64(op func(a, b float64) bool) {
-	b := vm.stack.popFloat64()
-	a := vm.stack.popFloat64()
-	vm.stack.pushInt32(boolToInt32(op(a, b)))
+func (vm *vm) handleI8x16GtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16GtU(a, b))
 }
 
-func (vm *vm) handleUnarySafeFloat32(op func(a float32) (int32, error)) error {
-	a := vm.stack.popFloat32()
-	result, err := op(a)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt32(result)
-	return nil
+func (vm *vm) handleI8x16LeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16LeS(a, b))
 }
 
-func (vm *vm) handleUnarySafeFloat64(op func(a float64) (int32, error)) error {
-	a := vm.stack.popFloat64()
-	result, err := op(a)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt32(result)
-	return nil
+func (vm *vm) handleI8x16LeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16LeU(a, b))
 }
 
-func (vm *vm) handleTruncFloat32Int64(op func(a float32) (int64, error)) error {
-	a := vm.stack.popFloat32()
-	result, err := op(a)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt64(result)
-	return nil
+func (vm *vm) handleI8x16GeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16GeS(a, b))
 }
 
-func (vm *vm) handleTruncFloat64Int64(op func(a float64) (int64, error)) error {
-	a := vm.stack.popFloat64()
-	result, err := op(a)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushInt64(result)
-	return nil
+func (vm *vm) handleI8x16GeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16GeU(a, b))
 }
 
-func (vm *vm) handleSimdShift(op func(v V128Value, shift int32) V128Value) {
+func (vm *vm) handleI16x8Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Eq(a, b))
+}
+
+func (vm *vm) handleI16x8Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Ne(a, b))
+}
+
+func (vm *vm) handleI16x8LtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8LtS(a, b))
+}
+
+func (vm *vm) handleI16x8LtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8LtU(a, b))
+}
+
+func (vm *vm) handleI16x8GtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8GtS(a, b))
+}
+
+func (vm *vm) handleI16x8GtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8GtU(a, b))
+}
+
+func (vm *vm) handleI16x8LeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8LeS(a, b))
+}
+
+func (vm *vm) handleI16x8LeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8LeU(a, b))
+}
+
+func (vm *vm) handleI16x8GeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8GeS(a, b))
+}
+
+func (vm *vm) handleI16x8GeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8GeU(a, b))
+}
+
+func (vm *vm) handleI32x4Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Eq(a, b))
+}
+
+func (vm *vm) handleI32x4Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Ne(a, b))
+}
+
+func (vm *vm) handleI32x4LtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4LtS(a, b))
+}
+
+func (vm *vm) handleI32x4LtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4LtU(a, b))
+}
+
+func (vm *vm) handleI32x4GtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4GtS(a, b))
+}
+
+func (vm *vm) handleI32x4GtU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4GtU(a, b))
+}
+
+func (vm *vm) handleI32x4LeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4LeS(a, b))
+}
+
+func (vm *vm) handleI32x4LeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4LeU(a, b))
+}
+
+func (vm *vm) handleI32x4GeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4GeS(a, b))
+}
+
+func (vm *vm) handleI32x4GeU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4GeU(a, b))
+}
+
+func (vm *vm) handleF32x4Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Eq(a, b))
+}
+
+func (vm *vm) handleF32x4Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Ne(a, b))
+}
+
+func (vm *vm) handleF32x4Lt() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Lt(a, b))
+}
+
+func (vm *vm) handleF32x4Gt() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Gt(a, b))
+}
+
+func (vm *vm) handleF32x4Le() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Le(a, b))
+}
+
+func (vm *vm) handleF32x4Ge() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Ge(a, b))
+}
+
+func (vm *vm) handleF64x2Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Eq(a, b))
+}
+
+func (vm *vm) handleF64x2Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Ne(a, b))
+}
+
+func (vm *vm) handleF64x2Lt() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Lt(a, b))
+}
+
+func (vm *vm) handleF64x2Gt() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Gt(a, b))
+}
+
+func (vm *vm) handleF64x2Le() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Le(a, b))
+}
+
+func (vm *vm) handleF64x2Ge() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Ge(a, b))
+}
+
+func (vm *vm) handleV128And() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdV128And(a, b))
+}
+
+func (vm *vm) handleV128Andnot() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdV128Andnot(a, b))
+}
+
+func (vm *vm) handleV128Or() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdV128Or(a, b))
+}
+
+func (vm *vm) handleV128Xor() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdV128Xor(a, b))
+}
+
+func (vm *vm) handleI8x16NarrowI16x8S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16NarrowI16x8S(a, b))
+}
+
+func (vm *vm) handleI8x16NarrowI16x8U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16NarrowI16x8U(a, b))
+}
+
+func (vm *vm) handleI8x16Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16Add(a, b))
+}
+
+func (vm *vm) handleI8x16AddSatS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16AddSatS(a, b))
+}
+
+func (vm *vm) handleI8x16AddSatU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16AddSatU(a, b))
+}
+
+func (vm *vm) handleI8x16Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16Sub(a, b))
+}
+
+func (vm *vm) handleI8x16SubSatS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16SubSatS(a, b))
+}
+
+func (vm *vm) handleI8x16SubSatU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16SubSatU(a, b))
+}
+
+func (vm *vm) handleI8x16MinS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16MinS(a, b))
+}
+
+func (vm *vm) handleI8x16MinU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16MinU(a, b))
+}
+
+func (vm *vm) handleI8x16MaxS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16MaxS(a, b))
+}
+
+func (vm *vm) handleI8x16MaxU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16MaxU(a, b))
+}
+
+func (vm *vm) handleI8x16AvgrU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16AvgrU(a, b))
+}
+
+func (vm *vm) handleI16x8Q15mulrSatS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Q15mulrSatS(a, b))
+}
+
+func (vm *vm) handleI16x8NarrowI32x4S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8NarrowI32x4S(a, b))
+}
+
+func (vm *vm) handleI16x8NarrowI32x4U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8NarrowI32x4U(a, b))
+}
+
+func (vm *vm) handleI16x8Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Add(a, b))
+}
+
+func (vm *vm) handleI16x8AddSatS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8AddSatS(a, b))
+}
+
+func (vm *vm) handleI16x8AddSatU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8AddSatU(a, b))
+}
+
+func (vm *vm) handleI16x8Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Sub(a, b))
+}
+
+func (vm *vm) handleI16x8SubSatS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8SubSatS(a, b))
+}
+
+func (vm *vm) handleI16x8SubSatU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8SubSatU(a, b))
+}
+
+func (vm *vm) handleI16x8Mul() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Mul(a, b))
+}
+
+func (vm *vm) handleI16x8MinS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8MinS(a, b))
+}
+
+func (vm *vm) handleI16x8MinU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8MinU(a, b))
+}
+
+func (vm *vm) handleI16x8MaxS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8MaxS(a, b))
+}
+
+func (vm *vm) handleI16x8MaxU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8MaxU(a, b))
+}
+
+func (vm *vm) handleI16x8AvgrU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8AvgrU(a, b))
+}
+
+func (vm *vm) handleI16x8ExtmulLowI8x16S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ExtmulLowI8x16S(a, b))
+}
+
+func (vm *vm) handleI16x8ExtmulHighI8x16S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ExtmulHighI8x16S(a, b))
+}
+
+func (vm *vm) handleI16x8ExtmulLowI8x16U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ExtmulLowI8x16U(a, b))
+}
+
+func (vm *vm) handleI16x8ExtmulHighI8x16U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ExtmulHighI8x16U(a, b))
+}
+
+func (vm *vm) handleI32x4Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Add(a, b))
+}
+
+func (vm *vm) handleI32x4Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Sub(a, b))
+}
+
+func (vm *vm) handleI32x4Mul() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Mul(a, b))
+}
+
+func (vm *vm) handleI32x4MinS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4MinS(a, b))
+}
+
+func (vm *vm) handleI32x4MinU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4MinU(a, b))
+}
+
+func (vm *vm) handleI32x4MaxS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4MaxS(a, b))
+}
+
+func (vm *vm) handleI32x4MaxU() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4MaxU(a, b))
+}
+
+func (vm *vm) handleI32x4DotI16x8S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4DotI16x8S(a, b))
+}
+
+func (vm *vm) handleI32x4ExtmulLowI16x8S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ExtmulLowI16x8S(a, b))
+}
+
+func (vm *vm) handleI32x4ExtmulHighI16x8S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ExtmulHighI16x8S(a, b))
+}
+
+func (vm *vm) handleI32x4ExtmulLowI16x8U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ExtmulLowI16x8U(a, b))
+}
+
+func (vm *vm) handleI32x4ExtmulHighI16x8U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ExtmulHighI16x8U(a, b))
+}
+
+func (vm *vm) handleI64x2Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Add(a, b))
+}
+
+func (vm *vm) handleI64x2Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Sub(a, b))
+}
+
+func (vm *vm) handleI64x2Mul() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Mul(a, b))
+}
+
+func (vm *vm) handleI64x2Eq() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Eq(a, b))
+}
+
+func (vm *vm) handleI64x2Ne() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Ne(a, b))
+}
+
+func (vm *vm) handleI64x2LtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2LtS(a, b))
+}
+
+func (vm *vm) handleI64x2GtS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2GtS(a, b))
+}
+
+func (vm *vm) handleI64x2LeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2LeS(a, b))
+}
+
+func (vm *vm) handleI64x2GeS() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2GeS(a, b))
+}
+
+func (vm *vm) handleI64x2ExtmulLowI32x4S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ExtmulLowI32x4S(a, b))
+}
+
+func (vm *vm) handleI64x2ExtmulHighI32x4S() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ExtmulHighI32x4S(a, b))
+}
+
+func (vm *vm) handleI64x2ExtmulLowI32x4U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ExtmulLowI32x4U(a, b))
+}
+
+func (vm *vm) handleI64x2ExtmulHighI32x4U() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ExtmulHighI32x4U(a, b))
+}
+
+func (vm *vm) handleF32x4Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Add(a, b))
+}
+
+func (vm *vm) handleF32x4Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Sub(a, b))
+}
+
+func (vm *vm) handleF32x4Mul() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Mul(a, b))
+}
+
+func (vm *vm) handleF32x4Div() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Div(a, b))
+}
+
+func (vm *vm) handleF32x4Min() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Min(a, b))
+}
+
+func (vm *vm) handleF32x4Max() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Max(a, b))
+}
+
+func (vm *vm) handleF32x4Pmin() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Pmin(a, b))
+}
+
+func (vm *vm) handleF32x4Pmax() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4Pmax(a, b))
+}
+
+func (vm *vm) handleF64x2Add() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Add(a, b))
+}
+
+func (vm *vm) handleF64x2Sub() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Sub(a, b))
+}
+
+func (vm *vm) handleF64x2Mul() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Mul(a, b))
+}
+
+func (vm *vm) handleF64x2Div() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Div(a, b))
+}
+
+func (vm *vm) handleF64x2Min() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Min(a, b))
+}
+
+func (vm *vm) handleF64x2Max() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Max(a, b))
+}
+
+func (vm *vm) handleF64x2Pmin() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Pmin(a, b))
+}
+
+func (vm *vm) handleF64x2Pmax() {
+	b := vm.stack.popV128()
+	a := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2Pmax(a, b))
+}
+
+func (vm *vm) handleI8x16Shl() {
 	shift := vm.stack.popInt32()
 	v := vm.stack.popV128()
-	vm.stack.pushV128(op(v, shift))
+	vm.stack.pushV128(simdI8x16Shl(v, shift))
 }
 
-func (vm *vm) handleSimdTernary(op func(v1, v2, v3 V128Value) V128Value) {
+func (vm *vm) handleI8x16ShrU() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16ShrU(v, shift))
+}
+
+func (vm *vm) handleI8x16ShrS() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16ShrS(v, shift))
+}
+
+func (vm *vm) handleI16x8Shl() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8Shl(v, shift))
+}
+
+func (vm *vm) handleI16x8ShrS() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ShrS(v, shift))
+}
+
+func (vm *vm) handleI16x8ShrU() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ShrU(v, shift))
+}
+
+func (vm *vm) handleI32x4Shl() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4Shl(v, shift))
+}
+
+func (vm *vm) handleI32x4ShrS() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ShrS(v, shift))
+}
+
+func (vm *vm) handleI32x4ShrU() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ShrU(v, shift))
+}
+
+func (vm *vm) handleI64x2Shl() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2Shl(v, shift))
+}
+
+func (vm *vm) handleI64x2ShrS() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ShrS(v, shift))
+}
+
+func (vm *vm) handleI64x2ShrU() {
+	shift := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ShrU(v, shift))
+}
+
+func (vm *vm) handleV128Bitselect() {
 	v3 := vm.stack.popV128()
 	v2 := vm.stack.popV128()
 	v1 := vm.stack.popV128()
-	vm.stack.pushV128(op(v1, v2, v3))
+	vm.stack.pushV128(simdV128Bitselect(v1, v2, v3))
 }
 
-func handleSimdExtractLane[R wasmNumber](
-	vm *vm,
-	frame *callFrame,
-	push func(R),
-	op func(v V128Value, laneIndex uint32) R,
-) {
+func (vm *vm) handleI8x16ExtractLaneS(frame *callFrame) {
 	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()
-	push(op(v, laneIndex))
+	vm.stack.pushInt32(simdI8x16ExtractLaneS(v, laneIndex))
 }
 
-func handleStore[T any](
-	vm *vm,
-	frame *callFrame,
-	val T,
-	store func(*Memory, uint32, uint32, T) error,
-) error {
+func (vm *vm) handleI8x16ExtractLaneU(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushInt32(simdI8x16ExtractLaneU(v, laneIndex))
+}
+
+func (vm *vm) handleI16x8ExtractLaneS(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushInt32(simdI16x8ExtractLaneS(v, laneIndex))
+}
+
+func (vm *vm) handleI16x8ExtractLaneU(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushInt32(simdI16x8ExtractLaneU(v, laneIndex))
+}
+
+func (vm *vm) handleI32x4ExtractLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushInt32(simdI32x4ExtractLane(v, laneIndex))
+}
+
+func (vm *vm) handleI64x2ExtractLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushInt64(simdI64x2ExtractLane(v, laneIndex))
+}
+
+func (vm *vm) handleF32x4ExtractLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushFloat32(simdF32x4ExtractLane(v, laneIndex))
+}
+
+func (vm *vm) handleF64x2ExtractLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	v := vm.stack.popV128()
+	vm.stack.pushFloat64(simdF64x2ExtractLane(v, laneIndex))
+}
+
+func (vm *vm) handleI8x16ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI8x16ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) handleI16x8ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI16x8ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) handleI32x4ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popInt32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI32x4ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) handleI64x2ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popInt64()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdI64x2ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) handleF32x4ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popFloat32()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdF32x4ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) handleF64x2ReplaceLane(frame *callFrame) {
+	laneIndex := uint32(frame.next())
+	laneValue := vm.stack.popFloat64()
+	v := vm.stack.popV128()
+	vm.stack.pushV128(simdF64x2ReplaceLane(v, laneIndex, laneValue))
+}
+
+func (vm *vm) memGet(frame *callFrame, size uint32) ([]byte, error) {
 	_ = frame.next() // align (unused)
 	memory := vm.getMemory(frame, frame.next())
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
-	return store(memory, offset, index, val)
-}
-
-func handleLoad[T any, R any](
-	vm *vm,
-	frame *callFrame,
-	push func(R),
-	load func(*Memory, uint32, uint32) (T, error),
-	convert func(T) R,
-) error {
-	_ = frame.next() // align (unused)
-	memory := vm.getMemory(frame, frame.next())
-	offset := uint32(frame.next())
-	index := uint32(vm.stack.popInt32())
-	v, err := load(memory, offset, index)
-	if err != nil {
-		return err
-	}
-	push(convert(v))
-	return nil
-}
-
-func (vm *vm) handleLoadV128FromBytes(
-	frame *callFrame,
-	fromBytes func(bytes []byte) V128Value,
-	sizeBytes uint32,
-) error {
-	_ = frame.next() // align (unused)
-	memory := vm.getMemory(frame, frame.next())
-	offset := uint32(frame.next())
-	index := vm.stack.popInt32()
-
-	data, err := memory.Get(offset, uint32(index), sizeBytes)
-	if err != nil {
-		return err
-	}
-	vm.stack.pushV128(fromBytes(data))
-	return nil
+	return memory.Get(offset, index, size)
 }
 
 func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
@@ -1811,18 +3304,6 @@ func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 		return memory.StoreUint64(offset, uint32(index), val)
 	}
 	return nil
-}
-
-func handleSimdReplaceLane[T wasmNumber](
-	vm *vm,
-	frame *callFrame,
-	pop func() T,
-	replaceLane func(V128Value, uint32, T) V128Value,
-) {
-	laneIndex := uint32(frame.next())
-	laneValue := pop()
-	vector := vm.stack.popV128()
-	vm.stack.pushV128(replaceLane(vector, laneIndex, laneValue))
 }
 
 func (vm *vm) getInputCount(module *ModuleInstance, blockType int32) uint32 {
@@ -1914,8 +3395,8 @@ func (vm *vm) invokeExpression(
 	resultType ValueType,
 	moduleInstance *ModuleInstance,
 ) (value, error) {
-	// We create a fake function to execute the expression.
-	// The expression is expected to return a single value.
+	// We create a fake function to execute the expression. The expression is
+	// expected to return a single value.
 	function := wasmFunction{
 		functionType: FunctionType{
 			ParamTypes:  []ValueType{},
