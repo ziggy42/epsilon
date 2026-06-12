@@ -91,7 +91,7 @@ type controlFrame struct {
 type vm struct {
 	store             *store
 	stack             *valueStack
-	callStack         []callFrame
+	callDepth         int
 	controlStackCache []controlFrame
 	localsCache       []value
 	// localsTop is the bump-allocation cursor into localsCache: each wasm call
@@ -109,7 +109,6 @@ func newVm(config Config) *vm {
 	return &vm{
 		store:             &store{},
 		stack:             newValueStack(),
-		callStack:         make([]callFrame, 0, config.CallStackPreallocationSize),
 		controlStackCache: make([]controlFrame, ctrlCacheSize),
 		localsCache:       make([]value, localsCacheSize),
 		config:            config,
@@ -280,14 +279,13 @@ func (vm *vm) invokeFunction(function FunctionInstance) error {
 }
 
 func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
-	if len(vm.callStack) >= vm.config.MaxCallStackDepth {
+	if vm.callDepth >= vm.config.MaxCallStackDepth {
 		return errCallStackExhausted
 	}
 
-	callDepth := len(vm.callStack)
 	// Unlike locals, the control stack uses a fixed per-depth slot; only depths
-	// within the preallocated range are cached, and deeper frames use the heap.
-	useControlStackCache := callDepth < vm.config.CallStackPreallocationSize
+	// within the preallocated range are cached, and deeper calls use the heap.
+	useControlStackCache := vm.callDepth < vm.config.CallStackPreallocationSize
 
 	numParams := len(function.functionType.ParamTypes)
 	numLocals := numParams + len(function.code.locals)
@@ -323,7 +321,7 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 	var controlStack []controlFrame
 	if useControlStackCache {
 		// Use part of the cache for the control stack to avoid allocations.
-		blockDepth := callDepth * controlStackCacheSlotSize
+		blockDepth := vm.callDepth * controlStackCacheSlotSize
 		// Slice cap to prevent appending into the next slot.
 		max := blockDepth + controlStackCacheSlotSize
 		controlStack = vm.controlStackCache[blockDepth:blockDepth:max]
@@ -335,28 +333,24 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 		stackHeight:    vm.stack.size(),
 	})
 
-	vm.callStack = append(vm.callStack, callFrame{
-		pc:           0,
+	frame := callFrame{
 		controlStack: controlStack,
 		locals:       locals,
 		function:     &function.code,
 		module:       function.module,
-	})
+	}
 
-	err := vm.runLoop()
-	// The run loop pops this frame before returning, so its locals slots are free
-	// to reuse. Rewinding the cursor here is a no-op for the heap case.
+	vm.callDepth++
+	err := vm.runLoop(&frame)
+	vm.callDepth--
+	// The run loop is done with this frame, so its locals slots are free to
+	// reuse. When the locals overflowed to the heap instead, the cursor never
+	// advanced and this write is a no-op.
 	vm.localsTop = localsMark
 	return err
 }
 
-func (vm *vm) runLoop() error {
-	// The frame pointer is invalidated whenever a nested call grows
-	// vm.callStack: only the call and call_indirect cases can do that, and
-	// they re-derive it after the callee returns. bodyLen is loop-invariant
-	// because nested calls always restore this frame to the top of the stack
-	// before control returns here.
-	frame := &vm.callStack[len(vm.callStack)-1]
+func (vm *vm) runLoop(frame *callFrame) error {
 	bodyLen := uint32(len(frame.function.body))
 	// Checking a cached flag per instruction is cheaper than the duplicated
 	// dispatch loop it would take to hoist it: the branch predicts perfectly.
@@ -364,7 +358,6 @@ func (vm *vm) runLoop() error {
 	for frame.pc < bodyLen {
 		if fuelOn {
 			if vm.fuel == 0 {
-				vm.callStack = vm.callStack[:len(vm.callStack)-1]
 				return errFuelExhausted
 			}
 			vm.fuel--
@@ -400,14 +393,8 @@ func (vm *vm) runLoop() error {
 			vm.brToLabel(frame, uint32(len(frame.controlStack)-1))
 		case call:
 			err = vm.handleCall(frame)
-			// The callee (or a re-entrant host function) may have grown
-			// vm.callStack and reallocated it, invalidating frame.
-			frame = &vm.callStack[len(vm.callStack)-1]
 		case callIndirect:
 			err = vm.handleCallIndirect(frame)
-			// The callee (or a re-entrant host function) may have grown
-			// vm.callStack and reallocated it, invalidating frame.
-			frame = &vm.callStack[len(vm.callStack)-1]
 		case drop:
 			vm.stack.drop()
 		case selectOp:
@@ -1354,11 +1341,9 @@ func (vm *vm) runLoop() error {
 			err = fmt.Errorf("unknown opcode %d", op)
 		}
 		if err != nil {
-			vm.callStack = vm.callStack[:len(vm.callStack)-1]
 			return err
 		}
 	}
-	vm.callStack = vm.callStack[:len(vm.callStack)-1]
 	return nil
 }
 
