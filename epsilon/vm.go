@@ -800,7 +800,7 @@ func (vm *vm) runLoop() error {
 		case i64Extend32S:
 			vm.stack.pushInt64(int64(int32(vm.stack.popInt64())))
 		case refNull:
-			frame.next() // type immediate
+			frame.pc++ // skip type immediate (unused at runtime)
 			vm.stack.pushInt32(NullReference)
 		case refIsNull:
 			vm.handleRefIsNull()
