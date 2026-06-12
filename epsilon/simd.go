@@ -36,71 +36,33 @@ const (
 )
 
 func simdV128Load8x8S(data []byte) V128Value {
-	p0 := uint64(uint16(int8(data[0])))
-	p1 := uint64(uint16(int8(data[1])))
-	p2 := uint64(uint16(int8(data[2])))
-	p3 := uint64(uint16(int8(data[3])))
-	low := p0 | p1<<16 | p2<<32 | p3<<48
-
-	p4 := uint64(uint16(int8(data[4])))
-	p5 := uint64(uint16(int8(data[5])))
-	p6 := uint64(uint16(int8(data[6])))
-	p7 := uint64(uint16(int8(data[7])))
-	high := p4 | p5<<16 | p6<<32 | p7<<48
-
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 1, false, true)
 }
 
 func simdV128Load8x8U(data []byte) V128Value {
-	p0 := uint64(data[0])
-	p1 := uint64(data[1])
-	p2 := uint64(data[2])
-	p3 := uint64(data[3])
-	low := p0 | p1<<16 | p2<<32 | p3<<48
-
-	p4 := uint64(data[4])
-	p5 := uint64(data[5])
-	p6 := uint64(data[6])
-	p7 := uint64(data[7])
-	high := p4 | p5<<16 | p6<<32 | p7<<48
-
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 1, false, false)
 }
 
 func simdV128Load16x4S(data []byte) V128Value {
-	v0 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[0:2]))))
-	v1 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[2:4]))))
-	low := v0 | v1<<32
-
-	v2 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[4:6]))))
-	v3 := uint64(uint32(int16(binary.LittleEndian.Uint16(data[6:8]))))
-	high := v2 | v3<<32
-
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 2, false, true)
 }
 
 func simdV128Load16x4U(data []byte) V128Value {
-	v0 := uint64(binary.LittleEndian.Uint16(data[0:2]))
-	v1 := uint64(binary.LittleEndian.Uint16(data[2:4]))
-	low := v0 | v1<<32
-
-	v2 := uint64(binary.LittleEndian.Uint16(data[4:6]))
-	v3 := uint64(binary.LittleEndian.Uint16(data[6:8]))
-	high := v2 | v3<<32
-
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 2, false, false)
 }
 
 func simdV128Load32x2S(data []byte) V128Value {
-	low := uint64(int32(binary.LittleEndian.Uint32(data[0:4])))
-	high := uint64(int32(binary.LittleEndian.Uint32(data[4:8])))
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 4, false, true)
 }
 
 func simdV128Load32x2U(data []byte) V128Value {
-	low := uint64(binary.LittleEndian.Uint32(data[0:4]))
-	high := uint64(binary.LittleEndian.Uint32(data[4:8]))
-	return V128Value{Low: low, High: high}
+	bits := binary.LittleEndian.Uint64(data)
+	return extend(V128Value{Low: bits}, 4, false, false)
 }
 
 // simdI8x16Shuffle performs a byte shuffle operation.
@@ -155,11 +117,8 @@ func simdI8x16Swizzle(v1, v2 V128Value) V128Value {
 }
 
 func simdI8x16Splat(val int32) V128Value {
-	v8 := uint64(byte(val))
-	v16 := v8 | (v8 << 8)
-	v32 := v16 | (v16 << 16)
-	v64 := v32 | (v32 << 32)
-	return V128Value{Low: v64, High: v64}
+	v := uint64(byte(val)) * lanes8Ones
+	return V128Value{Low: v, High: v}
 }
 
 func simdI8x16SplatFromBytes(data []byte) V128Value {
@@ -167,10 +126,8 @@ func simdI8x16SplatFromBytes(data []byte) V128Value {
 }
 
 func simdI16x8Splat(val int32) V128Value {
-	v16 := uint64(uint16(val))
-	v32 := v16 | (v16 << 16)
-	v64 := v32 | (v32 << 32)
-	return V128Value{Low: v64, High: v64}
+	v := uint64(uint16(val)) * lanes16Ones
+	return V128Value{Low: v, High: v}
 }
 
 func simdI16x8SplatFromBytes(data []byte) V128Value {
@@ -178,9 +135,8 @@ func simdI16x8SplatFromBytes(data []byte) V128Value {
 }
 
 func simdI32x4Splat(val int32) V128Value {
-	v := uint64(uint32(val))
-	low := v | (v << 32)
-	return V128Value{Low: low, High: low}
+	v := uint64(uint32(val)) * lanes32Ones
+	return V128Value{Low: v, High: v}
 }
 
 func simdI32x4SplatFromBytes(data []byte) V128Value {
@@ -197,9 +153,8 @@ func simdI64x2SplatFromBytes(data []byte) V128Value {
 }
 
 func simdF32x4Splat(val float32) V128Value {
-	v := uint64(math.Float32bits(val))
-	low := v | (v << 32)
-	return V128Value{Low: low, High: low}
+	v := uint64(math.Float32bits(val)) * lanes32Ones
+	return V128Value{Low: v, High: v}
 }
 
 func simdF64x2Splat(val float64) V128Value {
@@ -492,41 +447,6 @@ func simdI16x8GeU(v1, v2 V128Value) V128Value {
 	return simdV128Not(ltLanesU(v1, v2, lanes16MSB, 15, 0xFFFF))
 }
 
-func simdI16x8Abs(v V128Value) V128Value {
-	return V128Value{
-		Low:  absLanes(v.Low, lanes16MSB, 15, 0xFFFF),
-		High: absLanes(v.High, lanes16MSB, 15, 0xFFFF),
-	}
-}
-
-func simdI16x8Neg(v V128Value) V128Value {
-	return V128Value{
-		Low:  swarSub(0, v.Low, lanes16MSB),
-		High: swarSub(0, v.High, lanes16MSB),
-	}
-}
-
-func simdI16x8Q15mulrSatS(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  q15mulrSatLanesI16(v1.Low, v2.Low),
-		High: q15mulrSatLanesI16(v1.High, v2.High),
-	}
-}
-
-func simdI16x8NarrowI32x4S(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  narrow32x4To16x8(v1, saturateS32ToS16),
-		High: narrow32x4To16x8(v2, saturateS32ToS16),
-	}
-}
-
-func simdI16x8NarrowI32x4U(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  narrow32x4To16x8(v1, saturateS32ToU16),
-		High: narrow32x4To16x8(v2, saturateS32ToU16),
-	}
-}
-
 // simdI32x4Eq performs an equality comparison on each 32-bit lane of two
 // V128Value.
 func simdI32x4Eq(v1, v2 V128Value) V128Value {
@@ -587,136 +507,157 @@ func simdI32x4GeU(v1, v2 V128Value) V128Value {
 // simdF32x4Eq performs an equality comparison on each 32-bit float lane of two
 // V128Value.
 func simdF32x4Eq(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a == b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 == b0) | boolToMask32(a1 == b1)<<32,
+		High: boolToMask32(a2 == b2) | boolToMask32(a3 == b3)<<32,
+	}
 }
 
 // simdF32x4Ne performs an inequality comparison on each 32-bit float lane of
 // two V128Value.
 func simdF32x4Ne(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a != b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 != b0) | boolToMask32(a1 != b1)<<32,
+		High: boolToMask32(a2 != b2) | boolToMask32(a3 != b3)<<32,
+	}
 }
 
 // simdF32x4Lt performs a less-than comparison on each 32-bit float lane of two
 // V128Value.
 func simdF32x4Lt(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a < b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 < b0) | boolToMask32(a1 < b1)<<32,
+		High: boolToMask32(a2 < b2) | boolToMask32(a3 < b3)<<32,
+	}
 }
 
 // simdF32x4Gt performs a greater-than comparison on each 32-bit float lane of
 // two V128Value.
 func simdF32x4Gt(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a > b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 > b0) | boolToMask32(a1 > b1)<<32,
+		High: boolToMask32(a2 > b2) | boolToMask32(a3 > b3)<<32,
+	}
 }
 
 // simdF32x4Le performs a less-than-or-equal comparison on each 32-bit float
 // lane of two V128Value.
 func simdF32x4Le(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a <= b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 <= b0) | boolToMask32(a1 <= b1)<<32,
+		High: boolToMask32(a2 <= b2) | boolToMask32(a3 <= b3)<<32,
+	}
 }
 
 // simdF32x4Ge performs a greater-than-or-equal comparison on each 32-bit float
 // lane of two V128Value.
 func simdF32x4Ge(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		return boolToFloat32(a >= b)
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return V128Value{
+		Low:  boolToMask32(a0 >= b0) | boolToMask32(a1 >= b1)<<32,
+		High: boolToMask32(a2 >= b2) | boolToMask32(a3 >= b3)<<32,
+	}
 }
 
 // simdF64x2Eq performs an equality comparison on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Eq(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a == b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 == b0),
+		High: boolToMask64(a1 == b1),
+	}
 }
 
 // simdF64x2Ne performs an inequality comparison on each 64-bit float lane of
 // two V128Value.
 func simdF64x2Ne(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a != b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 != b0),
+		High: boolToMask64(a1 != b1),
+	}
 }
 
 // simdF64x2Lt performs a less-than comparison on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Lt(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a < b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 < b0),
+		High: boolToMask64(a1 < b1),
+	}
 }
 
 // simdF64x2Gt performs a greater-than comparison on each 64-bit float lane of
 // two V128Value.
 func simdF64x2Gt(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a > b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 > b0),
+		High: boolToMask64(a1 > b1),
+	}
 }
 
 // simdF64x2Le performs a less-than-or-equal comparison on each 64-bit float
 // lane of two V128Value.
 func simdF64x2Le(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a <= b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 <= b0),
+		High: boolToMask64(a1 <= b1),
+	}
 }
 
 // simdF64x2Ge performs a greater-than-or-equal comparison on each 64-bit float
 // lane of two V128Value.
 func simdF64x2Ge(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		return boolToFloat64(a >= b)
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return V128Value{
+		Low:  boolToMask64(a0 >= b0),
+		High: boolToMask64(a1 >= b1),
+	}
 }
 
 // simdV128Not performs a bitwise NOT operation on a V128Value.
 func simdV128Not(v V128Value) V128Value {
-	return V128Value{
-		Low:  ^v.Low,
-		High: ^v.High,
-	}
+	return V128Value{Low: ^v.Low, High: ^v.High}
 }
 
 // simdV128And performs a bitwise AND operation on two V128Value.
 func simdV128And(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low & v2.Low,
-		High: v1.High & v2.High,
-	}
+	return V128Value{Low: v1.Low & v2.Low, High: v1.High & v2.High}
 }
 
 func simdV128Andnot(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low & ^v2.Low,
-		High: v1.High & ^v2.High,
-	}
+	return V128Value{Low: v1.Low & ^v2.Low, High: v1.High & ^v2.High}
 }
 
 // simdV128Or performs a bitwise OR operation on two V128Value.
 func simdV128Or(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low | v2.Low,
-		High: v1.High | v2.High,
-	}
+	return V128Value{Low: v1.Low | v2.Low, High: v1.High | v2.High}
 }
 
 // simdV128Xor performs a bitwise XOR operation on two V128Value.
 func simdV128Xor(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low ^ v2.Low,
-		High: v1.High ^ v2.High,
-	}
+	return V128Value{Low: v1.Low ^ v2.Low, High: v1.High ^ v2.High}
 }
 
 func simdV128Bitselect(v1, v2, v3 V128Value) V128Value {
@@ -757,19 +698,13 @@ func simdLoadLane(v V128Value, idx uint32, data []byte) V128Value {
 }
 
 func simdF32x4DemoteF64x2Zero(v V128Value) V128Value {
-	lowBits := math.Float32bits(float32(math.Float64frombits(v.Low)))
-	highBits := math.Float32bits(float32(math.Float64frombits(v.High)))
-
-	return V128Value{
-		Low:  uint64(lowBits) | (uint64(highBits) << 32),
-		High: 0,
-	}
+	d0, d1 := f64x2(v)
+	return packF32x4(float32(d0), float32(d1), 0, 0)
 }
 
 func simdF64x2PromoteLowF32x4(v V128Value) V128Value {
-	low := math.Float64bits(float64(math.Float32frombits(uint32(v.Low))))
-	high := math.Float64bits(float64(math.Float32frombits(uint32(v.Low >> 32))))
-	return V128Value{Low: low, High: high}
+	f0, f1, _, _ := f32x4(v)
+	return packF64x2(float64(f0), float64(f1))
 }
 
 func simdI8x16Abs(v V128Value) V128Value {
@@ -790,27 +725,9 @@ func simdI8x16Popcnt(v V128Value) V128Value {
 	return V128Value{Low: popcntLanesI8(v.Low), High: popcntLanesI8(v.High)}
 }
 
-func simdI8x16NarrowI16x8S(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  narrow16x8To8x16(v1, saturateS16ToS8),
-		High: narrow16x8To8x16(v2, saturateS16ToS8),
-	}
-}
-
-func simdI8x16NarrowI16x8U(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  narrow16x8To8x16(v1, saturateS16ToU8),
-		High: narrow16x8To8x16(v2, saturateS16ToU8),
-	}
-}
-
 // simdI8x16AllTrue returns true if all 8-bit lanes of a V128Value are non-zero.
 func simdI8x16AllTrue(v V128Value) bool {
-	// https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
-	mask64bit := uint64(0x7F7F7F7F7F7F7F7F)
-	hasLowZero := ^((((v.Low & mask64bit) + mask64bit) | v.Low) | mask64bit)
-	hasHighZero := ^((((v.High & mask64bit) + mask64bit) | v.High) | mask64bit)
-	return hasLowZero == 0 && hasHighZero == 0
+	return allTrue(v, lanes8MSB)
 }
 
 // simdI8x16Bitmask returns a 16-bit integer wrapped in an int32 where each bit
@@ -820,17 +737,25 @@ func simdI8x16Bitmask(v V128Value) int32 {
 	return bitmask(v, 1)
 }
 
+func simdI8x16NarrowI16x8S(v1, v2 V128Value) V128Value {
+	return V128Value{Low: narrowS16x8ToS8x16(v1), High: narrowS16x8ToS8x16(v2)}
+}
+
+func simdI8x16NarrowI16x8U(v1, v2 V128Value) V128Value {
+	return V128Value{Low: narrowS16x8ToU8x16(v1), High: narrowS16x8ToU8x16(v2)}
+}
+
 // simdI8x16Shl performs a left shift on each 8-bit lane of a V128Value.
 func simdI8x16Shl(v V128Value, shift int32) V128Value {
 	s := uint(shift & 7) // shift amount is modulo 8
-	// Shift the whole word, then mask off the bits that crossed lane
-	// boundaries (each lane keeps bits [s, 8)).
+	// Shift the whole word, then mask off the bits that crossed lane boundaries
+	// (each lane keeps bits [s, 8)).
 	mask := uint64(byte(0xFF<<s)) * lanes8Ones
 	return V128Value{Low: (v.Low << s) & mask, High: (v.High << s) & mask}
 }
 
-// simdI8x16ShrU performs an unsigned right shift on each 8-bit lane
-// of a V128Value.
+// simdI8x16ShrU performs an unsigned right shift on each 8-bit lane of a
+// V128Value.
 func simdI8x16ShrU(v V128Value, shift int32) V128Value {
 	s := uint(shift & 7) // shift amount is modulo 8
 	// Each lane keeps bits [0, 8-s) after the word-wide shift.
@@ -843,11 +768,10 @@ func simdI8x16ShrU(v V128Value, shift int32) V128Value {
 func simdI8x16ShrS(v V128Value, shift int32) V128Value {
 	s := uint(shift & 7) // shift amount is modulo 8
 	maskLow := uint64(0xFF>>s) * lanes8Ones
-	const signs = 0x8080808080808080
-	// negLow/negHigh hold 0xFF in every lane whose sign bit is set; OR their
-	// high s bits into the logical shift to sign-extend each lane.
-	negLow := ((v.Low & signs) >> 7) * 0xFF
-	negHigh := ((v.High & signs) >> 7) * 0xFF
+	// negLow/negHigh hold 0xFF in every lane whose sign bit is set; OR their high
+	// s bits into the logical shift to sign-extend each lane.
+	negLow := spreadLaneMSB(v.Low&lanes8MSB, 7, 0xFF)
+	negHigh := spreadLaneMSB(v.High&lanes8MSB, 7, 0xFF)
 	return V128Value{
 		Low:  ((v.Low >> s) & maskLow) | (negLow &^ maskLow),
 		High: ((v.High >> s) & maskLow) | (negHigh &^ maskLow),
@@ -929,66 +853,101 @@ func simdI8x16AvgrU(v1, v2 V128Value) V128Value {
 	}
 }
 
+func simdI16x8Abs(v V128Value) V128Value {
+	return V128Value{
+		Low:  absLanes(v.Low, lanes16MSB, 15, 0xFFFF),
+		High: absLanes(v.High, lanes16MSB, 15, 0xFFFF),
+	}
+}
+
+func simdI16x8Neg(v V128Value) V128Value {
+	return V128Value{
+		Low:  swarSub(0, v.Low, lanes16MSB),
+		High: swarSub(0, v.High, lanes16MSB),
+	}
+}
+
+func simdI16x8Q15mulrSatS(v1, v2 V128Value) V128Value {
+	return V128Value{
+		Low:  q15mulrSatLanesI16(v1.Low, v2.Low),
+		High: q15mulrSatLanesI16(v1.High, v2.High),
+	}
+}
+
 func simdI16x8AllTrue(v V128Value) bool {
-	return allTrue(v, 2)
+	return allTrue(v, lanes16MSB)
 }
 
 func simdI16x8Bitmask(v V128Value) int32 {
 	return bitmask(v, 2)
 }
 
+func simdI16x8NarrowI32x4S(v1, v2 V128Value) V128Value {
+	return V128Value{
+		Low:  narrowS32x4ToS16x8(v1),
+		High: narrowS32x4ToS16x8(v2),
+	}
+}
+
+func simdI16x8NarrowI32x4U(v1, v2 V128Value) V128Value {
+	return V128Value{
+		Low:  narrowS32x4ToU16x8(v1),
+		High: narrowS32x4ToU16x8(v2),
+	}
+}
+
 func simdI16x8ExtendLowI8x16S(v V128Value) V128Value {
-	return extend(v, 1, 2, false, true)
+	return extend(v, 1, false, true)
 }
 
 func simdI16x8ExtendHighI8x16S(v V128Value) V128Value {
-	return extend(v, 1, 2, true, true)
+	return extend(v, 1, true, true)
 }
 
 func simdI16x8ExtendLowI8x16U(v V128Value) V128Value {
-	return extend(v, 1, 2, false, false)
+	return extend(v, 1, false, false)
 }
 
 func simdI16x8ExtendHighI8x16U(v V128Value) V128Value {
-	return extend(v, 1, 2, true, false)
+	return extend(v, 1, true, false)
 }
 
 func simdI32x4ExtendLowI16x8S(v V128Value) V128Value {
-	return extend(v, 2, 4, false, true)
+	return extend(v, 2, false, true)
 }
 
 func simdI32x4ExtendHighI16x8S(v V128Value) V128Value {
-	return extend(v, 2, 4, true, true)
+	return extend(v, 2, true, true)
 }
 
 func simdI32x4ExtendLowI16x8U(v V128Value) V128Value {
-	return extend(v, 2, 4, false, false)
+	return extend(v, 2, false, false)
 }
 
 func simdI32x4ExtendHighI16x8U(v V128Value) V128Value {
-	return extend(v, 2, 4, true, false)
+	return extend(v, 2, true, false)
 }
 
 func simdI64x2ExtendLowI32x4S(v V128Value) V128Value {
-	return extend(v, 4, 8, false, true)
+	return extend(v, 4, false, true)
 }
 
 func simdI64x2ExtendHighI32x4S(v V128Value) V128Value {
-	return extend(v, 4, 8, true, true)
+	return extend(v, 4, true, true)
 }
 
 func simdI64x2ExtendLowI32x4U(v V128Value) V128Value {
-	return extend(v, 4, 8, false, false)
+	return extend(v, 4, false, false)
 }
 
 func simdI64x2ExtendHighI32x4U(v V128Value) V128Value {
-	return extend(v, 4, 8, true, false)
+	return extend(v, 4, true, false)
 }
 
 func simdI16x8Shl(v V128Value, shift int32) V128Value {
 	s := uint(shift & 15) // shift amount is modulo 16
-	// Shift the whole word, then mask off the bits that crossed lane
-	// boundaries (each lane keeps bits [s, 16)).
+	// Shift the whole word, then mask off the bits that crossed lane boundaries
+	// (each lane keeps bits [s, 16)).
 	mask := uint64(uint16(0xFFFF<<s)) * lanes16Ones
 	return V128Value{Low: (v.Low << s) & mask, High: (v.High << s) & mask}
 }
@@ -998,11 +957,10 @@ func simdI16x8Shl(v V128Value, shift int32) V128Value {
 func simdI16x8ShrS(v V128Value, shift int32) V128Value {
 	s := uint(shift & 15) // shift amount is modulo 16
 	maskLow := uint64(0xFFFF>>s) * lanes16Ones
-	const signs = 0x8000800080008000
 	// negLow/negHigh hold 0xFFFF in every lane whose sign bit is set; OR their
 	// high s bits into the logical shift to sign-extend each lane.
-	negLow := ((v.Low & signs) >> 15) * 0xFFFF
-	negHigh := ((v.High & signs) >> 15) * 0xFFFF
+	negLow := spreadLaneMSB(v.Low&lanes16MSB, 15, 0xFFFF)
+	negHigh := spreadLaneMSB(v.High&lanes16MSB, 15, 0xFFFF)
 	return V128Value{
 		Low:  ((v.Low >> s) & maskLow) | (negLow &^ maskLow),
 		High: ((v.High >> s) & maskLow) | (negHigh &^ maskLow),
@@ -1101,6 +1059,34 @@ func simdI16x8AvgrU(v1, v2 V128Value) V128Value {
 	}
 }
 
+func simdI16x8ExtaddPairwiseI8x16S(v V128Value) V128Value {
+	return V128Value{
+		Low:  extaddPairwise8(v.Low, true),
+		High: extaddPairwise8(v.High, true),
+	}
+}
+
+func simdI16x8ExtaddPairwiseI8x16U(v V128Value) V128Value {
+	return V128Value{
+		Low:  extaddPairwise8(v.Low, false),
+		High: extaddPairwise8(v.High, false),
+	}
+}
+
+func simdI32x4ExtaddPairwiseI16x8S(v V128Value) V128Value {
+	return V128Value{
+		Low:  extaddPairwise16(v.Low, true),
+		High: extaddPairwise16(v.High, true),
+	}
+}
+
+func simdI32x4ExtaddPairwiseI16x8U(v V128Value) V128Value {
+	return V128Value{
+		Low:  extaddPairwise16(v.Low, false),
+		High: extaddPairwise16(v.High, false),
+	}
+}
+
 func simdI16x8ExtmulLowI8x16S(v1, v2 V128Value) V128Value {
 	return extmul(v1, v2, 1, false, true)
 }
@@ -1149,62 +1135,6 @@ func simdI64x2ExtmulHighI32x4U(v1, v2 V128Value) V128Value {
 	return extmul(v1, v2, 4, true, false)
 }
 
-func simdI16x8ExtaddPairwiseI8x16S(v V128Value) V128Value {
-	l0 := uint64(uint16(int16(int8(v.Low)) + int16(int8(v.Low>>8))))
-	l1 := uint64(uint16(int16(int8(v.Low>>16)) + int16(int8(v.Low>>24))))
-	l2 := uint64(uint16(int16(int8(v.Low>>32)) + int16(int8(v.Low>>40))))
-	l3 := uint64(uint16(int16(int8(v.Low>>48)) + int16(int8(v.Low>>56))))
-	low := l0 | l1<<16 | l2<<32 | l3<<48
-
-	h0 := uint64(uint16(int16(int8(v.High)) + int16(int8(v.High>>8))))
-	h1 := uint64(uint16(int16(int8(v.High>>16)) + int16(int8(v.High>>24))))
-	h2 := uint64(uint16(int16(int8(v.High>>32)) + int16(int8(v.High>>40))))
-	h3 := uint64(uint16(int16(int8(v.High>>48)) + int16(int8(v.High>>56))))
-	high := h0 | h1<<16 | h2<<32 | h3<<48
-
-	return V128Value{Low: low, High: high}
-}
-
-func simdI16x8ExtaddPairwiseI8x16U(v V128Value) V128Value {
-	l0 := uint64(uint16(byte(v.Low)) + uint16(byte(v.Low>>8)))
-	l1 := uint64(uint16(byte(v.Low>>16)) + uint16(byte(v.Low>>24)))
-	l2 := uint64(uint16(byte(v.Low>>32)) + uint16(byte(v.Low>>40)))
-	l3 := uint64(uint16(byte(v.Low>>48)) + uint16(byte(v.Low>>56)))
-	low := l0 | l1<<16 | l2<<32 | l3<<48
-
-	h0 := uint64(uint16(byte(v.High)) + uint16(byte(v.High>>8)))
-	h1 := uint64(uint16(byte(v.High>>16)) + uint16(byte(v.High>>24)))
-	h2 := uint64(uint16(byte(v.High>>32)) + uint16(byte(v.High>>40)))
-	h3 := uint64(uint16(byte(v.High>>48)) + uint16(byte(v.High>>56)))
-	high := h0 | h1<<16 | h2<<32 | h3<<48
-
-	return V128Value{Low: low, High: high}
-}
-
-func simdI32x4ExtaddPairwiseI16x8U(v V128Value) V128Value {
-	l0 := uint64(uint32(uint16(v.Low)) + uint32(uint16(v.Low>>16)))
-	l1 := uint64(uint32(uint16(v.Low>>32)) + uint32(uint16(v.Low>>48)))
-	low := l0 | l1<<32
-
-	h0 := uint64(uint32(uint16(v.High)) + uint32(uint16(v.High>>16)))
-	h1 := uint64(uint32(uint16(v.High>>32)) + uint32(uint16(v.High>>48)))
-	high := h0 | h1<<32
-
-	return V128Value{Low: low, High: high}
-}
-
-func simdI32x4ExtaddPairwiseI16x8S(v V128Value) V128Value {
-	l0 := uint64(uint32(int32(int16(v.Low)) + int32(int16(v.Low>>16))))
-	l1 := uint64(uint32(int32(int16(v.Low>>32)) + int32(int16(v.Low>>48))))
-	low := l0 | l1<<32
-
-	h0 := uint64(uint32(int32(int16(v.High)) + int32(int16(v.High>>16))))
-	h1 := uint64(uint32(int32(int16(v.High>>32)) + int32(int16(v.High>>48))))
-	high := h0 | h1<<32
-
-	return V128Value{Low: low, High: high}
-}
-
 func simdI32x4Abs(v V128Value) V128Value {
 	return V128Value{
 		Low:  absLanes(v.Low, lanes32MSB, 31, 0xFFFFFFFF),
@@ -1220,7 +1150,7 @@ func simdI32x4Neg(v V128Value) V128Value {
 }
 
 func simdI32x4AllTrue(v V128Value) bool {
-	return allTrue(v, 4)
+	return allTrue(v, lanes32MSB)
 }
 
 func simdI32x4Bitmask(v V128Value) int32 {
@@ -1230,8 +1160,8 @@ func simdI32x4Bitmask(v V128Value) int32 {
 // simdI32x4Shl performs a left shift on each 32-bit lane of a V128Value.
 func simdI32x4Shl(v V128Value, shift int32) V128Value {
 	s := uint(shift & 31) // shift amount is modulo 32
-	// Shift the whole word, then mask off the bits that crossed the lane
-	// boundary (each lane keeps bits [s, 32)).
+	// Shift the whole word, then mask off the bits that crossed the lane boundary
+	// (each lane keeps bits [s, 32)).
 	mask := uint64(uint32(0xFFFFFFFF<<s)) * lanes32Ones
 	return V128Value{Low: (v.Low << s) & mask, High: (v.High << s) & mask}
 }
@@ -1241,11 +1171,10 @@ func simdI32x4Shl(v V128Value, shift int32) V128Value {
 func simdI32x4ShrS(v V128Value, shift int32) V128Value {
 	s := uint(shift & 31) // shift amount is modulo 32
 	maskLow := uint64(0xFFFFFFFF>>s) * lanes32Ones
-	const signs = 0x8000000080000000
-	// negLow/negHigh hold all-ones in every lane whose sign bit is set; OR
-	// their high s bits into the logical shift to sign-extend each lane.
-	negLow := ((v.Low & signs) >> 31) * 0xFFFFFFFF
-	negHigh := ((v.High & signs) >> 31) * 0xFFFFFFFF
+	// negLow/negHigh hold all-ones in every lane whose sign bit is set; OR their
+	// high s bits into the logical shift to sign-extend each lane.
+	negLow := spreadLaneMSB(v.Low&lanes32MSB, 31, 0xFFFFFFFF)
+	negHigh := spreadLaneMSB(v.High&lanes32MSB, 31, 0xFFFFFFFF)
 	return V128Value{
 		Low:  ((v.Low >> s) & maskLow) | (negLow &^ maskLow),
 		High: ((v.High >> s) & maskLow) | (negHigh &^ maskLow),
@@ -1324,10 +1253,7 @@ func simdI64x2Abs(v V128Value) V128Value {
 }
 
 func simdI64x2Neg(v V128Value) V128Value {
-	return V128Value{
-		Low:  uint64(-int64(v.Low)),
-		High: uint64(-int64(v.High)),
-	}
+	return V128Value{Low: uint64(-int64(v.Low)), High: uint64(-int64(v.High))}
 }
 
 func simdI64x2AllTrue(v V128Value) bool {
@@ -1341,10 +1267,7 @@ func simdI64x2Bitmask(v V128Value) int32 {
 // simdI64x2Shl performs a left shift on each 64-bit lane of a V128Value.
 func simdI64x2Shl(v V128Value, shift int32) V128Value {
 	s := shift & 63 // shift amount is modulo 64
-	return V128Value{
-		Low:  v.Low << s,
-		High: v.High << s,
-	}
+	return V128Value{Low: v.Low << s, High: v.High << s}
 }
 
 // simdI64x2ShrS performs a signed right shift on each 64-bit lane of a
@@ -1361,39 +1284,27 @@ func simdI64x2ShrS(v V128Value, shift int32) V128Value {
 // V128Value.
 func simdI64x2ShrU(v V128Value, shift int32) V128Value {
 	s := shift & 63 // shift amount is modulo 64
-	return V128Value{
-		Low:  v.Low >> s,
-		High: v.High >> s,
-	}
+	return V128Value{Low: v.Low >> s, High: v.High >> s}
 }
 
 func simdI64x2Add(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low + v2.Low,
-		High: v1.High + v2.High,
-	}
+	return V128Value{Low: v1.Low + v2.Low, High: v1.High + v2.High}
 }
 
 func simdI64x2Sub(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low - v2.Low,
-		High: v1.High - v2.High,
-	}
+	return V128Value{Low: v1.Low - v2.Low, High: v1.High - v2.High}
 }
 
 func simdI64x2Mul(v1, v2 V128Value) V128Value {
-	return V128Value{
-		Low:  v1.Low * v2.Low,
-		High: v1.High * v2.High,
-	}
+	return V128Value{Low: v1.Low * v2.Low, High: v1.High * v2.High}
 }
 
 // simdI64x2Eq performs an equality comparison on each 64-bit lane of two
 // V128Value.
 func simdI64x2Eq(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](v1.Low == v2.Low),
-		High: boolToUint[uint64](v1.High == v2.High),
+		Low:  boolToMask64(v1.Low == v2.Low),
+		High: boolToMask64(v1.High == v2.High),
 	}
 }
 
@@ -1401,24 +1312,24 @@ func simdI64x2Eq(v1, v2 V128Value) V128Value {
 // V128Value.
 func simdI64x2Ne(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](v1.Low != v2.Low),
-		High: boolToUint[uint64](v1.High != v2.High),
+		Low:  boolToMask64(v1.Low != v2.Low),
+		High: boolToMask64(v1.High != v2.High),
 	}
 }
 
 // simdI64x2LtS performs a signed less-than comparison on each 64-bit lane.
 func simdI64x2LtS(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](int64(v1.Low) < int64(v2.Low)),
-		High: boolToUint[uint64](int64(v1.High) < int64(v2.High)),
+		Low:  boolToMask64(int64(v1.Low) < int64(v2.Low)),
+		High: boolToMask64(int64(v1.High) < int64(v2.High)),
 	}
 }
 
 // simdI64x2GtS performs a signed greater-than comparison on each 64-bit lane.
 func simdI64x2GtS(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](int64(v1.Low) > int64(v2.Low)),
-		High: boolToUint[uint64](int64(v1.High) > int64(v2.High)),
+		Low:  boolToMask64(int64(v1.Low) > int64(v2.Low)),
+		High: boolToMask64(int64(v1.High) > int64(v2.High)),
 	}
 }
 
@@ -1426,8 +1337,8 @@ func simdI64x2GtS(v1, v2 V128Value) V128Value {
 // lane.
 func simdI64x2LeS(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](int64(v1.Low) <= int64(v2.Low)),
-		High: boolToUint[uint64](int64(v1.High) <= int64(v2.High)),
+		Low:  boolToMask64(int64(v1.Low) <= int64(v2.Low)),
+		High: boolToMask64(int64(v1.High) <= int64(v2.High)),
 	}
 }
 
@@ -1435,168 +1346,218 @@ func simdI64x2LeS(v1, v2 V128Value) V128Value {
 // 64-bit lane.
 func simdI64x2GeS(v1, v2 V128Value) V128Value {
 	return V128Value{
-		Low:  boolToUint[uint64](int64(v1.Low) >= int64(v2.Low)),
-		High: boolToUint[uint64](int64(v1.High) >= int64(v2.High)),
+		Low:  boolToMask64(int64(v1.Low) >= int64(v2.Low)),
+		High: boolToMask64(int64(v1.High) >= int64(v2.High)),
 	}
 }
 
 // simdF32x4Abs performs an absolute value operation on each 32-bit float lane.
 func simdF32x4Abs(v V128Value) V128Value {
-	return unaryOpF32x4(v, abs[float32])
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(abs(f0), abs(f1), abs(f2), abs(f3))
 }
 
 func simdF32x4Neg(v V128Value) V128Value {
-	return unaryOpF32x4(v, func(f float32) float32 { return -f })
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(-f0, -f1, -f2, -f3)
 }
 
 func simdF32x4Sqrt(v V128Value) V128Value {
-	return unaryOpF32x4(v, sqrt[float32])
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(sqrt(f0), sqrt(f1), sqrt(f2), sqrt(f3))
+}
+
+func simdF32x4Ceil(v V128Value) V128Value {
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(ceil(f0), ceil(f1), ceil(f2), ceil(f3))
+}
+
+func simdF32x4Floor(v V128Value) V128Value {
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(floor(f0), floor(f1), floor(f2), floor(f3))
+}
+
+func simdF32x4Trunc(v V128Value) V128Value {
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(trunc(f0), trunc(f1), trunc(f2), trunc(f3))
+}
+
+func simdF32x4Nearest(v V128Value) V128Value {
+	f0, f1, f2, f3 := f32x4(v)
+	return packF32x4(nearest(f0), nearest(f1), nearest(f2), nearest(f3))
 }
 
 // simdF32x4Add performs an addition on each 32-bit float lane.
 func simdF32x4Add(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, add[float32])
-}
-
-func simdF32x4Ceil(v V128Value) V128Value {
-	return unaryOpF32x4(v, ceil[float32])
-}
-
-func simdF32x4Floor(v V128Value) V128Value {
-	return unaryOpF32x4(v, floor[float32])
-}
-
-func simdF32x4Trunc(v V128Value) V128Value {
-	return unaryOpF32x4(v, trunc[float32])
-}
-
-func simdF32x4Nearest(v V128Value) V128Value {
-	return unaryOpF32x4(v, nearest[float32])
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(a0+b0, a1+b1, a2+b2, a3+b3)
 }
 
 // simdF32x4Sub performs a subtraction on each 32-bit float lane.
 func simdF32x4Sub(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, sub[float32])
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(a0-b0, a1-b1, a2-b2, a3-b3)
 }
 
 // simdF32x4Mul performs a multiplication on each 32-bit float lane.
 func simdF32x4Mul(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, mul[float32])
-}
-
-// simdF32x4Min performs a minimum operation on each 32-bit float lane.
-func simdF32x4Min(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, wasmMin[float32])
-}
-
-func simdF32x4Max(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, wasmMax[float32])
-}
-
-func simdF32x4Pmin(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		if b < a {
-			return b
-		}
-		return a
-	})
-}
-
-func simdF32x4Pmax(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, func(a, b float32) float32 {
-		if a < b {
-			return b
-		}
-		return a
-	})
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(a0*b0, a1*b1, a2*b2, a3*b3)
 }
 
 // simdF32x4Div performs a division operation on each 32-bit float lane.
 func simdF32x4Div(v1, v2 V128Value) V128Value {
-	return binaryOpF32x4(v1, v2, div[float32])
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(a0/b0, a1/b1, a2/b2, a3/b3)
+}
+
+// simdF32x4Min performs a minimum operation on each 32-bit float lane.
+func simdF32x4Min(v1, v2 V128Value) V128Value {
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(min(a0, b0), min(a1, b1), min(a2, b2), min(a3, b3))
+}
+
+func simdF32x4Max(v1, v2 V128Value) V128Value {
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(max(a0, b0), max(a1, b1), max(a2, b2), max(a3, b3))
+}
+
+func simdF32x4Pmin(v1, v2 V128Value) V128Value {
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(pmin(a0, b0), pmin(a1, b1), pmin(a2, b2), pmin(a3, b3))
+}
+
+func simdF32x4Pmax(v1, v2 V128Value) V128Value {
+	a0, a1, a2, a3 := f32x4(v1)
+	b0, b1, b2, b3 := f32x4(v2)
+	return packF32x4(pmax(a0, b0), pmax(a1, b1), pmax(a2, b2), pmax(a3, b3))
+}
+
+func simdF64x2Abs(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(abs(f0), abs(f1))
+}
+
+func simdF64x2Neg(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(-f0, -f1)
+}
+
+func simdF64x2Sqrt(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(sqrt(f0), sqrt(f1))
+}
+
+func simdF64x2Ceil(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(ceil(f0), ceil(f1))
+}
+
+func simdF64x2Floor(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(floor(f0), floor(f1))
+}
+
+func simdF64x2Trunc(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(trunc(f0), trunc(f1))
+}
+
+func simdF64x2Nearest(v V128Value) V128Value {
+	f0, f1 := f64x2(v)
+	return packF64x2(nearest(f0), nearest(f1))
 }
 
 // simdF64x2Add performs an addition on each 64-bit float lane of two V128Value.
 func simdF64x2Add(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, add[float64])
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(a0+b0, a1+b1)
 }
 
 // simdF64x2Sub performs a subtraction on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Sub(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, sub[float64])
-}
-
-func simdF64x2Ceil(v V128Value) V128Value {
-	return unaryOpF64x2(v, ceil[float64])
-}
-
-func simdF64x2Floor(v V128Value) V128Value {
-	return unaryOpF64x2(v, floor[float64])
-}
-
-func simdF64x2Trunc(v V128Value) V128Value {
-	return unaryOpF64x2(v, trunc[float64])
-}
-
-func simdF64x2Nearest(v V128Value) V128Value {
-	return unaryOpF64x2(v, nearest[float64])
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(a0-b0, a1-b1)
 }
 
 // simdF64x2Mul performs a multiplication on each 64-bit float lane of two
 // V128Value.
 func simdF64x2Mul(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, mul[float64])
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(a0*b0, a1*b1)
+}
+
+func simdF64x2Div(v1, v2 V128Value) V128Value {
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(a0/b0, a1/b1)
 }
 
 func simdF64x2Min(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, wasmMin[float64])
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(min(a0, b0), min(a1, b1))
 }
 
 func simdF64x2Max(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, wasmMax[float64])
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(max(a0, b0), max(a1, b1))
 }
 
 func simdF64x2Pmin(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if b < a {
-			return b
-		}
-		return a
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(pmin(a0, b0), pmin(a1, b1))
 }
 
 func simdF64x2Pmax(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, func(a, b float64) float64 {
-		if a < b {
-			return b
-		}
-		return a
-	})
+	a0, a1 := f64x2(v1)
+	b0, b1 := f64x2(v2)
+	return packF64x2(pmax(a0, b0), pmax(a1, b1))
 }
 
 func simdI32x4TruncSatF32x4S(v V128Value) V128Value {
-	i0 := saturateF32toInt32(math.Float32frombits(uint32(v.Low)))
-	i1 := saturateF32toInt32(math.Float32frombits(uint32(v.Low >> 32)))
-	low := uint64(uint32(i0)) | (uint64(uint32(i1)) << 32)
-
-	i2 := saturateF32toInt32(math.Float32frombits(uint32(v.High)))
-	i3 := saturateF32toInt32(math.Float32frombits(uint32(v.High >> 32)))
-	high := uint64(uint32(i2)) | (uint64(uint32(i3)) << 32)
-
-	return V128Value{Low: low, High: high}
+	f0, f1, f2, f3 := f32x4(v)
+	i0, i1 := saturateF32toInt32(f0), saturateF32toInt32(f1)
+	i2, i3 := saturateF32toInt32(f2), saturateF32toInt32(f3)
+	return V128Value{
+		Low:  uint64(uint32(i0)) | uint64(uint32(i1))<<32,
+		High: uint64(uint32(i2)) | uint64(uint32(i3))<<32,
+	}
 }
 
 func simdI32x4TruncSatF32x4U(v V128Value) V128Value {
-	u0 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.Low))))
-	u1 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.Low >> 32))))
-	low := u0 | (u1 << 32)
+	f0, f1, f2, f3 := f32x4(v)
+	u0, u1 := saturateF32toUint32(f0), saturateF32toUint32(f1)
+	u2, u3 := saturateF32toUint32(f2), saturateF32toUint32(f3)
+	return V128Value{
+		Low:  uint64(u0) | uint64(u1)<<32,
+		High: uint64(u2) | uint64(u3)<<32,
+	}
+}
 
-	u2 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.High))))
-	u3 := uint64(saturateF32toUint32(math.Float32frombits(uint32(v.High >> 32))))
-	high := u2 | (u3 << 32)
+func simdF32x4ConvertI32x4S(v V128Value) V128Value {
+	return packF32x4(
+		float32(int32(v.Low)), float32(int32(v.Low>>32)),
+		float32(int32(v.High)), float32(int32(v.High>>32)))
+}
 
-	return V128Value{Low: low, High: high}
+func simdF32x4ConvertI32x4U(v V128Value) V128Value {
+	return packF32x4(
+		float32(uint32(v.Low)), float32(uint32(v.Low>>32)),
+		float32(uint32(v.High)), float32(uint32(v.High>>32)))
 }
 
 func simdI32x4TruncSatF64x2SZero(v V128Value) V128Value {
@@ -1617,127 +1578,79 @@ func simdI32x4TruncSatF64x2UZero(v V128Value) V128Value {
 	}
 }
 
-func simdF32x4ConvertI32x4S(v V128Value) V128Value {
-	f0 := float32(int32(v.Low))
-	f1 := float32(int32(v.Low >> 32))
-	low := uint64(math.Float32bits(f0)) | (uint64(math.Float32bits(f1)) << 32)
-
-	f2 := float32(int32(v.High))
-	f3 := float32(int32(v.High >> 32))
-	high := uint64(math.Float32bits(f2)) | (uint64(math.Float32bits(f3)) << 32)
-
-	return V128Value{Low: low, High: high}
-}
-
-func simdF32x4ConvertI32x4U(v V128Value) V128Value {
-	f0 := float32(uint32(v.Low))
-	f1 := float32(uint32(v.Low >> 32))
-	low := uint64(math.Float32bits(f0)) | (uint64(math.Float32bits(f1)) << 32)
-
-	f2 := float32(uint32(v.High))
-	f3 := float32(uint32(v.High >> 32))
-	high := uint64(math.Float32bits(f2)) | (uint64(math.Float32bits(f3)) << 32)
-
-	return V128Value{Low: low, High: high}
-}
-
-func simdF64x2Abs(v V128Value) V128Value {
-	return unaryOpF64x2(v, abs[float64])
-}
-
-func simdF64x2Neg(v V128Value) V128Value {
-	return unaryOpF64x2(v, func(f float64) float64 { return -f })
-}
-
-func simdF64x2Sqrt(v V128Value) V128Value {
-	return unaryOpF64x2(v, sqrt[float64])
-}
-
-func simdF64x2Div(v1, v2 V128Value) V128Value {
-	return binaryOpF64x2(v1, v2, div[float64])
-}
-
 func simdF64x2ConvertLowI32x4S(v V128Value) V128Value {
-	return V128Value{
-		Low:  math.Float64bits(float64(int32(v.Low))),
-		High: math.Float64bits(float64(int32(v.Low >> 32))),
-	}
+	return packF64x2(float64(int32(v.Low)), float64(int32(v.Low>>32)))
 }
 
 func simdF64x2ConvertLowI32x4U(v V128Value) V128Value {
+	return packF64x2(float64(uint32(v.Low)), float64(uint32(v.Low>>32)))
+}
+
+// f32x4 unpacks the four float32 lanes of v.
+func f32x4(v V128Value) (float32, float32, float32, float32) {
+	return math.Float32frombits(uint32(v.Low)),
+		math.Float32frombits(uint32(v.Low >> 32)),
+		math.Float32frombits(uint32(v.High)),
+		math.Float32frombits(uint32(v.High >> 32))
+}
+
+// packF32x4 packs four float32 lanes into a V128Value.
+func packF32x4(r0, r1, r2, r3 float32) V128Value {
 	return V128Value{
-		Low:  math.Float64bits(float64(uint32(v.Low))),
-		High: math.Float64bits(float64(uint32(v.Low >> 32))),
+		Low:  uint64(math.Float32bits(r0)) | uint64(math.Float32bits(r1))<<32,
+		High: uint64(math.Float32bits(r2)) | uint64(math.Float32bits(r3))<<32,
 	}
 }
 
-func binaryOpF64x2(
-	v1, v2 V128Value,
-	op func(float64, float64) float64,
-) V128Value {
-	resLow := op(math.Float64frombits(v1.Low), math.Float64frombits(v2.Low))
-	resHigh := op(math.Float64frombits(v1.High), math.Float64frombits(v2.High))
-	return V128Value{
-		Low:  math.Float64bits(resLow),
-		High: math.Float64bits(resHigh),
+// f64x2 unpacks the two float64 lanes of v.
+func f64x2(v V128Value) (float64, float64) {
+	return math.Float64frombits(v.Low), math.Float64frombits(v.High)
+}
+
+// packF64x2 packs two float64 lanes into a V128Value.
+func packF64x2(r0, r1 float64) V128Value {
+	return V128Value{Low: math.Float64bits(r0), High: math.Float64bits(r1)}
+}
+
+// boolToMask32 returns an all-ones 32-bit lane mask for true, zero for false.
+func boolToMask32(v bool) uint64 {
+	if v {
+		return 0xFFFFFFFF
 	}
+	return 0
 }
 
-func binaryOpF32x4(
-	v1, v2 V128Value,
-	op func(float32, float32) float32,
-) V128Value {
-	f1_0 := math.Float32frombits(uint32(v1.Low))
-	f1_1 := math.Float32frombits(uint32(v1.Low >> 32))
-	f2_0 := math.Float32frombits(uint32(v2.Low))
-	f2_1 := math.Float32frombits(uint32(v2.Low >> 32))
-
-	r0 := uint64(math.Float32bits(op(f1_0, f2_0)))
-	r1 := uint64(math.Float32bits(op(f1_1, f2_1)))
-	low := r0 | (r1 << 32)
-
-	f1_2 := math.Float32frombits(uint32(v1.High))
-	f1_3 := math.Float32frombits(uint32(v1.High >> 32))
-	f2_2 := math.Float32frombits(uint32(v2.High))
-	f2_3 := math.Float32frombits(uint32(v2.High >> 32))
-
-	r2 := uint64(math.Float32bits(op(f1_2, f2_2)))
-	r3 := uint64(math.Float32bits(op(f1_3, f2_3)))
-	high := r2 | (r3 << 32)
-
-	return V128Value{Low: low, High: high}
-}
-
-func unaryOpF32x4(v V128Value, op func(float32) float32) V128Value {
-	f0 := math.Float32frombits(uint32(v.Low))
-	f1 := math.Float32frombits(uint32(v.Low >> 32))
-	r0 := math.Float32bits(op(f0))
-	r1 := math.Float32bits(op(f1))
-	low := uint64(r0) | (uint64(r1) << 32)
-
-	f2 := math.Float32frombits(uint32(v.High))
-	f3 := math.Float32frombits(uint32(v.High >> 32))
-	r2 := math.Float32bits(op(f2))
-	r3 := math.Float32bits(op(f3))
-	high := uint64(r2) | (uint64(r3) << 32)
-
-	return V128Value{Low: low, High: high}
-}
-
-func unaryOpF64x2(v V128Value, op func(float64) float64) V128Value {
-	return V128Value{
-		Low:  math.Float64bits(op(math.Float64frombits(v.Low))),
-		High: math.Float64bits(op(math.Float64frombits(v.High))),
+// boolToMask64 returns an all-ones 64-bit lane mask for true, zero for false.
+func boolToMask64(v bool) uint64 {
+	if v {
+		return 0xFFFFFFFFFFFFFFFF
 	}
+	return 0
 }
 
-func extend(v V128Value, fromBytes, toBytes int, high, signed bool) V128Value {
+// pmin returns the wasm pseudo-minimum of a and b: b if b < a, else a.
+func pmin[T wasmFloat](a, b T) T {
+	if b < a {
+		return b
+	}
+	return a
+}
+
+// pmax returns the wasm pseudo-maximum of a and b: b if a < b, else a.
+func pmax[T wasmFloat](a, b T) T {
+	if a < b {
+		return b
+	}
+	return a
+}
+
+func extend(v V128Value, fromBytes int, high, signed bool) V128Value {
 	src := v.Low
 	if high {
 		src = v.High
 	}
-	// Each half of the result widens half of src's lanes. Branching on the
-	// source width once (rather than per lane) keeps the packing branch-free.
+	// Each half of the result widens half of src's lanes. Branching on the source
+	// width once (rather than per lane) keeps the packing branch-free.
 	switch fromBytes {
 	case 1: // 8x8 -> 8x16; src low/high 32 bits feed the two result halves.
 		return V128Value{
@@ -1793,8 +1706,8 @@ func extmul(v1, v2 V128Value, fromBytes int, high, signed bool) V128Value {
 	if high {
 		half1, half2 = v1.High, v2.High
 	}
-	// As in extend, branch on the source width once and pack the widened
-	// products of each half's lanes directly.
+	// As in extend, branch on the source width once and pack the widened products
+	// of each half's lanes directly.
 	switch fromBytes {
 	case 1: // 8x8 * 8x8 -> 8x16
 		return V128Value{
@@ -1818,6 +1731,36 @@ func extmul(v1, v2 V128Value, fromBytes int, high, signed bool) V128Value {
 			High: uint64(uint32(half1>>32)) * uint64(uint32(half2>>32)),
 		}
 	}
+}
+
+// extaddPairwise8 sums adjacent pairs of packed 8-bit lanes into four packed
+// 16-bit lanes, with signed or unsigned interpretation.
+func extaddPairwise8(half uint64, signed bool) uint64 {
+	if signed {
+		l0 := uint64(uint16(int16(int8(half)) + int16(int8(half>>8))))
+		l1 := uint64(uint16(int16(int8(half>>16)) + int16(int8(half>>24))))
+		l2 := uint64(uint16(int16(int8(half>>32)) + int16(int8(half>>40))))
+		l3 := uint64(uint16(int16(int8(half>>48)) + int16(int8(half>>56))))
+		return l0 | l1<<16 | l2<<32 | l3<<48
+	}
+	l0 := uint64(uint16(byte(half)) + uint16(byte(half>>8)))
+	l1 := uint64(uint16(byte(half>>16)) + uint16(byte(half>>24)))
+	l2 := uint64(uint16(byte(half>>32)) + uint16(byte(half>>40)))
+	l3 := uint64(uint16(byte(half>>48)) + uint16(byte(half>>56)))
+	return l0 | l1<<16 | l2<<32 | l3<<48
+}
+
+// extaddPairwise16 sums adjacent pairs of packed 16-bit lanes into two packed
+// 32-bit lanes, with signed or unsigned interpretation.
+func extaddPairwise16(half uint64, signed bool) uint64 {
+	if signed {
+		l0 := uint64(uint32(int32(int16(half)) + int32(int16(half>>16))))
+		l1 := uint64(uint32(int32(int16(half>>32)) + int32(int16(half>>48))))
+		return l0 | l1<<32
+	}
+	l0 := uint64(uint32(uint16(half)) + uint32(uint16(half>>16)))
+	l1 := uint64(uint32(uint16(half>>32)) + uint32(uint16(half>>48)))
+	return l0 | l1<<32
 }
 
 // extmul8 multiplies four pairs of packed bytes into four packed 16-bit
@@ -1850,29 +1793,54 @@ func extmul16(a, b uint32, signed bool) uint64 {
 	return p0 | p1<<32
 }
 
-// narrow32x4To16x8 takes a single V128 (treated as 4x32-bit lanes), saturates
-// them, and packs them into a uint64 (4x16-bit lanes).
-func narrow32x4To16x8(v V128Value, saturate func(int32) uint64) uint64 {
-	r0 := saturate(int32(v.Low))
-	r1 := saturate(int32(v.Low >> 32))
-	r2 := saturate(int32(v.High))
-	r3 := saturate(int32(v.High >> 32))
+// narrowS32x4ToS16x8 saturates v's 4x32-bit signed lanes to signed 16-bit and
+// packs them into a uint64 (4x16-bit lanes).
+func narrowS32x4ToS16x8(v V128Value) uint64 {
+	r0 := saturateS32ToS16(int32(v.Low))
+	r1 := saturateS32ToS16(int32(v.Low >> 32))
+	r2 := saturateS32ToS16(int32(v.High))
+	r3 := saturateS32ToS16(int32(v.High >> 32))
 	return r0 | (r1 << 16) | (r2 << 32) | (r3 << 48)
 }
 
-// narrow16x8To8x16 takes a single V128 (treated as 8x16-bit lanes), saturates
-// them, and packs them into a uint64 (8x8-bit lanes).
-func narrow16x8To8x16(v V128Value, saturate func(int16) uint64) uint64 {
-	r0 := saturate(int16(v.Low))
-	r1 := saturate(int16(v.Low >> 16))
-	r2 := saturate(int16(v.Low >> 32))
-	r3 := saturate(int16(v.Low >> 48))
-	r4 := saturate(int16(v.High))
-	r5 := saturate(int16(v.High >> 16))
-	r6 := saturate(int16(v.High >> 32))
-	r7 := saturate(int16(v.High >> 48))
-	return r0 | (r1 << 8) | (r2 << 16) | (r3 << 24) | (r4 << 32) | (r5 << 40) |
-		(r6 << 48) | (r7 << 56)
+// narrowS32x4ToU16x8 saturates v's 4x32-bit signed lanes to unsigned 16-bit and
+// packs them into a uint64 (4x16-bit lanes).
+func narrowS32x4ToU16x8(v V128Value) uint64 {
+	r0 := saturateS32ToU16(int32(v.Low))
+	r1 := saturateS32ToU16(int32(v.Low >> 32))
+	r2 := saturateS32ToU16(int32(v.High))
+	r3 := saturateS32ToU16(int32(v.High >> 32))
+	return r0 | (r1 << 16) | (r2 << 32) | (r3 << 48)
+}
+
+// narrowS16x8ToS8x16 saturates v's 8x16-bit signed lanes to signed 8-bit and
+// packs them into a uint64 (8x8-bit lanes).
+func narrowS16x8ToS8x16(v V128Value) uint64 {
+	r0 := saturateS16ToS8(int16(v.Low))
+	r1 := saturateS16ToS8(int16(v.Low >> 16))
+	r2 := saturateS16ToS8(int16(v.Low >> 32))
+	r3 := saturateS16ToS8(int16(v.Low >> 48))
+	r4 := saturateS16ToS8(int16(v.High))
+	r5 := saturateS16ToS8(int16(v.High >> 16))
+	r6 := saturateS16ToS8(int16(v.High >> 32))
+	r7 := saturateS16ToS8(int16(v.High >> 48))
+	return r0 | (r1 << 8) | (r2 << 16) | (r3 << 24) | (r4 << 32) |
+		(r5 << 40) | (r6 << 48) | (r7 << 56)
+}
+
+// narrowS16x8ToU8x16 saturates v's 8x16-bit signed lanes to unsigned 8-bit and
+// packs them into a uint64 (8x8-bit lanes).
+func narrowS16x8ToU8x16(v V128Value) uint64 {
+	r0 := saturateS16ToU8(int16(v.Low))
+	r1 := saturateS16ToU8(int16(v.Low >> 16))
+	r2 := saturateS16ToU8(int16(v.Low >> 32))
+	r3 := saturateS16ToU8(int16(v.Low >> 48))
+	r4 := saturateS16ToU8(int16(v.High))
+	r5 := saturateS16ToU8(int16(v.High >> 16))
+	r6 := saturateS16ToU8(int16(v.High >> 32))
+	r7 := saturateS16ToU8(int16(v.High >> 48))
+	return r0 | (r1 << 8) | (r2 << 16) | (r3 << 24) | (r4 << 32) |
+		(r5 << 40) | (r6 << 48) | (r7 << 56)
 }
 
 // saturateS32ToS16: Signed 32-bit -> Signed 16-bit
@@ -1950,8 +1918,8 @@ func saturateF32toInt32(f float32) int32 {
 		return 0
 	}
 
-	// We use an explicit float rather than comparing against math.MaxInt32
-	// to avoid subtle differences in behavior between architectures.
+	// We use an explicit float rather than comparing against math.MaxInt32 to
+	// avoid subtle differences in behavior between architectures.
 	if f >= 2147483648.0 {
 		return math.MaxInt32
 	}
@@ -1975,24 +1943,10 @@ func saturateF32toUint32(f float32) uint32 {
 	return uint32(f64)
 }
 
-// allTrue checks if all lanes of a given size are non-zero.
-func allTrue(v V128Value, laneSizeBytes int) bool {
-	laneBits := laneSizeBytes * 8
-	mask := uint64(1<<laneBits) - 1
-	halfLanes := 8 / laneSizeBytes
-
-	for i := range halfLanes {
-		if (v.Low>>(i*laneBits))&mask == 0 {
-			return false
-		}
-	}
-
-	for i := range halfLanes {
-		if (v.High>>(i*laneBits))&mask == 0 {
-			return false
-		}
-	}
-	return true
+// allTrue reports whether every lane of both halves is non-zero, with msb
+// marking each lane's top bit.
+func allTrue(v V128Value, msb uint64) bool {
+	return swarZeroMarker(v.Low, msb) == 0 && swarZeroMarker(v.High, msb) == 0
 }
 
 // bitmask extracts the most significant bit from each lane.
@@ -2015,29 +1969,6 @@ func bitmask(v V128Value, laneSizeBytes int) int32 {
 	}
 	return res
 }
-
-func boolToUint[T byte | uint16 | uint32 | uint64](b bool) T {
-	if b {
-		return ^T(0)
-	}
-	return 0
-}
-
-func boolToFloat32(b bool) float32 {
-	if b {
-		return math.Float32frombits(0xFFFFFFFF)
-	}
-	return 0
-}
-
-func boolToFloat64(b bool) float64 {
-	if b {
-		return math.Float64frombits(0xFFFFFFFFFFFFFFFF)
-	}
-	return 0
-}
-
-func identityV128(v V128Value) V128Value { return v }
 
 // swarAdd adds the packed lanes of a and b, where msb marks the high bit of
 // each lane. Carries are confined to their lane: the low bits are summed with
@@ -2069,15 +2000,19 @@ func spreadLaneMSB(bits uint64, laneShift uint, fill uint64) uint64 {
 	return (bits >> laneShift) * fill
 }
 
-// swarEqMask returns all-ones in every lane where a and b are equal. It detects
-// the zero lanes of a^b with a carry-contained test (so a zero lane cannot
-// falsely mark its neighbour), leaving the lane's top bit set, then expands
-// that marker to a full-lane mask.
-func swarEqMask(a, b, msb uint64, laneShift uint, fill uint64) uint64 {
-	x := a ^ b
+// swarZeroMarker returns a word with the lane's top bit set in every lane of x
+// that is all-zero. The inner addition's carry is contained in its lane, so a
+// zero lane cannot falsely mark its neighbour.
+// https://graphics.stanford.edu/~seander/bithacks.html#ZeroInWord
+func swarZeroMarker(x, msb uint64) uint64 {
 	low := ^msb
-	marker := ^(((x & low) + low) | x | low)
-	return spreadLaneMSB(marker, laneShift, fill)
+	return ^(((x & low) + low) | x | low)
+}
+
+// swarEqMask returns all-ones in every lane where a and b are equal: the lanes
+// where a^b is zero.
+func swarEqMask(a, b, msb uint64, laneShift uint, fill uint64) uint64 {
+	return spreadLaneMSB(swarZeroMarker(a^b, msb), laneShift, fill)
 }
 
 // swarLtMaskU returns all-ones in every lane where a < b (unsigned). It
