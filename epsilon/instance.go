@@ -36,10 +36,10 @@ type ModuleInstance struct {
 	funcAddrs []uint32
 	elemAddrs []uint32
 	dataAddrs []uint32
-	// tables, memories, and globals hold this module's index spaces with
-	// the instances pre-resolved, so the VM hot path reaches them with a
-	// single indexed load instead of chasing a module-to-store indirection
-	// on every instruction.
+	// tables, memories, and globals hold this module's index spaces with the
+	// instances pre-resolved, so the VM hot path reaches them with a single
+	// indexed load instead of chasing a module-to-store indirection on every
+	// instruction.
 	tables   []*Table
 	memories []*Memory
 	globals  []*Global

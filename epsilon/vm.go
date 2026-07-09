@@ -35,11 +35,11 @@ const (
 	localsCacheSlotSize       = 12 // Locals slot size per call frame.
 )
 
-// store holds the vm-wide state that must be addressable by index across
-// module boundaries: the function index space (call, ref.func, and table
-// elements hold store indices) and the element/data segment instances.
-// Tables, memories, and globals need no cross-module index space, so their
-// instances are held directly by the ModuleInstances that use them.
+// store holds the vm-wide state that must be addressable by index across module
+// boundaries: the function index space (call, ref.func, and table elements hold
+// store indices) and the element/data segment instances. Tables, memories, and
+// globals need no cross-module index space, so their instances are held
+// directly by the ModuleInstances that use them.
 type store struct {
 	funcs    []FunctionInstance
 	elements []elementInstance
@@ -122,65 +122,60 @@ func (vm *vm) instantiate(
 	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
-	moduleInstance := &ModuleInstance{types: module.types, vm: vm}
+	instance := &ModuleInstance{types: module.types, vm: vm}
 
-	resolvedImports, err := resolveImports(module, moduleInstance, imports)
+	resolvedImports, err := resolveImports(module, instance, imports)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, functionInstance := range resolvedImports.functions {
-		storeIndex := uint32(len(vm.store.funcs))
-		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
+		instance.funcAddrs = append(instance.funcAddrs, uint32(len(vm.store.funcs)))
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
 	}
 
 	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
-		funType := module.types[function.typeIndex]
 		wasmFunc := &wasmFunction{
-			functionType: funType,
-			module:       moduleInstance,
+			functionType: module.types[function.typeIndex],
+			module:       instance,
 			code:         function,
 		}
-		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
+		instance.funcAddrs = append(instance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
 
-	moduleInstance.tables = append(moduleInstance.tables, resolvedImports.tables...)
+	instance.tables = append(instance.tables, resolvedImports.tables...)
 	for _, tableType := range module.tables {
-		moduleInstance.tables = append(moduleInstance.tables, newTable(vm, tableType))
+		instance.tables = append(instance.tables, newTable(vm, tableType))
 	}
 
-	moduleInstance.memories = append(
-		moduleInstance.memories, resolvedImports.memories...)
+	instance.memories = append(instance.memories, resolvedImports.memories...)
 	for _, memoryType := range module.memories {
-		memory := newMemory(vm, memoryType)
-		moduleInstance.memories = append(moduleInstance.memories, memory)
+		instance.memories = append(instance.memories, newMemory(vm, memoryType))
 	}
 
-	moduleInstance.globals = append(
-		moduleInstance.globals, resolvedImports.globals...)
+	instance.globals = append(instance.globals, resolvedImports.globals...)
 	for _, variable := range module.globalVariables {
 		valueType := variable.globalType.ValueType
 		initExpression := variable.initExpression
-		val, err := vm.invokeExpression(initExpression, valueType, moduleInstance)
+		val, err := vm.invokeExpression(initExpression, valueType, instance)
 		if err != nil {
 			return nil, err
 		}
 
 		global := newGlobal(vm, val, variable.globalType.IsMutable, valueType)
-		moduleInstance.globals = append(moduleInstance.globals, global)
+		instance.globals = append(instance.globals, global)
 	}
 
 	for _, segment := range module.elementSegments {
-		instance, err := vm.newElementInstance(segment, moduleInstance)
+		elem, err := vm.newElementInstance(segment, instance)
 		if err != nil {
 			return nil, err
 		}
 		storeIndex := uint32(len(vm.store.elements))
-		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
-		vm.store.elements = append(vm.store.elements, instance)
+		instance.elemAddrs = append(instance.elemAddrs, storeIndex)
+		vm.store.elements = append(vm.store.elements, elem)
 	}
 
 	// Apply active element segments to their target tables, then drop them.
@@ -189,9 +184,9 @@ func (vm *vm) instantiate(
 		if segment.mode == passiveElementMode {
 			continue
 		}
-		elem := &vm.store.elements[moduleInstance.elemAddrs[i]]
+		elem := &vm.store.elements[instance.elemAddrs[i]]
 		if segment.mode == activeElementMode {
-			err := vm.applyActiveElementSegment(segment, elem, moduleInstance)
+			err := vm.applyActiveElementSegment(segment, elem, instance)
 			if err != nil {
 				return nil, err
 			}
@@ -204,8 +199,7 @@ func (vm *vm) instantiate(
 	// data.drop nils the instance's slice header, never the backing array, so the
 	// moduleDefinition is left untouched and can be reinstantiated.
 	for _, segment := range module.dataSegments {
-		storeIndex := uint32(len(vm.store.datas))
-		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
+		instance.dataAddrs = append(instance.dataAddrs, uint32(len(vm.store.datas)))
 		data := dataInstance{content: segment.content}
 		vm.store.datas = append(vm.store.datas, data)
 	}
@@ -217,8 +211,8 @@ func (vm *vm) instantiate(
 		if segment.mode != activeDataMode {
 			continue
 		}
-		data := &vm.store.datas[moduleInstance.dataAddrs[i]]
-		err := vm.applyActiveDataSegment(segment, data, moduleInstance)
+		data := &vm.store.datas[instance.dataAddrs[i]]
+		err := vm.applyActiveDataSegment(segment, data, instance)
 		if err != nil {
 			return nil, err
 		}
@@ -226,15 +220,14 @@ func (vm *vm) instantiate(
 	}
 
 	if module.startIndex != nil {
-		storeFunctionIndex := moduleInstance.funcAddrs[*module.startIndex]
-		function := vm.store.funcs[storeFunctionIndex]
+		function := vm.store.funcs[instance.funcAddrs[*module.startIndex]]
 		if err := vm.invokeFunction(function); err != nil {
 			return nil, err
 		}
 	}
 
-	moduleInstance.exports = vm.resolveExports(module, moduleInstance)
-	return moduleInstance, nil
+	instance.exports = vm.resolveExports(module, instance)
+	return instance, nil
 }
 
 func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
