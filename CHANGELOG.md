@@ -2,6 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2026-07-09
+
+### Performance
+
+- Several runtime performance improvements across VM dispatch, SIMD execution,
+  memory access, parser allocation, instantiation, and wasm call paths (#69,
+  #74, #82, #83, #85). Compared with v0.1.0 on the current benchmark suite,
+  execution time improved across every benchmark, with a 22.77% geomean speedup.
+
+| Benchmark            | sec/op change |
+| -------------------- | ------------: |
+| IntegerVectorMath    |       -32.98% |
+| Indirect             |       -28.06% |
+| SortingBubbleSort    |       -27.86% |
+| FibonacciIterative   |       -26.64% |
+| FactorialRecursive   |       -25.79% |
+| FactorialIterative   |       -24.87% |
+| SHA256               |       -24.48% |
+| SortingMergeSort     |       -24.24% |
+| FibonacciRecursive   |       -24.02% |
+| MemoryAccess         |       -23.97% |
+| MatrixMultiplication |       -22.50% |
+| VectorMath           |       -22.05% |
+| SortingQuickSort     |       -22.01% |
+| InstantiateSmall     |       -16.52% |
+| HostCall             |       -14.61% |
+| TrigonometrySin      |       -13.33% |
+| InstantiateLarge     |        -9.55% |
+| Geomean              |       -22.77% |
+
+- Reduced allocations in parser, instantiation, and VM call-path benchmarks
+  (#74).
+
+| Benchmark         | allocs/op change |
+| ----------------- | ---------------: |
+| SortingMergeSort  |          -50.01% |
+| InstantiateLarge  |          -35.78% |
+| VectorMath        |          -33.33% |
+| IntegerVectorMath |          -33.33% |
+| SHA256            |          -33.33% |
+| InstantiateSmall  |          -26.82% |
+| Geomean           |          -14.51% |
+
+### Fixes
+
+- Fixed active data segment handling so `memory.init` after instantiation
+  observes dropped active segments correctly, matching the WebAssembly spec
+  (#70).
+
 ## [0.1.0] - 2026-05-19
 
 This release fixes a significant number of security and correctness issues
