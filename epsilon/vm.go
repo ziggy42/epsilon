@@ -152,6 +152,7 @@ func (vm *vm) instantiate(
 	for _, table := range resolvedImports.tables {
 		storeIndex := uint32(len(vm.store.tables))
 		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
+		moduleInstance.tables = append(moduleInstance.tables, table)
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
@@ -159,12 +160,14 @@ func (vm *vm) instantiate(
 		storeIndex := uint32(len(vm.store.tables))
 		table := newTable(vm, tableType)
 		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
+		moduleInstance.tables = append(moduleInstance.tables, table)
 		vm.store.tables = append(vm.store.tables, table)
 	}
 
 	for _, memory := range resolvedImports.memories {
 		storeIndex := uint32(len(vm.store.memories))
 		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
+		moduleInstance.memories = append(moduleInstance.memories, memory)
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
@@ -172,12 +175,14 @@ func (vm *vm) instantiate(
 		storeIndex := uint32(len(vm.store.memories))
 		memory := newMemory(vm, memoryType)
 		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
+		moduleInstance.memories = append(moduleInstance.memories, memory)
 		vm.store.memories = append(vm.store.memories, memory)
 	}
 
 	for _, global := range resolvedImports.globals {
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
+		moduleInstance.globals = append(moduleInstance.globals, global)
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
@@ -192,6 +197,7 @@ func (vm *vm) instantiate(
 		storeIndex := uint32(len(vm.store.globals))
 		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		global := newGlobal(vm, val, variable.globalType.IsMutable, valueType)
+		moduleInstance.globals = append(moduleInstance.globals, global)
 		vm.store.globals = append(vm.store.globals, global)
 	}
 
@@ -351,7 +357,11 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 }
 
 func (vm *vm) runLoop(frame *callFrame) error {
-	bodyLen := uint32(len(frame.function.body))
+	// The local body slice lets the opcode fetch skip the frame.function
+	// indirection: unlike frame fields, the compiler knows a local cannot be
+	// mutated by the handler calls, so it stays register/stack-resident.
+	body := frame.function.body
+	bodyLen := uint32(len(body))
 	// Checking a cached flag per instruction is cheaper than the duplicated
 	// dispatch loop it would take to hoist it: the branch predicts perfectly.
 	fuelOn := vm.config.EnableFuel
@@ -362,7 +372,8 @@ func (vm *vm) runLoop(frame *callFrame) error {
 			}
 			vm.fuel--
 		}
-		op := opcode(frame.next())
+		op := opcode(body[frame.pc])
+		frame.pc++
 		var err error
 		// Using a switch instead of a map of opcode -> Handler is
 		// significantly faster.
@@ -477,47 +488,95 @@ func (vm *vm) runLoop(frame *callFrame) error {
 		case i32Eqz:
 			vm.stack.pushInt32(boolToInt32(vm.stack.popInt32() == 0))
 		case i32Eq:
-			vm.handleI32Eq()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() == b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32Ne:
-			vm.handleI32Ne()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() != b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LtS:
-			vm.handleI32LtS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() < b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LtU:
-			vm.handleI32LtU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) < uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GtS:
-			vm.handleI32GtS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() > b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GtU:
-			vm.handleI32GtU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) > uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LeS:
-			vm.handleI32LeS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() <= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LeU:
-			vm.handleI32LeU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) <= uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GeS:
-			vm.handleI32GeS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() >= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GeU:
-			vm.handleI32GeU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) >= uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64Eqz:
 			vm.stack.pushInt32(boolToInt32(vm.stack.popInt64() == 0))
 		case i64Eq:
-			vm.handleI64Eq()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() == b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64Ne:
-			vm.handleI64Ne()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() != b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LtS:
-			vm.handleI64LtS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() < b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LtU:
-			vm.handleI64LtU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) < uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GtS:
-			vm.handleI64GtS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() > b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GtU:
-			vm.handleI64GtU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) > uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LeS:
-			vm.handleI64LeS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() <= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LeU:
-			vm.handleI64LeU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) <= uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GeS:
-			vm.handleI64GeS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() >= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GeU:
-			vm.handleI64GeU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) >= uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case f32Eq:
 			vm.handleF32Eq()
 		case f32Ne:
@@ -1757,18 +1816,15 @@ func toStoreFuncIndexes(
 }
 
 func (vm *vm) getTable(frame *callFrame, localIndex uint64) *Table {
-	tableIndex := frame.module.tableAddrs[localIndex]
-	return vm.store.tables[tableIndex]
+	return frame.module.tables[localIndex]
 }
 
 func (vm *vm) getMemory(frame *callFrame, localIndex uint64) *Memory {
-	memoryIndex := frame.module.memAddrs[localIndex]
-	return vm.store.memories[memoryIndex]
+	return frame.module.memories[localIndex]
 }
 
 func (vm *vm) getGlobal(frame *callFrame, localIndex uint64) *Global {
-	globalIndex := frame.module.globalAddrs[localIndex]
-	return vm.store.globals[globalIndex]
+	return frame.module.globals[localIndex]
 }
 
 func (vm *vm) getElement(frame *callFrame, localIndex uint64) *elementInstance {
