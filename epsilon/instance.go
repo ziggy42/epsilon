@@ -32,22 +32,19 @@ type exportInstance struct {
 
 // ModuleInstance is the runtime representation of a module.
 type ModuleInstance struct {
-	types       []FunctionType
-	funcAddrs   []uint32
-	tableAddrs  []uint32
-	memAddrs    []uint32
-	globalAddrs []uint32
-	elemAddrs   []uint32
-	dataAddrs   []uint32
-	// tables, memories, and globals mirror tableAddrs, memAddrs, and
-	// globalAddrs with the store entries pre-resolved, so the VM hot path
-	// reaches them with a single indexed load instead of chasing the
-	// module-to-store indirection on every instruction.
+	types     []FunctionType
+	funcAddrs []uint32
+	elemAddrs []uint32
+	dataAddrs []uint32
+	// tables, memories, and globals hold this module's index spaces with
+	// the instances pre-resolved, so the VM hot path reaches them with a
+	// single indexed load instead of chasing a module-to-store indirection
+	// on every instruction.
 	tables   []*Table
 	memories []*Memory
 	globals  []*Global
 	exports  []exportInstance
-	vm       *vm // Internal reference to resolve exports
+	vm       *vm // The vm this instance lives in.
 }
 
 // Invoke calls an exported function by name with the given arguments.
