@@ -30,7 +30,7 @@ import "math"
 // measurable in the dispatch hot path.
 func (vm *vm) handleI32Load(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint32(offset, index)
@@ -43,7 +43,7 @@ func (vm *vm) handleI32Load(frame *callFrame) error {
 
 func (vm *vm) handleI64Load(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint64(offset, index)
@@ -56,7 +56,7 @@ func (vm *vm) handleI64Load(frame *callFrame) error {
 
 func (vm *vm) handleF32Load(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint32(offset, index)
@@ -69,7 +69,7 @@ func (vm *vm) handleF32Load(frame *callFrame) error {
 
 func (vm *vm) handleF64Load(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint64(offset, index)
@@ -82,7 +82,7 @@ func (vm *vm) handleF64Load(frame *callFrame) error {
 
 func (vm *vm) handleI32Load8S(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadByte(offset, index)
@@ -95,7 +95,7 @@ func (vm *vm) handleI32Load8S(frame *callFrame) error {
 
 func (vm *vm) handleI32Load8U(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadByte(offset, index)
@@ -108,7 +108,7 @@ func (vm *vm) handleI32Load8U(frame *callFrame) error {
 
 func (vm *vm) handleI32Load16S(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint16(offset, index)
@@ -121,7 +121,7 @@ func (vm *vm) handleI32Load16S(frame *callFrame) error {
 
 func (vm *vm) handleI32Load16U(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint16(offset, index)
@@ -134,7 +134,7 @@ func (vm *vm) handleI32Load16U(frame *callFrame) error {
 
 func (vm *vm) handleI64Load8S(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadByte(offset, index)
@@ -147,7 +147,7 @@ func (vm *vm) handleI64Load8S(frame *callFrame) error {
 
 func (vm *vm) handleI64Load8U(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadByte(offset, index)
@@ -160,7 +160,7 @@ func (vm *vm) handleI64Load8U(frame *callFrame) error {
 
 func (vm *vm) handleI64Load16S(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint16(offset, index)
@@ -173,7 +173,7 @@ func (vm *vm) handleI64Load16S(frame *callFrame) error {
 
 func (vm *vm) handleI64Load16U(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint16(offset, index)
@@ -186,7 +186,7 @@ func (vm *vm) handleI64Load16U(frame *callFrame) error {
 
 func (vm *vm) handleI64Load32S(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint32(offset, index)
@@ -199,7 +199,7 @@ func (vm *vm) handleI64Load32S(frame *callFrame) error {
 
 func (vm *vm) handleI64Load32U(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadUint32(offset, index)
@@ -213,7 +213,7 @@ func (vm *vm) handleI64Load32U(frame *callFrame) error {
 func (vm *vm) handleI32Store(frame *callFrame) error {
 	val := uint32(vm.stack.popInt32())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint32(offset, index, val)
@@ -222,7 +222,7 @@ func (vm *vm) handleI32Store(frame *callFrame) error {
 func (vm *vm) handleI64Store(frame *callFrame) error {
 	val := uint64(vm.stack.popInt64())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint64(offset, index, val)
@@ -231,7 +231,7 @@ func (vm *vm) handleI64Store(frame *callFrame) error {
 func (vm *vm) handleF32Store(frame *callFrame) error {
 	val := math.Float32bits(vm.stack.popFloat32())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint32(offset, index, val)
@@ -240,7 +240,7 @@ func (vm *vm) handleF32Store(frame *callFrame) error {
 func (vm *vm) handleF64Store(frame *callFrame) error {
 	val := math.Float64bits(vm.stack.popFloat64())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint64(offset, index, val)
@@ -249,7 +249,7 @@ func (vm *vm) handleF64Store(frame *callFrame) error {
 func (vm *vm) handleI32Store8(frame *callFrame) error {
 	val := byte(vm.stack.popInt32())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreByte(offset, index, val)
@@ -258,7 +258,7 @@ func (vm *vm) handleI32Store8(frame *callFrame) error {
 func (vm *vm) handleI32Store16(frame *callFrame) error {
 	val := uint16(vm.stack.popInt32())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint16(offset, index, val)
@@ -267,7 +267,7 @@ func (vm *vm) handleI32Store16(frame *callFrame) error {
 func (vm *vm) handleI64Store8(frame *callFrame) error {
 	val := byte(vm.stack.popInt64())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreByte(offset, index, val)
@@ -276,7 +276,7 @@ func (vm *vm) handleI64Store8(frame *callFrame) error {
 func (vm *vm) handleI64Store16(frame *callFrame) error {
 	val := uint16(vm.stack.popInt64())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint16(offset, index, val)
@@ -285,130 +285,10 @@ func (vm *vm) handleI64Store16(frame *callFrame) error {
 func (vm *vm) handleI64Store32(frame *callFrame) error {
 	val := uint32(vm.stack.popInt64())
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreUint32(offset, index, val)
-}
-
-func (vm *vm) handleI32Eq() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a == b))
-}
-
-func (vm *vm) handleI32Ne() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a != b))
-}
-
-func (vm *vm) handleI32LtS() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a < b))
-}
-
-func (vm *vm) handleI32LtU() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(uint32(a) < uint32(b)))
-}
-
-func (vm *vm) handleI32GtS() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a > b))
-}
-
-func (vm *vm) handleI32GtU() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(uint32(a) > uint32(b)))
-}
-
-func (vm *vm) handleI32LeS() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a <= b))
-}
-
-func (vm *vm) handleI32LeU() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(uint32(a) <= uint32(b)))
-}
-
-func (vm *vm) handleI32GeS() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(a >= b))
-}
-
-func (vm *vm) handleI32GeU() {
-	b := vm.stack.popInt32()
-	a := vm.stack.popInt32()
-	vm.stack.pushInt32(boolToInt32(uint32(a) >= uint32(b)))
-}
-
-func (vm *vm) handleI64Eq() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a == b))
-}
-
-func (vm *vm) handleI64Ne() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a != b))
-}
-
-func (vm *vm) handleI64LtS() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a < b))
-}
-
-func (vm *vm) handleI64LtU() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(uint64(a) < uint64(b)))
-}
-
-func (vm *vm) handleI64GtS() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a > b))
-}
-
-func (vm *vm) handleI64GtU() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(uint64(a) > uint64(b)))
-}
-
-func (vm *vm) handleI64LeS() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a <= b))
-}
-
-func (vm *vm) handleI64LeU() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(uint64(a) <= uint64(b)))
-}
-
-func (vm *vm) handleI64GeS() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(a >= b))
-}
-
-func (vm *vm) handleI64GeU() {
-	b := vm.stack.popInt64()
-	a := vm.stack.popInt64()
-	vm.stack.pushInt32(boolToInt32(uint64(a) >= uint64(b)))
 }
 
 func (vm *vm) handleF32Eq() {
@@ -744,7 +624,7 @@ func (vm *vm) handleI8x16Shuffle(frame *callFrame) {
 
 func (vm *vm) handleV128Load(frame *callFrame) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	v, err := memory.LoadV128(offset, index)
@@ -758,7 +638,7 @@ func (vm *vm) handleV128Load(frame *callFrame) error {
 func (vm *vm) handleV128Store(frame *callFrame) error {
 	val := vm.stack.popV128()
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.StoreV128(offset, index, val)
@@ -1655,7 +1535,7 @@ func (vm *vm) handleF64x2ReplaceLane(frame *callFrame) {
 
 func (vm *vm) memGet(frame *callFrame, size uint32) ([]byte, error) {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	index := uint32(vm.stack.popInt32())
 	return memory.Get(offset, index, size)
@@ -1663,7 +1543,7 @@ func (vm *vm) memGet(frame *callFrame, size uint32) ([]byte, error) {
 
 func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()
@@ -1680,7 +1560,7 @@ func (vm *vm) handleSimdLoadLane(frame *callFrame, laneSize uint32) error {
 
 func (vm *vm) handleSimdStoreLane(frame *callFrame, laneSize uint32) error {
 	frame.pc++ // skip align (unused at runtime)
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	offset := uint32(frame.next())
 	laneIndex := uint32(frame.next())
 	v := vm.stack.popV128()

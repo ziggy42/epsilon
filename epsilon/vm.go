@@ -35,15 +35,13 @@ const (
 	localsCacheSlotSize       = 12 // Locals slot size per call frame.
 )
 
-// store represents all global state that can be manipulated by the vm. It
-// consists of the runtime representation of all instances of functions, tables,
-// memories, globals, element segments, and data segments that have been
-// allocated during the vm life time.
+// store holds the vm-wide state that must be addressable by index across module
+// boundaries: the function index space (call, ref.func, and table elements hold
+// store indices) and the element/data segment instances. Tables, memories, and
+// globals need no cross-module index space, so their instances are held
+// directly by the ModuleInstances that use them.
 type store struct {
 	funcs    []FunctionInstance
-	tables   []*Table
-	memories []*Memory
-	globals  []*Global
 	elements []elementInstance
 	datas    []dataInstance
 }
@@ -124,85 +122,60 @@ func (vm *vm) instantiate(
 	if err := validator.validateModule(module); err != nil {
 		return nil, err
 	}
-	moduleInstance := &ModuleInstance{types: module.types, vm: vm}
+	instance := &ModuleInstance{types: module.types, vm: vm}
 
-	resolvedImports, err := resolveImports(module, moduleInstance, imports)
+	resolvedImports, err := resolveImports(module, instance, imports)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, functionInstance := range resolvedImports.functions {
-		storeIndex := uint32(len(vm.store.funcs))
-		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
+		instance.funcAddrs = append(instance.funcAddrs, uint32(len(vm.store.funcs)))
 		vm.store.funcs = append(vm.store.funcs, functionInstance)
 	}
 
 	for _, function := range module.funcs {
 		storeIndex := uint32(len(vm.store.funcs))
-		funType := module.types[function.typeIndex]
 		wasmFunc := &wasmFunction{
-			functionType: funType,
-			module:       moduleInstance,
+			functionType: module.types[function.typeIndex],
+			module:       instance,
 			code:         function,
 		}
-		moduleInstance.funcAddrs = append(moduleInstance.funcAddrs, storeIndex)
+		instance.funcAddrs = append(instance.funcAddrs, storeIndex)
 		vm.store.funcs = append(vm.store.funcs, wasmFunc)
 	}
 
-	for _, table := range resolvedImports.tables {
-		storeIndex := uint32(len(vm.store.tables))
-		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
-		vm.store.tables = append(vm.store.tables, table)
-	}
-
+	instance.tables = append(instance.tables, resolvedImports.tables...)
 	for _, tableType := range module.tables {
-		storeIndex := uint32(len(vm.store.tables))
-		table := newTable(vm, tableType)
-		moduleInstance.tableAddrs = append(moduleInstance.tableAddrs, storeIndex)
-		vm.store.tables = append(vm.store.tables, table)
+		instance.tables = append(instance.tables, newTable(vm, tableType))
 	}
 
-	for _, memory := range resolvedImports.memories {
-		storeIndex := uint32(len(vm.store.memories))
-		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
-		vm.store.memories = append(vm.store.memories, memory)
-	}
-
+	instance.memories = append(instance.memories, resolvedImports.memories...)
 	for _, memoryType := range module.memories {
-		storeIndex := uint32(len(vm.store.memories))
-		memory := newMemory(vm, memoryType)
-		moduleInstance.memAddrs = append(moduleInstance.memAddrs, storeIndex)
-		vm.store.memories = append(vm.store.memories, memory)
+		instance.memories = append(instance.memories, newMemory(vm, memoryType))
 	}
 
-	for _, global := range resolvedImports.globals {
-		storeIndex := uint32(len(vm.store.globals))
-		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
-		vm.store.globals = append(vm.store.globals, global)
-	}
-
+	instance.globals = append(instance.globals, resolvedImports.globals...)
 	for _, variable := range module.globalVariables {
 		valueType := variable.globalType.ValueType
 		initExpression := variable.initExpression
-		val, err := vm.invokeExpression(initExpression, valueType, moduleInstance)
+		val, err := vm.invokeExpression(initExpression, valueType, instance)
 		if err != nil {
 			return nil, err
 		}
 
-		storeIndex := uint32(len(vm.store.globals))
-		moduleInstance.globalAddrs = append(moduleInstance.globalAddrs, storeIndex)
 		global := newGlobal(vm, val, variable.globalType.IsMutable, valueType)
-		vm.store.globals = append(vm.store.globals, global)
+		instance.globals = append(instance.globals, global)
 	}
 
 	for _, segment := range module.elementSegments {
-		instance, err := vm.newElementInstance(segment, moduleInstance)
+		elem, err := vm.newElementInstance(segment, instance)
 		if err != nil {
 			return nil, err
 		}
 		storeIndex := uint32(len(vm.store.elements))
-		moduleInstance.elemAddrs = append(moduleInstance.elemAddrs, storeIndex)
-		vm.store.elements = append(vm.store.elements, instance)
+		instance.elemAddrs = append(instance.elemAddrs, storeIndex)
+		vm.store.elements = append(vm.store.elements, elem)
 	}
 
 	// Apply active element segments to their target tables, then drop them.
@@ -211,9 +184,9 @@ func (vm *vm) instantiate(
 		if segment.mode == passiveElementMode {
 			continue
 		}
-		elem := &vm.store.elements[moduleInstance.elemAddrs[i]]
+		elem := &vm.store.elements[instance.elemAddrs[i]]
 		if segment.mode == activeElementMode {
-			err := vm.applyActiveElementSegment(segment, elem, moduleInstance)
+			err := vm.applyActiveElementSegment(segment, elem, instance)
 			if err != nil {
 				return nil, err
 			}
@@ -226,8 +199,7 @@ func (vm *vm) instantiate(
 	// data.drop nils the instance's slice header, never the backing array, so the
 	// moduleDefinition is left untouched and can be reinstantiated.
 	for _, segment := range module.dataSegments {
-		storeIndex := uint32(len(vm.store.datas))
-		moduleInstance.dataAddrs = append(moduleInstance.dataAddrs, storeIndex)
+		instance.dataAddrs = append(instance.dataAddrs, uint32(len(vm.store.datas)))
 		data := dataInstance{content: segment.content}
 		vm.store.datas = append(vm.store.datas, data)
 	}
@@ -239,8 +211,8 @@ func (vm *vm) instantiate(
 		if segment.mode != activeDataMode {
 			continue
 		}
-		data := &vm.store.datas[moduleInstance.dataAddrs[i]]
-		err := vm.applyActiveDataSegment(segment, data, moduleInstance)
+		data := &vm.store.datas[instance.dataAddrs[i]]
+		err := vm.applyActiveDataSegment(segment, data, instance)
 		if err != nil {
 			return nil, err
 		}
@@ -248,15 +220,14 @@ func (vm *vm) instantiate(
 	}
 
 	if module.startIndex != nil {
-		storeFunctionIndex := moduleInstance.funcAddrs[*module.startIndex]
-		function := vm.store.funcs[storeFunctionIndex]
+		function := vm.store.funcs[instance.funcAddrs[*module.startIndex]]
 		if err := vm.invokeFunction(function); err != nil {
 			return nil, err
 		}
 	}
 
-	moduleInstance.exports = vm.resolveExports(module, moduleInstance)
-	return moduleInstance, nil
+	instance.exports = vm.resolveExports(module, instance)
+	return instance, nil
 }
 
 func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
@@ -351,7 +322,11 @@ func (vm *vm) invokeWasmFunction(function *wasmFunction) error {
 }
 
 func (vm *vm) runLoop(frame *callFrame) error {
-	bodyLen := uint32(len(frame.function.body))
+	// The local body slice lets the opcode fetch skip the frame.function
+	// indirection: unlike frame fields, the compiler knows a local cannot be
+	// mutated by the handler calls, so it stays register/stack-resident.
+	body := frame.function.body
+	bodyLen := uint32(len(body))
 	// Checking a cached flag per instruction is cheaper than the duplicated
 	// dispatch loop it would take to hoist it: the branch predicts perfectly.
 	fuelOn := vm.config.EnableFuel
@@ -362,7 +337,8 @@ func (vm *vm) runLoop(frame *callFrame) error {
 			}
 			vm.fuel--
 		}
-		op := opcode(frame.next())
+		op := opcode(body[frame.pc])
+		frame.pc++
 		var err error
 		// Using a switch instead of a map of opcode -> Handler is
 		// significantly faster.
@@ -477,47 +453,95 @@ func (vm *vm) runLoop(frame *callFrame) error {
 		case i32Eqz:
 			vm.stack.pushInt32(boolToInt32(vm.stack.popInt32() == 0))
 		case i32Eq:
-			vm.handleI32Eq()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() == b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32Ne:
-			vm.handleI32Ne()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() != b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LtS:
-			vm.handleI32LtS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() < b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LtU:
-			vm.handleI32LtU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) < uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GtS:
-			vm.handleI32GtS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() > b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GtU:
-			vm.handleI32GtU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) > uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LeS:
-			vm.handleI32LeS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() <= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32LeU:
-			vm.handleI32LeU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) <= uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GeS:
-			vm.handleI32GeS()
+			b := vm.stack.popInt32()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int32() >= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i32GeU:
-			vm.handleI32GeU()
+			b := vm.stack.popInt32()
+			a := vm.stack.data[len(vm.stack.data)-1].int32()
+			res := boolToInt32(uint32(a) >= uint32(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64Eqz:
 			vm.stack.pushInt32(boolToInt32(vm.stack.popInt64() == 0))
 		case i64Eq:
-			vm.handleI64Eq()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() == b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64Ne:
-			vm.handleI64Ne()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() != b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LtS:
-			vm.handleI64LtS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() < b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LtU:
-			vm.handleI64LtU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) < uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GtS:
-			vm.handleI64GtS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() > b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GtU:
-			vm.handleI64GtU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) > uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LeS:
-			vm.handleI64LeS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() <= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64LeU:
-			vm.handleI64LeU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) <= uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GeS:
-			vm.handleI64GeS()
+			b := vm.stack.popInt64()
+			res := boolToInt32(vm.stack.data[len(vm.stack.data)-1].int64() >= b)
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case i64GeU:
-			vm.handleI64GeU()
+			b := vm.stack.popInt64()
+			a := vm.stack.data[len(vm.stack.data)-1].int64()
+			res := boolToInt32(uint64(a) >= uint64(b))
+			vm.stack.data[len(vm.stack.data)-1] = i32(res)
 		case f32Eq:
 			vm.handleF32Eq()
 		case f32Ne:
@@ -1439,7 +1463,7 @@ func (vm *vm) handleCall(frame *callFrame) error {
 
 func (vm *vm) handleCallIndirect(frame *callFrame) error {
 	expectedType := frame.module.types[frame.next()]
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 
 	elementIndex := vm.stack.popInt32()
 
@@ -1473,17 +1497,17 @@ func (vm *vm) handleSelect() {
 }
 
 func (vm *vm) handleGlobalGet(frame *callFrame) {
-	global := vm.getGlobal(frame, frame.next())
+	global := frame.module.globals[frame.next()]
 	vm.stack.push(global.value)
 }
 
 func (vm *vm) handleGlobalSet(frame *callFrame) {
-	global := vm.getGlobal(frame, frame.next())
+	global := frame.module.globals[frame.next()]
 	global.value = vm.stack.pop()
 }
 
 func (vm *vm) handleTableGet(frame *callFrame) error {
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	index := vm.stack.popInt32()
 
 	element, err := table.Get(index)
@@ -1496,19 +1520,19 @@ func (vm *vm) handleTableGet(frame *callFrame) error {
 }
 
 func (vm *vm) handleTableSet(frame *callFrame) error {
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	reference := vm.stack.popInt32()
 	index := vm.stack.popInt32()
 	return table.Set(index, reference)
 }
 
 func (vm *vm) handleMemorySize(frame *callFrame) {
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	vm.stack.pushInt32(memory.Size())
 }
 
 func (vm *vm) handleMemoryGrow(frame *callFrame) {
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	pages := vm.stack.popInt32()
 	oldSize := memory.Grow(pages)
 	vm.stack.pushInt32(oldSize)
@@ -1526,7 +1550,7 @@ func (vm *vm) handleRefIsNull() {
 
 func (vm *vm) handleMemoryInit(frame *callFrame) error {
 	data := vm.getData(frame, frame.next())
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	n, s, d := vm.stack.pop3Int32()
 	return memory.Init(uint32(n), uint32(s), uint32(d), data.content)
 }
@@ -1537,21 +1561,21 @@ func (vm *vm) handleDataDrop(frame *callFrame) {
 }
 
 func (vm *vm) handleMemoryCopy(frame *callFrame) error {
-	destMemory := vm.getMemory(frame, frame.next())
-	srcMemory := vm.getMemory(frame, frame.next())
+	destMemory := frame.module.memories[frame.next()]
+	srcMemory := frame.module.memories[frame.next()]
 	n, s, d := vm.stack.pop3Int32()
 	return srcMemory.Copy(destMemory, uint32(n), uint32(s), uint32(d))
 }
 
 func (vm *vm) handleMemoryFill(frame *callFrame) error {
-	memory := vm.getMemory(frame, frame.next())
+	memory := frame.module.memories[frame.next()]
 	n, val, offset := vm.stack.pop3Int32()
 	return memory.Fill(uint32(n), uint32(offset), byte(val))
 }
 
 func (vm *vm) handleTableInit(frame *callFrame) error {
 	element := vm.getElement(frame, frame.next())
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	n, s, d := vm.stack.pop3Int32()
 	// element.functionIndexes is nil for dropped, active, and declarative
 	// segments; only passive segments retain their entries until elem.drop.
@@ -1564,26 +1588,26 @@ func (vm *vm) handleElemDrop(frame *callFrame) {
 }
 
 func (vm *vm) handleTableCopy(frame *callFrame) error {
-	destTable := vm.getTable(frame, frame.next())
-	srcTable := vm.getTable(frame, frame.next())
+	destTable := frame.module.tables[frame.next()]
+	srcTable := frame.module.tables[frame.next()]
 	n, s, d := vm.stack.pop3Int32()
 	return srcTable.Copy(destTable, n, s, d)
 }
 
 func (vm *vm) handleTableGrow(frame *callFrame) {
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	n := vm.stack.popInt32()
 	val := vm.stack.popInt32()
 	vm.stack.pushInt32(table.Grow(n, val))
 }
 
 func (vm *vm) handleTableSize(frame *callFrame) {
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	vm.stack.pushInt32(int32(table.Size()))
 }
 
 func (vm *vm) handleTableFill(frame *callFrame) error {
-	table := vm.getTable(frame, frame.next())
+	table := frame.module.tables[frame.next()]
 	n, val, i := vm.stack.pop3Int32()
 	return table.Fill(n, i, val)
 }
@@ -1633,14 +1657,11 @@ func (vm *vm) resolveExports(
 			storeIndex := instance.funcAddrs[export.index]
 			value = vm.store.funcs[storeIndex]
 		case globalExportKind:
-			storeIndex := instance.globalAddrs[export.index]
-			value = vm.store.globals[storeIndex]
+			value = instance.globals[export.index]
 		case memoryExportKind:
-			storeIndex := instance.memAddrs[export.index]
-			value = vm.store.memories[storeIndex]
+			value = instance.memories[export.index]
 		case tableExportKind:
-			storeIndex := instance.tableAddrs[export.index]
-			value = vm.store.tables[storeIndex]
+			value = instance.tables[export.index]
 		}
 		exports = append(exports, exportInstance{name: export.name, value: value})
 	}
@@ -1706,7 +1727,7 @@ func (vm *vm) applyActiveElementSegment(
 	if err != nil {
 		return err
 	}
-	table := vm.store.tables[moduleInstance.tableAddrs[segment.tableIndex]]
+	table := moduleInstance.tables[segment.tableIndex]
 	return table.InitFromSlice(offsetVal.int32(), elem.functionIndexes)
 }
 
@@ -1720,7 +1741,7 @@ func (vm *vm) applyActiveDataSegment(
 	if err != nil {
 		return err
 	}
-	memory := vm.store.memories[moduleInstance.memAddrs[segment.memoryIndex]]
+	memory := moduleInstance.memories[segment.memoryIndex]
 	return memory.Set(uint32(offsetVal.int32()), 0, data.content)
 }
 
@@ -1754,21 +1775,6 @@ func toStoreFuncIndexes(
 		storeIndices[i] = int32(moduleInstance.funcAddrs[localIndex])
 	}
 	return storeIndices
-}
-
-func (vm *vm) getTable(frame *callFrame, localIndex uint64) *Table {
-	tableIndex := frame.module.tableAddrs[localIndex]
-	return vm.store.tables[tableIndex]
-}
-
-func (vm *vm) getMemory(frame *callFrame, localIndex uint64) *Memory {
-	memoryIndex := frame.module.memAddrs[localIndex]
-	return vm.store.memories[memoryIndex]
-}
-
-func (vm *vm) getGlobal(frame *callFrame, localIndex uint64) *Global {
-	globalIndex := frame.module.globalAddrs[localIndex]
-	return vm.store.globals[globalIndex]
 }
 
 func (vm *vm) getElement(frame *callFrame, localIndex uint64) *elementInstance {
