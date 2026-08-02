@@ -555,3 +555,45 @@ func TestParseCustomSectionDoesNotReadPastPayload(t *testing.T) {
 		)
 	}
 }
+
+func TestReadOpcodeRejectsNamespaceAliasing(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded []byte
+		want    opcode
+		wantErr error
+	}{
+		{
+			name:    "FC cannot alias FD",
+			encoded: []byte{0xFC, 0x80, 0x02},
+			wantErr: errPrefixedOpcodeOutOfRange,
+		},
+		{
+			name: "FD cannot wrap to a single-byte opcode",
+			encoded: []byte{
+				0xFD, 0x80, 0x86, 0xFC, 0xFF, 0x0F,
+			},
+			wantErr: errPrefixedOpcodeOutOfRange,
+		},
+		{
+			name:    "largest representable subopcode",
+			encoded: []byte{0xFD, 0xFF, 0x01},
+			want:    f64x2ConvertLowI32x4U,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := newParser(
+				bytes.NewReader(test.encoded),
+				DefaultConfig(),
+			).readOpcode()
+			if err != test.wantErr {
+				t.Fatalf("expected error %v, got %v", test.wantErr, err)
+			}
+			if got != test.want {
+				t.Fatalf("expected opcode %#x, got %#x", test.want, got)
+			}
+		})
+	}
+}

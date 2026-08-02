@@ -39,6 +39,7 @@ var (
 	errInvalidUTF8               = errors.New("invalid UTF-8")
 	errMalformedMemopFlags       = errors.New("malformed memop flags")
 	errMissingEndOpcode          = errors.New("missing end opcode")
+	errPrefixedOpcodeOutOfRange  = errors.New("prefixed opcode out of range")
 	errSectionSizeMismatch       = errors.New("section size mismatch")
 	errUnexpectedContent         = errors.New("unexpected content after last section")
 )
@@ -1217,24 +1218,19 @@ func (p *parser) readOpcode() (opcode, error) {
 	}
 
 	// Multi-byte opcode (prefixed with 0xFC or 0xFD).
+	if opcodeByte != 0xFC && opcodeByte != 0xFD {
+		return 0, fmt.Errorf("unrecognized opcode prefix: 0x%X", opcodeByte)
+	}
+
 	val, err := p.readUint32()
 	if err != nil {
 		return 0, err
 	}
-
-	var compositeOpcode uint32
-	switch opcodeByte {
-	case 0xFC:
-		compositeOpcode = 0xFC00 + uint32(val)
-	case 0xFD:
-		compositeOpcode = 0xFD00 + uint32(val)
-	default:
-		// This case should ideally not be reached if opcodeByte is guaranteed to be
-		// < 0xFC or 0xFD. However, as a safeguard, we can return an error.
-		return 0, fmt.Errorf("unrecognized opcode prefix: 0x%X", opcodeByte)
+	if val > math.MaxUint8 {
+		return 0, errPrefixedOpcodeOutOfRange
 	}
 
-	return opcode(compositeOpcode), nil
+	return opcode(uint32(opcodeByte)<<8 | uint32(val)), nil
 }
 
 func (p *parser) readImmediateVector() ([]uint64, error) {
