@@ -156,7 +156,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	var elementSegments []elementSegment
 	var globals []globalVariable
 	var dataSegments []dataSegment
-	var dataCount *uint64
+	var dataCount *uint32
 
 	// We initialize lastSection to CustomSectionId since custom sections
 	// can be in any order.
@@ -249,7 +249,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 				return nil, err
 			}
 		case dataCountSectionId:
-			count, err := p.parseUint64()
+			count, err := p.parseUint32()
 			if err != nil {
 				return nil, err
 			}
@@ -265,7 +265,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 		p.bytesRemaining = -1
 	}
 
-	if dataCount != nil && *dataCount != uint64(len(dataSegments)) {
+	if dataCount != nil && uint64(*dataCount) != uint64(len(dataSegments)) {
 		return nil, errInconsistentDataCount
 	}
 

@@ -88,7 +88,7 @@ type validator struct {
 	globalTypes         []GlobalType
 	importedTypes       []GlobalType // Only includes imported globals.
 	elemTypes           []ReferenceType
-	dataCount           *uint64
+	dataCount           *uint32
 	referencedFunctions map[uint32]bool
 	config              Config
 	code                []uint64
@@ -1056,7 +1056,7 @@ func (v *validator) validateMemoryInit() error {
 		return errDataCountNotSet
 	}
 
-	if dataIndex >= uint32(*v.dataCount) {
+	if dataIndex >= *v.dataCount {
 		return errDataIndexOutOfBounds
 	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1296,7 +1296,7 @@ func (v *validator) validateDataDrop() error {
 	}
 
 	dataIndex := uint32(v.next())
-	if dataIndex >= uint32(*v.dataCount) {
+	if dataIndex >= *v.dataCount {
 		return errDataIndexOutOfBounds
 	}
 	return nil

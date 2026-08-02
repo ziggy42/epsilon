@@ -145,5 +145,5 @@ type moduleDefinition struct {
 	elementSegments []elementSegment
 	globalVariables []globalVariable
 	dataSegments    []dataSegment
-	dataCount       *uint64
+	dataCount       *uint32
 }
