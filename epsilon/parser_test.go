@@ -494,6 +494,81 @@ func TestReadUleb128(t *testing.T) {
 	}
 }
 
+func TestReadCodeDecodesLaneIndexesAsBytes(t *testing.T) {
+	shuffleEncoded := []byte{0xfd, 0x0d}
+	shuffleEncoded = append(
+		shuffleEncoded,
+		bytes.Repeat([]byte{0x80}, 16)...,
+	)
+	shuffleEncoded = append(shuffleEncoded, byte(end))
+	shuffleBytecode := []uint64{uint64(i8x16Shuffle)}
+	for range 16 {
+		shuffleBytecode = append(shuffleBytecode, 0x80)
+	}
+	shuffleBytecode = append(shuffleBytecode, uint64(end))
+
+	tests := []struct {
+		name     string
+		encoded  []byte
+		bytecode []uint64
+	}{
+		{
+			name: "extract lane",
+			encoded: []byte{
+				0xfd, 0x15, 0x80, byte(unreachable), byte(end),
+			},
+			bytecode: []uint64{
+				uint64(i8x16ExtractLaneS),
+				0x80,
+				uint64(unreachable),
+				uint64(end),
+			},
+		},
+		{
+			name: "load lane",
+			encoded: []byte{
+				0xfd, 0x54,
+				0x00,
+				0x00,
+				0x80,
+				byte(unreachable),
+				byte(end),
+			},
+			bytecode: []uint64{
+				uint64(v128Load8Lane),
+				0,
+				0,
+				0,
+				0x80,
+				uint64(unreachable),
+				uint64(end),
+			},
+		},
+		{
+			name:     "shuffle",
+			encoded:  shuffleEncoded,
+			bytecode: shuffleBytecode,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := newParser(bytes.NewReader(test.encoded), DefaultConfig())
+			result, err := parser.readCode(uint32(len(test.encoded)), nil)
+			if err != nil {
+				t.Fatalf("readCode failed: %v", err)
+			}
+			if !slices.Equal(result.bytecode, test.bytecode) {
+				t.Fatalf(
+					"expected bytecode %v, got %v",
+					test.bytecode,
+					result.bytecode,
+				)
+			}
+		})
+	}
+}
+
 func TestParseImportMemory(t *testing.T) {
 	wat := `(module (import "module" "memory" (memory 1)))`
 

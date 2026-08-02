@@ -1028,8 +1028,13 @@ func (p *parser) readCode(
 			tableSize,
 			tableFill,
 			refNull,
-			refFunc,
-			i8x16ExtractLaneS,
+			refFunc:
+			immediate, err := p.readUint32()
+			if err != nil {
+				return bytecodeResult{}, err
+			}
+			bytecode = append(bytecode, immediate)
+		case i8x16ExtractLaneS,
 			i8x16ExtractLaneU,
 			i16x8ExtractLaneS,
 			i16x8ExtractLaneU,
@@ -1043,11 +1048,11 @@ func (p *parser) readCode(
 			i64x2ReplaceLane,
 			f32x4ReplaceLane,
 			f64x2ReplaceLane:
-			immediate, err := p.readUint32()
+			immediate, err := p.ReadByte()
 			if err != nil {
 				return bytecodeResult{}, err
 			}
-			bytecode = append(bytecode, immediate)
+			bytecode = append(bytecode, uint64(immediate))
 		case memorySize, memoryGrow:
 			immediate, err := p.ReadByte()
 			if err != nil {
@@ -1171,14 +1176,20 @@ func (p *parser) readCode(
 				return bytecodeResult{}, err
 			}
 
-			laneIndex, err := p.readUint8()
+			laneIndex, err := p.ReadByte()
 			if err != nil {
 				return bytecodeResult{}, err
 			}
-			bytecode = append(bytecode, align, memoryIndex, offset, laneIndex)
+			bytecode = append(
+				bytecode,
+				align,
+				memoryIndex,
+				offset,
+				uint64(laneIndex),
+			)
 		case i8x16Shuffle:
 			for range 16 {
-				val, err := p.readUint8()
+				val, err := p.ReadByte()
 				if err != nil {
 					return bytecodeResult{}, err
 				}
@@ -1329,19 +1340,6 @@ func (p *parser) readInt32() (uint64, error) {
 		return 0, err
 	}
 	if int64(val) < math.MinInt32 || int64(val) > math.MaxInt32 {
-		return 0, errIntegerTooLarge
-	}
-	return val, nil
-}
-
-// readUint8 still returns a uint64, but checks that the value can be
-// interpreted as a WASM u8.
-func (p *parser) readUint8() (uint64, error) {
-	val, err := p.readUleb128(32)
-	if err != nil {
-		return 0, err
-	}
-	if val > math.MaxUint8 {
 		return 0, errIntegerTooLarge
 	}
 	return val, nil
