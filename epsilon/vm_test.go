@@ -788,6 +788,34 @@ func TestExecuteLoadOutOfBoundsTraps(t *testing.T) {
 	}
 }
 
+func TestInvokeRestoresStackAfterTrap(t *testing.T) {
+	wat := `(module
+		(func (export "trap") (param i32) (result i32)
+			local.get 0
+			unreachable)
+		(func (export "succeed") (result i32)
+			i32.const 42))`
+	moduleInstance, err := instantiate(wat, nil, nil)
+	if err != nil {
+		t.Fatalf("failed to create vm: %v", err)
+	}
+
+	if _, err := moduleInstance.Invoke("trap", int32(7)); err == nil {
+		t.Fatal("expected trap")
+	}
+	if got := moduleInstance.vm.stack.size(); got != 0 {
+		t.Fatalf("expected empty stack after trap, got height %d", got)
+	}
+
+	result, err := moduleInstance.Invoke("succeed")
+	if err != nil {
+		t.Fatalf("failed to invoke function after trap: %v", err)
+	}
+	if result[0] != int32(42) {
+		t.Fatalf("expected 42, got %v", result[0])
+	}
+}
+
 func TestFunctionImport(t *testing.T) {
 	wat := `(module
 		(import "module" "sum" (func $sum (param i32) (param i32) (result i32)))

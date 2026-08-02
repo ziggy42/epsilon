@@ -231,8 +231,10 @@ func (vm *vm) instantiate(
 }
 
 func (vm *vm) invoke(function FunctionInstance, args []any) ([]any, error) {
+	stackHeight := len(vm.stack.data)
 	vm.stack.pushAll(args)
 	if err := vm.invokeFunction(function); err != nil {
+		vm.stack.data = vm.stack.data[:stackHeight]
 		return nil, err
 	}
 	return vm.stack.popValueTypes(function.GetType().ResultTypes), nil
