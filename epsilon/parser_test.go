@@ -17,6 +17,7 @@ package epsilon
 import (
 	"bytes"
 	"io"
+	"math"
 	"reflect"
 	"slices"
 	"testing"
@@ -396,6 +397,98 @@ func TestParseElementRejectsOversizedIndexes(t *testing.T) {
 			).parseElementSegment()
 			if err != errIntegerTooLarge {
 				t.Fatalf("expected %v, got %v", errIntegerTooLarge, err)
+			}
+		})
+	}
+}
+
+func TestReadUleb128(t *testing.T) {
+	tests := []struct {
+		name     string
+		bitWidth uint
+		encoded  []byte
+		want     uint64
+		wantErr  error
+	}{
+		{
+			name:     "u32 maximum",
+			bitWidth: 32,
+			encoded:  []byte{0xff, 0xff, 0xff, 0xff, 0x0f},
+			want:     math.MaxUint32,
+		},
+		{
+			name:     "u32 padded zero",
+			bitWidth: 32,
+			encoded:  []byte{0x80, 0x80, 0x80, 0x80, 0x00},
+		},
+		{
+			name:     "u32 unused bits",
+			bitWidth: 32,
+			encoded:  []byte{0x80, 0x80, 0x80, 0x80, 0x10},
+			wantErr:  errIntegerTooLarge,
+		},
+		{
+			name:     "u32 continuation after last byte",
+			bitWidth: 32,
+			encoded:  []byte{0x80, 0x80, 0x80, 0x80, 0x80},
+			wantErr:  errIntRepresentationTooLong,
+		},
+		{
+			name:     "u64 maximum",
+			bitWidth: 64,
+			encoded: []byte{
+				0xff, 0xff, 0xff, 0xff, 0xff,
+				0xff, 0xff, 0xff, 0xff, 0x01,
+			},
+			want: math.MaxUint64,
+		},
+		{
+			name:     "u64 padded two",
+			bitWidth: 64,
+			encoded: []byte{
+				0x82, 0x80, 0x80, 0x80, 0x80,
+				0x80, 0x80, 0x80, 0x80, 0x00,
+			},
+			want: 2,
+		},
+		{
+			name:     "u64 unused low bits",
+			bitWidth: 64,
+			encoded: []byte{
+				0x82, 0x80, 0x80, 0x80, 0x80,
+				0x80, 0x80, 0x80, 0x80, 0x10,
+			},
+			wantErr: errIntegerTooLarge,
+		},
+		{
+			name:     "u64 unused high bits",
+			bitWidth: 64,
+			encoded: []byte{
+				0x82, 0x80, 0x80, 0x80, 0x80,
+				0x80, 0x80, 0x80, 0x80, 0x40,
+			},
+			wantErr: errIntegerTooLarge,
+		},
+		{
+			name:     "u64 continuation after last byte",
+			bitWidth: 64,
+			encoded: []byte{
+				0x80, 0x80, 0x80, 0x80, 0x80,
+				0x80, 0x80, 0x80, 0x80, 0x80,
+			},
+			wantErr: errIntRepresentationTooLong,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := newParser(bytes.NewReader(test.encoded), DefaultConfig())
+			got, err := parser.readUleb128(test.bitWidth)
+			if err != test.wantErr {
+				t.Fatalf("expected error %v, got %v", test.wantErr, err)
+			}
+			if got != test.want {
+				t.Fatalf("expected value %d, got %d", test.want, got)
 			}
 		})
 	}

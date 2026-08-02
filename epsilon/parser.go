@@ -841,18 +841,15 @@ func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 }
 
 func (p *parser) parseUint32() (uint32, error) {
-	val, err := p.readUleb128(5)
+	val, err := p.readUleb128(32)
 	if err != nil {
 		return 0, err
-	}
-	if val > math.MaxUint32 {
-		return 0, errIntegerTooLarge
 	}
 	return uint32(val), nil
 }
 
 func (p *parser) parseUint64() (uint64, error) {
-	return p.readUleb128(9)
+	return p.readUleb128(64)
 }
 
 func (p *parser) parseUtf8String() (string, error) {
@@ -1289,7 +1286,7 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 		}
 	}
 
-	offset, err := p.readUleb128(10)
+	offset, err := p.readUleb128(64)
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -1323,14 +1320,7 @@ func (p *parser) readBytes(n uint) ([]byte, error) {
 // readUint32 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u32.
 func (p *parser) readUint32() (uint64, error) {
-	val, err := p.readUleb128(5)
-	if err != nil {
-		return 0, err
-	}
-	if val > math.MaxUint32 {
-		return 0, errIntegerTooLarge
-	}
-	return val, nil
+	return p.readUleb128(32)
 }
 
 func (p *parser) readInt32() (uint64, error) {
@@ -1347,7 +1337,7 @@ func (p *parser) readInt32() (uint64, error) {
 // readUint8 still returns a uint64, but checks that the value can be
 // interpreted as a WASM u8.
 func (p *parser) readUint8() (uint64, error) {
-	val, err := p.readUleb128(5)
+	val, err := p.readUleb128(32)
 	if err != nil {
 		return 0, err
 	}
@@ -1358,17 +1348,23 @@ func (p *parser) readUint8() (uint64, error) {
 }
 
 // readUleb128 decodes an unsigned LEB128-encoded integer.
-func (p *parser) readUleb128(maxBytes int) (uint64, error) {
+func (p *parser) readUleb128(bitWidth uint) (uint64, error) {
 	var value uint64
-	for shift := uint(0); shift < uint(maxBytes)*7; shift += 7 {
+	maxBytes := (bitWidth + 6) / 7
+	for byteIndex := uint(0); byteIndex < maxBytes; byteIndex++ {
 		b, err := p.ReadByte()
 		if err != nil {
 			return 0, err
 		}
 
-		group := b & 0b01111111
+		shift := byteIndex * 7
+		group := b & payloadMask
+		remainingBits := bitWidth - shift
+		if remainingBits < 7 && uint(group) >= 1<<remainingBits {
+			return 0, errIntegerTooLarge
+		}
 		value |= uint64(group) << shift
-		if b&0b10000000 == 0 {
+		if b&continuationBit == 0 {
 			return value, nil
 		}
 	}
