@@ -26,6 +26,7 @@ var (
 	errDuplicateExport             = errors.New("duplicate export name")
 	errElseMustMatchIf             = errors.New("else must match if")
 	errGlobalIsImmutable           = errors.New("global is immutable")
+	errIllegalOpcode               = errors.New("illegal opcode")
 	errInvalidCallIndirectType     = errors.New("unknown type")
 	errInvalidConstantExpression   = errors.New("constant expression required")
 	errInvalidLimits               = errors.New("invalid limits")
@@ -37,6 +38,8 @@ var (
 	errInvalidTableType            = errors.New("type mismatch: table is not funcref")
 	errInvalidBlockType            = errors.New("invalid block type")
 	errMultipleMemoriesNotEnabled  = errors.New("multiple memories not enabled")
+	errDataCountSectionRequired    = errors.New("data count section required")
+	errZeroByteExpected            = errors.New("zero byte expected")
 	errReturnTypeNotSet            = errors.New("return type not set")
 	errSimdLaneIndexOutOfBounds    = errors.New("invalid lane index")
 	errStackHeightMismatch         = errors.New("type mismatch: stack height mismatch")
@@ -47,8 +50,8 @@ var (
 )
 
 // unknownIndex reports an index immediate that is out of range for the module
-// index space it addresses. The spec states these failures as "unknown <space>",
-// and several assertions name the offending index too.
+// index space it addresses, in the "unknown <space> <index>" form the spec
+// words these failures.
 func unknownIndex(space string, index uint64) error {
 	return fmt.Errorf("unknown %s %d", space, index)
 }
@@ -93,6 +96,7 @@ type validator struct {
 	importedTypes       []GlobalType // Only includes imported globals.
 	elemTypes           []ReferenceType
 	dataCount           *uint32
+	hasDataSegments     bool
 	referencedFunctions map[uint32]bool
 	config              Config
 	code                []uint64
@@ -210,6 +214,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 	}
 
 	v.dataCount = module.dataCount
+	v.hasDataSegments = len(module.dataSegments) > 0
 	for _, data := range module.dataSegments {
 		if err := v.validateDataSegment(&data); err != nil {
 			return err
@@ -382,7 +387,7 @@ func (v *validator) validateConstExpression(
 	return nil
 }
 
-// validateConstantOpcode reports whether op may appear in a constant
+// validateConstantOpcode rejects an opcode that may not appear in a constant
 // expression. Only an immutable imported global is in scope for global.get
 // there, so any other global index names one that does not exist yet.
 func (v *validator) validateConstantOpcode(op opcode) error {
@@ -399,6 +404,12 @@ func (v *validator) validateConstantOpcode(op opcode) error {
 
 	if isConstantOpcode(op) {
 		return nil
+	}
+
+	// A byte that is no instruction at all is illegal wherever it appears, not
+	// merely an instruction a constant expression may not use.
+	if err := v.validate(op); errors.Is(err, errIllegalOpcode) {
+		return err
 	}
 	return errInvalidConstantExpression
 }
@@ -697,7 +708,7 @@ func (v *validator) validate(op opcode) error {
 	case memoryFill:
 		return v.validateMemoryFill()
 	default:
-		return fmt.Errorf("unknown opcode %d", op)
+		return fmt.Errorf("%w %d", errIllegalOpcode, op)
 	}
 }
 
@@ -989,7 +1000,7 @@ func (v *validator) validateLoad(valueType ValueType, sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
@@ -1007,7 +1018,7 @@ func (v *validator) validateStore(valueType ValueType, sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
@@ -1037,7 +1048,7 @@ func (v *validator) validateMemArg(align uint64, nBytes uint32) error {
 func (v *validator) validateMemorySize() error {
 	memoryIndex := uint32(v.next())
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1050,7 +1061,7 @@ func (v *validator) validateMemorySize() error {
 func (v *validator) validateMemoryGrow() error {
 	memoryIndex := uint32(v.next())
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1309,10 +1320,18 @@ func (v *validator) validateDataDrop() error {
 	return v.validateDataSegmentExists(uint32(v.next()))
 }
 
-// validateDataSegmentExists reports whether the module declares the given data
-// segment. A module carrying no data count section declares none.
+// validateDataSegmentExists rejects a data segment the module does not
+// declare.
 func (v *validator) validateDataSegmentExists(dataIndex uint32) error {
-	if v.dataCount == nil || dataIndex >= *v.dataCount {
+	if v.dataCount == nil {
+		// A data section without the count section that must accompany it is
+		// malformed; a module carrying neither declares no segments at all.
+		if v.hasDataSegments {
+			return errDataCountSectionRequired
+		}
+		return unknownIndex("data segment", uint64(dataIndex))
+	}
+	if dataIndex >= *v.dataCount {
 		return unknownIndex("data segment", uint64(dataIndex))
 	}
 	return nil
@@ -1365,7 +1384,7 @@ func (v *validator) validateVectorScalar(scalar ValueType) error {
 func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
@@ -1390,7 +1409,7 @@ func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
 func (v *validator) validateSimdStoreLane(sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err

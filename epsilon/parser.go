@@ -26,23 +26,26 @@ import (
 )
 
 var (
-	errFunctionTypeMismatch      = errors.New("function type count mismatch")
-	errInconsistentDataCount     = errors.New("inconsistent data count")
+	errFunctionTypeMismatch      = errors.New("function and code section have inconsistent lengths")
+	errInconsistentDataCount     = errors.New("data count and data section have inconsistent lengths")
 	errIntRepresentationTooLong  = errors.New("integer representation too long")
 	errIntegerTooLarge           = errors.New("integer too large")
 	errInvalidElementKind        = errors.New("invalid element kind")
 	errInvalidFunctionTypePrefix = errors.New("invalid function type prefix")
-	errInvalidGlobalMutability   = errors.New("invalid global mutability")
-	errInvalidImportDescriptor   = errors.New("invalid import descriptor")
-	errInvalidLimitsFormat       = errors.New("invalid limits format")
-	errInvalidMagicNumber        = errors.New("invalid magic number")
-	errInvalidReferenceType      = errors.New("invalid reference type")
-	errInvalidUTF8               = errors.New("invalid UTF-8")
+	errInvalidGlobalMutability   = errors.New("malformed mutability")
+	errInvalidImportDescriptor   = errors.New("malformed import kind")
+	errInvalidMagicNumber        = errors.New("magic header not detected")
+	errInvalidReferenceType      = errors.New("malformed reference type")
+	errInvalidUTF8               = errors.New("malformed UTF-8 encoding")
 	errMalformedMemopFlags       = errors.New("malformed memop flags")
 	errMissingEndOpcode          = errors.New("missing end opcode")
+	errEndOpcodeExpected         = errors.New("END opcode expected")
 	errPrefixedOpcodeOutOfRange  = errors.New("prefixed opcode out of range")
 	errSectionSizeMismatch       = errors.New("section size mismatch")
 	errUnexpectedContent         = errors.New("unexpected content after last section")
+	errUnexpectedEnd             = errors.New("unexpected end")
+	errLengthOutOfBounds         = errors.New("length out of bounds")
+	errSectionTruncated          = errors.New("unexpected end of section or function")
 )
 
 const (
@@ -116,7 +119,7 @@ func newParser(reader io.Reader, config Config) *parser {
 
 func (p *parser) Read(bytes []byte) (int, error) {
 	if p.bytesRemaining == 0 {
-		return 0, io.EOF
+		return 0, errSectionTruncated
 	}
 	if p.bytesRemaining > 0 && int64(len(bytes)) > p.bytesRemaining {
 		bytes = bytes[:p.bytesRemaining]
@@ -125,18 +128,46 @@ func (p *parser) Read(bytes []byte) (int, error) {
 	if p.bytesRemaining > 0 {
 		p.bytesRemaining -= int64(n)
 	}
+	if err == io.EOF && n < len(bytes) {
+		return n, p.outOfInput()
+	}
 	return n, err
 }
 
 func (p *parser) ReadByte() (byte, error) {
 	if p.bytesRemaining == 0 {
-		return 0, io.EOF
+		return 0, errSectionTruncated
 	}
 	b, err := p.reader.ReadByte()
-	if err == nil && p.bytesRemaining > 0 {
+	if err == io.EOF {
+		return 0, p.outOfInput()
+	}
+	if err != nil {
+		return 0, err
+	}
+	if p.bytesRemaining > 0 {
 		p.bytesRemaining--
 	}
-	return b, err
+	return b, nil
+}
+
+// discardRemaining consumes whatever is left of the bounded region the parser
+// is reading. Reaching its end is the expected outcome here, not a failure.
+func (p *parser) discardRemaining() error {
+	_, err := io.Copy(io.Discard, p)
+	if err == errSectionTruncated {
+		return nil
+	}
+	return err
+}
+
+// outOfInput states why a read found no more input: bytes still owed to a
+// section mean the section declared a longer payload than the module holds.
+func (p *parser) outOfInput() error {
+	if p.bytesRemaining > 0 {
+		return errLengthOutOfBounds
+	}
+	return errUnexpectedEnd
 }
 
 // parse takes a byte slice and returns a Module.
@@ -164,12 +195,12 @@ func (p *parser) parse() (*moduleDefinition, error) {
 
 	for {
 		sectionIdByte, err := p.ReadByte()
-		if err == io.EOF {
+		if err == errUnexpectedEnd {
 			break
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to read section ID: %w", err)
+			return nil, err
 		}
 
 		sectionId := sectionId(sectionIdByte)
@@ -182,7 +213,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 
 		payloadLen, err := p.parseUint32()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read payload length: %w", err)
+			return nil, err
 		}
 
 		p.bytesRemaining = int64(payloadLen)
@@ -293,17 +324,24 @@ func (p *parser) parse() (*moduleDefinition, error) {
 }
 
 func (p *parser) parseHeader() error {
-	header := make([]byte, 8)
-	if _, err := io.ReadFull(p, header); err != nil {
+	// The magic number is checked before the version is read, so input too short
+	// to hold a header counts as truncated only while what it does hold still
+	// looks like WebAssembly.
+	magic := make([]byte, len(wasmMagicNumber))
+	if _, err := io.ReadFull(p, magic); err != nil {
 		return err
 	}
-
-	if !bytes.HasPrefix(header, []byte(wasmMagicNumber)) {
+	if !bytes.Equal(magic, []byte(wasmMagicNumber)) {
 		return errInvalidMagicNumber
 	}
-	version := int32(binary.LittleEndian.Uint32(header[4:8]))
+
+	versionBytes := make([]byte, 4)
+	if _, err := io.ReadFull(p, versionBytes); err != nil {
+		return err
+	}
+	version := int32(binary.LittleEndian.Uint32(versionBytes))
 	if version != supportedWasmVersion {
-		return fmt.Errorf("unsupported WASM version: %d", version)
+		return fmt.Errorf("unknown binary version %d", version)
 	}
 	return nil
 }
@@ -325,8 +363,7 @@ func (p *parser) parseCustomSection() error {
 	}
 
 	// Discard the remaining bytes of the section.
-	_, err = io.Copy(io.Discard, p)
-	return err
+	return p.discardRemaining()
 }
 
 func (p *parser) parseFunction() (function, error) {
@@ -337,7 +374,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	sectionBytesRemaining := p.bytesRemaining
 	if int64(size) > sectionBytesRemaining {
-		return function{}, io.ErrUnexpectedEOF
+		return function{}, errLengthOutOfBounds
 	}
 	p.bytesRemaining = int64(size)
 
@@ -366,17 +403,20 @@ func (p *parser) parseFunction() (function, error) {
 
 	result, err := p.readCode(size, nil)
 	if err != nil {
+		if err == errSectionTruncated && sectionBytesRemaining > int64(size) {
+			return function{}, errEndOpcodeExpected
+		}
 		return function{}, err
 	}
 
 	// Discard any bytes of the function body the parser didn't consume (e.g.
 	// trailing bytes after an early end opcode) so the underlying reader is
 	// positioned at the start of the next function.
-	if _, err := io.Copy(io.Discard, p); err != nil {
+	if err := p.discardRemaining(); err != nil {
 		return function{}, err
 	}
 	if p.bytesRemaining != 0 {
-		return function{}, io.ErrUnexpectedEOF
+		return function{}, errSectionTruncated
 	}
 	p.bytesRemaining = sectionBytesRemaining - int64(size)
 
@@ -414,7 +454,7 @@ func (p *parser) parseLocalVariables() (localEntry, error) {
 		return localEntry{}, err
 	}
 	if count > math.MaxInt32 {
-		return localEntry{}, fmt.Errorf("too many local variables: %d", count)
+		return localEntry{}, fmt.Errorf("too many locals %d", count)
 	}
 
 	valueType, err := p.parseValueType()
@@ -539,11 +579,11 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 }
 
 func (p *parser) parseFunctionType() (FunctionType, error) {
-	b, err := p.ReadByte()
+	prefix, err := p.readSleb128(1)
 	if err != nil {
 		return FunctionType{}, err
 	}
-	if b != 0x60 {
+	if int64(prefix) != -0x20 {
 		return FunctionType{}, errInvalidFunctionTypePrefix
 	}
 
@@ -637,7 +677,7 @@ func (p *parser) parseGlobalType() (GlobalType, error) {
 func (p *parser) parseElementSegment() (elementSegment, error) {
 	flags, err := p.parseUint32()
 	if err != nil {
-		return elementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
+		return elementSegment{}, err
 	}
 
 	switch flags {
@@ -802,26 +842,26 @@ func (p *parser) parseExpression() ([]uint64, error) {
 }
 
 func (p *parser) parseLimits() (Limits, error) {
-	b, err := p.ReadByte()
+	// The flags are a single-bit LEB128, so an over-long encoding or a value
+	// that does not fit is rejected as the malformed integer it is, before
+	// anything is read on its behalf.
+	flags, err := p.readUleb128(1)
 	if err != nil {
 		return Limits{}, err
 	}
+
 	min, err := p.parseUint32()
 	if err != nil {
 		return Limits{}, err
 	}
-	switch b {
-	case 0:
+	if flags == 0 {
 		return Limits{Min: min}, nil
-	case 1:
-		max, err := p.parseUint32()
-		if err != nil {
-			return Limits{}, err
-		}
-		return Limits{Min: min, Max: &max}, nil
-	default:
-		return Limits{}, errInvalidLimitsFormat
 	}
+	max, err := p.parseUint32()
+	if err != nil {
+		return Limits{}, err
+	}
+	return Limits{Min: min, Max: &max}, nil
 }
 
 func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
@@ -855,7 +895,7 @@ func (p *parser) parseUtf8String() (string, error) {
 	}
 	stringBytes, err := p.readN(uint64(length))
 	if err != nil {
-		return "", fmt.Errorf("failed to read string bytes: %w", err)
+		return "", err
 	}
 	if !utf8.Valid(stringBytes) {
 		return "", errInvalidUTF8
@@ -926,9 +966,10 @@ type bytecodeResult struct {
 // block/if to its branch targets.
 //
 // Decoding stops at the first instruction for which isEnd returns true; a nil
-// isEnd decodes until the reader reaches EOF, which a function body's bounded
-// reader hits at the end of the body. A sequence that does not end with an end
-// opcode is rejected with errMissingEndOpcode.
+// isEnd decodes until the reader runs out, which a function body's bounded
+// reader does at the end of the body. A sequence the input ran out of is
+// rejected as truncated, one that merely lacks its end opcode with
+// errMissingEndOpcode.
 //
 // sizeHint only seeds the bytecode buffer capacity to avoid regrowth: it is the
 // body's declared byte length, or 0 if unknown, and need not be accurate.
@@ -948,11 +989,13 @@ func (p *parser) readCode(
 
 	controlStack := []controlEntry{}
 	var lastOp opcode
+	var truncation error
 
 	for {
 		opcodeVal, err := p.readOpcode()
 		if err != nil {
-			if err == io.EOF {
+			if err == errSectionTruncated || err == errUnexpectedEnd {
+				truncation = err
 				break
 			}
 			return bytecodeResult{}, err
@@ -1203,6 +1246,11 @@ func (p *parser) readCode(
 		}
 	}
 
+	// Input that ran out mid-sequence is truncated, whatever it stopped inside;
+	// only a sequence that reads to completion can be missing its end opcode.
+	if truncation != nil && (lastOp != end || len(controlStack) > 0) {
+		return bytecodeResult{}, truncation
+	}
 	if len(bytecode) == 0 || lastOp != end {
 		return bytecodeResult{}, errMissingEndOpcode
 	}
@@ -1280,8 +1328,11 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 		return 0, 0, 0, err
 	}
 
-	// The alignment exponent must be < 32.
-	// We also have to remove bit 6, used for multi memory.
+	// The alignment exponent must be < 32. Bit 6 is not part of it: it marks an
+	// explicit memory index, which only multi-memory allows.
+	if align&sixthBitMask != 0 && !p.config.ExperimentalMultipleMemories {
+		return 0, 0, 0, errMalformedMemopFlags
+	}
 	if (align & ^sixthBitMask) >= 32 {
 		return 0, 0, 0, errMalformedMemopFlags
 	}
@@ -1351,6 +1402,9 @@ func (p *parser) readUleb128(bitWidth uint) (uint64, error) {
 	for byteIndex := uint(0); byteIndex < maxBytes; byteIndex++ {
 		b, err := p.ReadByte()
 		if err != nil {
+			if byteIndex > 0 && err == errSectionTruncated {
+				return 0, errIntRepresentationTooLong
+			}
 			return 0, err
 		}
 
@@ -1379,6 +1433,9 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	for {
 		b, err = p.ReadByte()
 		if err != nil {
+			if bytesRead > 0 && err == errSectionTruncated {
+				return 0, errIntRepresentationTooLong
+			}
 			return 0, err
 		}
 		bytesRead++

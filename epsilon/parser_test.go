@@ -17,7 +17,6 @@ package epsilon
 import (
 	"bytes"
 	"errors"
-	"io"
 	"math"
 	"reflect"
 	"slices"
@@ -856,8 +855,8 @@ func TestParseTruncatedFunctionBody(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected parse error for truncated function body, got nil")
 	}
-	if err != errMissingEndOpcode {
-		t.Errorf("expected errMissingEndOpcode, got %v", err)
+	if err != errSectionTruncated {
+		t.Errorf("expected errSectionTruncated, got %v", err)
 	}
 }
 
@@ -873,7 +872,7 @@ func TestParseSectionPayloadBounds(t *testing.T) {
 		{
 			name:    "content outside payload",
 			section: []byte{byte(typeSectionId), 0x00, 0x00},
-			wantErr: io.EOF,
+			wantErr: errSectionTruncated,
 		},
 		{
 			name:    "payload shorter than declared",
@@ -890,7 +889,7 @@ func TestParseSectionPayloadBounds(t *testing.T) {
 			section: []byte{
 				byte(codeSectionId), 0x03, 0x01, 0x02, 0x00,
 			},
-			wantErr: io.ErrUnexpectedEOF,
+			wantErr: errLengthOutOfBounds,
 		},
 	}
 
@@ -916,8 +915,8 @@ func TestParseCustomSectionDoesNotReadPastPayload(t *testing.T) {
 	}
 	reader := bytes.NewReader(wasm)
 	_, err := newParser(reader, DefaultConfig()).parse()
-	if err != io.EOF {
-		t.Fatalf("expected EOF, got %v", err)
+	if err != errSectionTruncated {
+		t.Fatalf("expected errSectionTruncated, got %v", err)
 	}
 	if reader.Len() != 3 {
 		t.Fatalf(

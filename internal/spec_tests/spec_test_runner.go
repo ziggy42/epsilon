@@ -229,16 +229,26 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 	r.assertFailedWithText(cmd, err)
 }
 
-// binaryIndistinguishableReasons maps a reason an assertion expects to one a
-// runtime reading the binary format may report instead, for failures the
-// encoding does not preserve the distinction between.
+// binaryIndistinguishableReasons maps a reason an assertion expects to one
+// epsilon reports instead, where the two cannot be told apart from the binary
+// a module was compiled to.
 //
 // select.wast expects "invalid result arity" from (select (result) …), but
 // wat2wasm drops the empty result vector and emits the untyped select opcode,
 // so that module is byte-identical to the one the assertion before it expects
 // to fail with "type mismatch". Only the text format tells them apart.
+//
+// The rest are reasons the reference interpreter reaches by reading past a
+// section's declared size and reporting whatever it then trips over: the byte
+// beginning the next section, read as an end opcode, an instruction, or a name
+// length. binary.wast:93 says as much in a comment. Epsilon stops at the size
+// the section declared, so it reports the boundary it hit instead; matching the
+// interpreter would mean letting a declared length be overrun.
 var binaryIndistinguishableReasons = map[string]string{
-	"invalid result arity": "type mismatch",
+	"invalid result arity":  "type mismatch",
+	"section size mismatch": "unexpected end of section or function",
+	"illegal opcode":        "unexpected end of section or function",
+	"length out of bounds":  "unexpected end of section or function",
 }
 
 // assertFailedWithText reports a test failure unless err states the reason the
@@ -282,9 +292,7 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected validation error, but got no error")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
