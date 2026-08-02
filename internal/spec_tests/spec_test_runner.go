@@ -223,20 +223,31 @@ func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
 }
 
 func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
+	var err error
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
 		wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
-		_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-		if err == nil {
-			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
-		}
+		_, err = r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	} else {
 		// This is asserting that a function call will trap.
-		_, err := r.handleAction(cmd.Action)
-		if err == nil {
-			r.fatalf(cmd.Line, "expected trap, but got no error")
-		}
+		_, err = r.handleAction(cmd.Action)
 	}
+
+	if err == nil {
+		r.fatalf(cmd.Line, "expected trap %q, but got no error", cmd.Text)
+	}
+	if !trapMatches(cmd.Text, err.Error()) {
+		r.fatalf(cmd.Line, "expected trap %q, but got: %v", cmd.Text, err)
+	}
+}
+
+// trapMatches reports whether a trap message satisfies the failure reason an
+// assertion expects. Epsilon appends context to some trap messages (the
+// offending element index, for instance), so the expected reason may stop
+// short of the full message, but only at a word boundary.
+func trapMatches(expected, actual string) bool {
+	rest, ok := strings.CutPrefix(actual, expected)
+	return ok && (rest == "" || rest[0] == ' ')
 }
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {

@@ -36,6 +36,9 @@ type Command struct {
 	Action   *Action `json:"action,omitempty"`
 	Expected []Value `json:"expected,omitempty"`
 	As       string  `json:"as,omitempty"`
+	// Text is the failure reason an assertion expects, present on the
+	// assert_* commands.
+	Text string `json:"text,omitempty"`
 }
 
 type Action struct {

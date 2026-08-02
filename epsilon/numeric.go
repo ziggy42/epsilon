@@ -21,7 +21,6 @@ import (
 
 var (
 	errIntegerDivideByZero        = errors.New("integer divide by zero")
-	errIntegerDivideOverflow      = errors.New("integer divide overflow")
 	errIntegerOverflow            = errors.New("integer overflow")
 	errInvalidConversionToInteger = errors.New("invalid conversion to integer")
 )
@@ -48,7 +47,7 @@ func divS32(a, b int32) (int32, error) {
 		return 0, errIntegerDivideByZero
 	}
 	if a == math.MinInt32 && b == -1 {
-		return 0, errIntegerDivideOverflow
+		return 0, errIntegerOverflow
 	}
 	return a / b, nil
 }
@@ -58,7 +57,7 @@ func divS64(a, b int64) (int64, error) {
 		return 0, errIntegerDivideByZero
 	}
 	if a == math.MinInt64 && b == -1 {
-		return 0, errIntegerDivideOverflow
+		return 0, errIntegerOverflow
 	}
 	return a / b, nil
 }
