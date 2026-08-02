@@ -1354,7 +1354,7 @@ func simdI64x2GeS(v1, v2 V128Value) V128Value {
 // simdF32x4Abs performs an absolute value operation on each 32-bit float lane.
 func simdF32x4Abs(v V128Value) V128Value {
 	f0, f1, f2, f3 := f32x4(v)
-	return packF32x4(abs(f0), abs(f1), abs(f2), abs(f3))
+	return packF32x4(absF32(f0), absF32(f1), absF32(f2), absF32(f3))
 }
 
 func simdF32x4Neg(v V128Value) V128Value {
@@ -1442,7 +1442,7 @@ func simdF32x4Pmax(v1, v2 V128Value) V128Value {
 
 func simdF64x2Abs(v V128Value) V128Value {
 	f0, f1 := f64x2(v)
-	return packF64x2(abs(f0), abs(f1))
+	return packF64x2(absF64(f0), absF64(f1))
 }
 
 func simdF64x2Neg(v V128Value) V128Value {

@@ -490,7 +490,7 @@ func (vm *vm) handleF32Max() {
 func (vm *vm) handleF32Copysign() {
 	b := vm.stack.popFloat32()
 	a := vm.stack.popFloat32()
-	vm.stack.pushFloat32(copysign(a, b))
+	vm.stack.pushFloat32(copysignF32(a, b))
 }
 
 func (vm *vm) handleF64Add() {
@@ -532,7 +532,7 @@ func (vm *vm) handleF64Max() {
 func (vm *vm) handleF64Copysign() {
 	b := vm.stack.popFloat64()
 	a := vm.stack.popFloat64()
-	vm.stack.pushFloat64(copysign(a, b))
+	vm.stack.pushFloat64(copysignF64(a, b))
 }
 
 func (vm *vm) handleI32TruncF32S() error {

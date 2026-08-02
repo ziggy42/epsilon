@@ -697,7 +697,7 @@ func (vm *vm) runLoop(frame *callFrame) error {
 			res := int64(bits.RotateLeft64(uint64(a), -int(b)))
 			vm.stack.data[len(vm.stack.data)-1] = i64(res)
 		case f32Abs:
-			vm.stack.pushFloat32(abs(vm.stack.popFloat32()))
+			vm.stack.pushFloat32(absF32(vm.stack.popFloat32()))
 		case f32Neg:
 			vm.stack.pushFloat32(-vm.stack.popFloat32())
 		case f32Ceil:
@@ -725,7 +725,7 @@ func (vm *vm) runLoop(frame *callFrame) error {
 		case f32Copysign:
 			vm.handleF32Copysign()
 		case f64Abs:
-			vm.stack.pushFloat64(abs(vm.stack.popFloat64()))
+			vm.stack.pushFloat64(absF64(vm.stack.popFloat64()))
 		case f64Neg:
 			vm.stack.pushFloat64(-vm.stack.popFloat64())
 		case f64Ceil:

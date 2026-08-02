@@ -303,70 +303,166 @@ func (r *specTestRunner) assertValuesEqual(
 	expectedVal wabt.Value,
 	actual any,
 ) {
-	expected, err := valueToGolang(expectedVal)
+	matches, err := valueMatches(expectedVal, actual)
 	if err != nil {
-		r.fatalf(line, "failed to convert expected value: %v", err)
+		r.fatalf(line, "failed to compare expected value: %v", err)
 	}
 
-	if !areEqual(expected, actual, expectedVal.LaneType) {
+	if !matches {
 		r.fatalf(
 			line,
-			"mismatch: expected %v (%T), got %v (%T)",
-			expected,
-			expected,
+			"mismatch: expected %v, got %v (%T)",
+			expectedVal.Value,
 			actual,
 			actual,
 		)
 	}
 }
 
-func areEqual(expected, actual any, laneType string) bool {
-	switch exp := expected.(type) {
-	case float32:
-		return floatsEqual(exp, actual.(float32))
-	case float64:
-		return floatsEqual(exp, actual.(float64))
-	case epsilon.V128Value:
+// valueMatches reports whether an action result satisfies an `assert_return`
+// expectation. Floats are compared bit for bit so that the sign of zero is
+// significant, except for the `nan:canonical` and `nan:arithmetic` patterns,
+// which stand for the sets of NaNs the spec allows an operation to produce.
+func valueMatches(expected wabt.Value, actual any) (bool, error) {
+	if expected.Type == "v128" {
+		lanes, ok := expected.Value.([]any)
+		if !ok {
+			return false, fmt.Errorf(
+				"v128 value is not an array: %T",
+				expected.Value,
+			)
+		}
 		act, ok := actual.(epsilon.V128Value)
 		if !ok {
-			return false
+			return false, nil
 		}
-		return v128Equal(exp, act, laneType)
+		return v128Matches(lanes, expected.LaneType, act)
+	}
+
+	raw, ok := expected.Value.(string)
+	if !ok {
+		return false, fmt.Errorf(
+			"val for type %s not a string: %T",
+			expected.Type,
+			expected.Value,
+		)
+	}
+
+	return scalarMatches(raw, expected.Type, actual)
+}
+
+func v128Matches(
+	lanes []any,
+	laneType string,
+	actual epsilon.V128Value,
+) (bool, error) {
+	for i, lane := range lanes {
+		raw, ok := lane.(string)
+		if !ok {
+			return false, fmt.Errorf("v128 lane is not a string: %T", lane)
+		}
+		matches, err := scalarMatches(raw, laneType, extractLane(
+			actual,
+			laneType,
+			uint32(i),
+		))
+		if err != nil || !matches {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func scalarMatches(raw, valueType string, actual any) (bool, error) {
+	switch valueType {
+	case "f32":
+		act, ok := actual.(float32)
+		if !ok {
+			return false, nil
+		}
+		return f32Matches(raw, act)
+	case "f64":
+		act, ok := actual.(float64)
+		if !ok {
+			return false, nil
+		}
+		return f64Matches(raw, act)
 	default:
-		return expected == actual
+		expected, err := parseScalar(raw, valueType)
+		if err != nil {
+			return false, err
+		}
+		return expected == actual, nil
 	}
 }
 
-func v128Equal(expected, actual epsilon.V128Value, laneType string) bool {
+const (
+	// canonicalNaN32 is the f32 canonical NaN with the sign bit cleared; a
+	// NaN is arithmetic when its payload is at least the canonical one, i.e.
+	// when the most significant payload bit is set.
+	canonicalNaN32 = uint32(0x7fc00000)
+	canonicalNaN64 = uint64(0x7ff8000000000000)
+)
+
+func f32Matches(raw string, actual float32) (bool, error) {
+	bits := math.Float32bits(actual)
+	switch raw {
+	case "nan:canonical":
+		return bits&^uint32(1<<31) == canonicalNaN32, nil
+	case "nan:arithmetic":
+		return bits&canonicalNaN32 == canonicalNaN32, nil
+	}
+	expected, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil {
+		return false, err
+	}
+	return uint32(expected) == bits, nil
+}
+
+func f64Matches(raw string, actual float64) (bool, error) {
+	bits := math.Float64bits(actual)
+	switch raw {
+	case "nan:canonical":
+		return bits&^uint64(1<<63) == canonicalNaN64, nil
+	case "nan:arithmetic":
+		return bits&canonicalNaN64 == canonicalNaN64, nil
+	}
+	expected, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return false, err
+	}
+	return expected == bits, nil
+}
+
+func extractLane(v epsilon.V128Value, laneType string, laneIndex uint32) any {
 	switch laneType {
 	case "f32":
-		for i := range uint32(4) {
-			expLane := simdF32x4ExtractLane(expected, i)
-			actLane := simdF32x4ExtractLane(actual, i)
-			if !floatsEqual(expLane, actLane) {
-				return false
-			}
-		}
-		return true
+		return simdF32x4ExtractLane(v, laneIndex)
 	case "f64":
-		for i := range uint32(2) {
-			expLane := simdF64x2ExtractLane(expected, i)
-			actLane := simdF64x2ExtractLane(actual, i)
-			if !floatsEqual(expLane, actLane) {
-				return false
-			}
-		}
-		return true
+		return simdF64x2ExtractLane(v, laneIndex)
+	case "i8":
+		return int8(laneBits(v, laneIndex, 8))
+	case "i16":
+		return int16(laneBits(v, laneIndex, 16))
+	case "i32":
+		return int32(laneBits(v, laneIndex, 32))
 	default:
-		return expected == actual
+		return int64(laneBits(v, laneIndex, 64))
 	}
 }
 
-func floatsEqual[T float32 | float64](expected, actual T) bool {
-	if math.IsNaN(float64(expected)) {
-		return math.IsNaN(float64(actual))
+func laneBits(v epsilon.V128Value, laneIndex, laneWidth uint32) uint64 {
+	source := v.Low
+	lanesPerHalf := 64 / laneWidth
+	if laneIndex >= lanesPerHalf {
+		source = v.High
 	}
-	return expected == actual
+	shift := (laneIndex % lanesPerHalf) * laneWidth
+	mask := uint64(1)<<laneWidth - 1
+	if laneWidth == 64 {
+		mask = ^uint64(0)
+	}
+	return (source >> shift) & mask
 }
 
 func (r *specTestRunner) getModuleInstance(
@@ -472,9 +568,9 @@ func parseF32(s string) (float32, error) {
 	if pattern, ok := strings.CutPrefix(s, "nan:"); ok {
 		switch pattern {
 		case "canonical":
-			return math.Float32frombits(0x7ff80000), nil
+			return math.Float32frombits(canonicalNaN32), nil
 		case "arithmetic":
-			return math.Float32frombits(0x7ff80001), nil
+			return math.Float32frombits(canonicalNaN32 | 1), nil
 		default:
 			return 0, fmt.Errorf("unknown NaN pattern: %s", s)
 		}
@@ -490,9 +586,9 @@ func parseF64(s string) (float64, error) {
 	if pattern, ok := strings.CutPrefix(s, "nan:"); ok {
 		switch pattern {
 		case "canonical":
-			return math.Float64frombits(0x7ff8000000000000), nil
+			return math.Float64frombits(canonicalNaN64), nil
 		case "arithmetic":
-			return math.Float64frombits(0x7ff8000000000001), nil
+			return math.Float64frombits(canonicalNaN64 | 1), nil
 		default:
 			return 0, fmt.Errorf("unknown NaN pattern: %s", s)
 		}
