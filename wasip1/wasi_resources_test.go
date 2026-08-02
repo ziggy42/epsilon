@@ -124,6 +124,40 @@ func TestCompositeRightsRequireAll(t *testing.T) {
 	})
 }
 
+func TestIovecHighBitCountReturnsFault(t *testing.T) {
+	memory := epsilon.NewRuntime().NewMemory(
+		epsilon.MemoryType{Limits: epsilon.Limits{Min: 1}},
+	)
+
+	t.Run("read", func(t *testing.T) {
+		called := false
+		errno := iterIovec(memory, 0, -1, 0, func([]byte, int64) (int, error) {
+			called = true
+			return 0, nil
+		})
+		if errno != errnoFault {
+			t.Fatalf("expected errnoFault, got %d", errno)
+		}
+		if called {
+			t.Fatal("read callback was called")
+		}
+	})
+
+	t.Run("write", func(t *testing.T) {
+		called := false
+		errno := iterCiovec(memory, 0, -1, 0, func([]byte) (int, error) {
+			called = true
+			return 0, nil
+		})
+		if errno != errnoFault {
+			t.Fatalf("expected errnoFault, got %d", errno)
+		}
+		if called {
+			t.Fatal("write callback was called")
+		}
+	})
+}
+
 func TestRightsEscalation_SockShutdown(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
