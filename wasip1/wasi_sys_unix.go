@@ -909,8 +909,16 @@ func mapError(err error) int32 {
 			return errnoNoEnt
 		case syscall.EEXIST:
 			return errnoExist
+		case syscall.EFAULT:
+			return errnoFault
+		case syscall.EFBIG:
+			return errnoFbig
+		case syscall.EINTR:
+			return errnoIntr
 		case syscall.EISDIR:
 			return errnoIsDir
+		case syscall.EIO:
+			return errnoIO
 		case syscall.ENOTDIR:
 			return errnoNotDir
 		case syscall.EINVAL:
@@ -921,16 +929,32 @@ func mapError(err error) int32 {
 			return errnoLoop
 		case syscall.EBADF:
 			return errnoBadF
-		case syscall.EMFILE, syscall.ENFILE:
+		case syscall.EMFILE:
+			return errnoMFile
+		case syscall.ENFILE:
 			return errnoNFile
 		case syscall.ENAMETOOLONG:
 			return errnoNameTooLong
+		case syscall.ENOSPC:
+			return errnoNoSpc
+		case syscall.ENOTSOCK:
+			return errnoNotSock
+		case syscall.ENOTSUP:
+			return errnoNotSup
+		case syscall.EOVERFLOW:
+			return errnoOverflow
 		case syscall.EPIPE:
 			return errnoPipe
 		case syscall.EAGAIN:
 			return errnoAgain
 		case syscall.ERANGE:
 			return errnoRange
+		case syscall.EROFS:
+			return errnoRofs
+		case syscall.ESPIPE:
+			return errnoSpipe
+		case syscall.EXDEV:
+			return errnoXdev
 		}
 	}
 

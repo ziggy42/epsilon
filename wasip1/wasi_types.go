@@ -107,20 +107,27 @@ const (
 	errnoExist       int32 = 20 // File exists.
 	errnoFault       int32 = 21 // Bad address.
 	errnoFbig        int32 = 22 // File too large.
+	errnoIntr        int32 = 27 // Interrupted function.
 	errnoInval       int32 = 28 // Invalid argument.
 	errnoIO          int32 = 29 // I/O error.
 	errnoIsDir       int32 = 31 // Is a directory.
 	errnoLoop        int32 = 32 // Too many levels of symbolic links.
 	errnoNameTooLong int32 = 37 // Filename too long.
+	errnoMFile       int32 = 40 // File descriptor value too large.
 	errnoNFile       int32 = 41 // Too many files open in system.
 	errnoNoEnt       int32 = 44 // No such file or directory.
+	errnoNoSpc       int32 = 51 // No space left on device.
 	errnoNotDir      int32 = 54 // Not a directory or symbolic link.
 	errnoNotEmpty    int32 = 55 // Directory not empty.
 	errnoNotSock     int32 = 57 // Not a socket.
 	errnoNotSup      int32 = 58 // Not supported.
+	errnoOverflow    int32 = 61 // Value too large to be stored in data type.
 	errnoPerm        int32 = 63 // Operation not permitted.
 	errnoPipe        int32 = 64 // Broken pipe.
 	errnoRange       int32 = 68 // Result too large.
+	errnoRofs        int32 = 69 // Read-only file system.
+	errnoSpipe       int32 = 70 // Invalid seek.
+	errnoXdev        int32 = 75 // Cross-device link.
 	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
 )
 

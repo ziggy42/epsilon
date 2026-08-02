@@ -1066,9 +1066,31 @@ func TestBuildTimespecPreservesUnsignedTimestamps(t *testing.T) {
 	}
 }
 
-func TestMapErrorRange(t *testing.T) {
-	if errno := mapError(syscall.ERANGE); errno != errnoRange {
-		t.Fatalf("expected errnoRange, got %d", errno)
+func TestMapError(t *testing.T) {
+	tests := []struct {
+		err  error
+		want int32
+	}{
+		{err: syscall.EFAULT, want: errnoFault},
+		{err: syscall.EFBIG, want: errnoFbig},
+		{err: syscall.EINTR, want: errnoIntr},
+		{err: syscall.EIO, want: errnoIO},
+		{err: syscall.EMFILE, want: errnoMFile},
+		{err: syscall.ENFILE, want: errnoNFile},
+		{err: syscall.ENOSPC, want: errnoNoSpc},
+		{err: syscall.ENOTSOCK, want: errnoNotSock},
+		{err: syscall.ENOTSUP, want: errnoNotSup},
+		{err: syscall.EOVERFLOW, want: errnoOverflow},
+		{err: syscall.ERANGE, want: errnoRange},
+		{err: syscall.EROFS, want: errnoRofs},
+		{err: syscall.ESPIPE, want: errnoSpipe},
+		{err: syscall.EXDEV, want: errnoXdev},
+	}
+
+	for _, test := range tests {
+		if errno := mapError(test.err); errno != test.want {
+			t.Errorf("mapError(%v): got %d, want %d", test.err, errno, test.want)
+		}
 	}
 }
 
