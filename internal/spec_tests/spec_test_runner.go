@@ -229,27 +229,48 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 	r.assertFailedWithText(cmd, err)
 }
 
+// binaryIndistinguishableReasons maps a reason an assertion expects to one a
+// runtime reading the binary format may report instead, for failures the
+// encoding does not preserve the distinction between.
+//
+// select.wast expects "invalid result arity" from (select (result) …), but
+// wat2wasm drops the empty result vector and emits the untyped select opcode,
+// so that module is byte-identical to the one the assertion before it expects
+// to fail with "type mismatch". Only the text format tells them apart.
+var binaryIndistinguishableReasons = map[string]string{
+	"invalid result arity": "type mismatch",
+}
+
 // assertFailedWithText reports a test failure unless err states the reason the
-// assertion expects. Epsilon appends context to some messages (the offending
-// element index, for instance), so the expected reason may stop short of the
-// full message, but only at a word boundary.
+// assertion expects.
 func (r *specTestRunner) assertFailedWithText(cmd wabt.Command, err error) {
 	r.t.Helper()
 	if err == nil {
 		r.fatalf(cmd.Line, "expected %q, but got no error", cmd.Text)
 	}
-	rest, ok := strings.CutPrefix(err.Error(), cmd.Text)
-	if !ok || (rest != "" && rest[0] != ' ') {
-		r.fatalf(cmd.Line, "expected %q, but got: %v", cmd.Text, err)
+	if statesReason(cmd.Text, err.Error()) {
+		return
 	}
+	alternative, ok := binaryIndistinguishableReasons[cmd.Text]
+	if ok && statesReason(alternative, err.Error()) {
+		return
+	}
+	r.fatalf(cmd.Line, "expected %q, but got: %v", cmd.Text, err)
+}
+
+// statesReason reports whether message opens with the failure reason an
+// assertion expects. Epsilon appends context to some messages (the offending
+// index, or which check within a broader category failed), so the reason may
+// stop short of the full message, but only at a word boundary.
+func statesReason(reason, message string) bool {
+	rest, ok := strings.CutPrefix(message, reason)
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == ':')
 }
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected validation error, but got no error")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
