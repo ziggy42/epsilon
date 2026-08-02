@@ -83,7 +83,7 @@ const (
 )
 
 type localEntry struct {
-	count uint64
+	count uint32
 	typ   ValueType
 }
 
@@ -348,7 +348,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	var totalLocalsCount uint64
 	for _, entry := range localEntries {
-		totalLocalsCount += entry.count
+		totalLocalsCount += uint64(entry.count)
 	}
 	if totalLocalsCount > uint64(p.config.MaxLocalsPerFunction) {
 		return function{}, fmt.Errorf(
@@ -359,7 +359,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	locals := make([]ValueType, 0, min(totalLocalsCount, maxInitialCapacity))
 	for _, entry := range localEntries {
-		for i := uint64(0); i < entry.count; i++ {
+		for range entry.count {
 			locals = append(locals, entry.typ)
 		}
 	}
@@ -409,7 +409,7 @@ func (p *parser) parseFunction() (function, error) {
 }
 
 func (p *parser) parseLocalVariables() (localEntry, error) {
-	count, err := p.parseUint64()
+	count, err := p.parseUint32()
 	if err != nil {
 		return localEntry{}, err
 	}
@@ -846,10 +846,6 @@ func (p *parser) parseUint32() (uint32, error) {
 		return 0, err
 	}
 	return uint32(val), nil
-}
-
-func (p *parser) parseUint64() (uint64, error) {
-	return p.readUleb128(64)
 }
 
 func (p *parser) parseUtf8String() (string, error) {

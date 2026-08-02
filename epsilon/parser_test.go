@@ -756,6 +756,42 @@ func TestParseDataCountAsUint32(t *testing.T) {
 	}
 }
 
+func TestParseLocalCountAsUint32(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded []byte
+		wantErr error
+	}{
+		{
+			name: "five-byte padded zero",
+			encoded: []byte{
+				0x80, 0x80, 0x80, 0x80, 0x00,
+				0x7f,
+			},
+		},
+		{
+			name: "six-byte zero",
+			encoded: []byte{
+				0x80, 0x80, 0x80, 0x80, 0x80, 0x00,
+				0x7f,
+			},
+			wantErr: errIntRepresentationTooLong,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newParser(
+				bytes.NewReader(test.encoded),
+				DefaultConfig(),
+			).parseLocalVariables()
+			if err != test.wantErr {
+				t.Fatalf("expected error %v, got %v", test.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestParseTruncatedFunctionBody(t *testing.T) {
 	// Truncated function body where the last byte is 0x0B (end), but it's
 	// actually an immediate for i32.const.
