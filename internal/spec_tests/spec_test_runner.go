@@ -162,13 +162,7 @@ func (r *specTestRunner) run(commands []wabt.Command) {
 
 func (r *specTestRunner) handleAssertExhaustion(cmd wabt.Command) {
 	_, err := r.handleAction(cmd.Action)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected call stack exhaustion, but got no error")
-	}
-
-	if err.Error() != "call stack exhausted" {
-		r.fatalf(cmd.Line, "expected call stack exhaustion, but got: %v", err)
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleRegister(cmd wabt.Command) {
@@ -232,22 +226,22 @@ func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
 		// This is asserting that a function call will trap.
 		_, err = r.handleAction(cmd.Action)
 	}
-
-	if err == nil {
-		r.fatalf(cmd.Line, "expected trap %q, but got no error", cmd.Text)
-	}
-	if !trapMatches(cmd.Text, err.Error()) {
-		r.fatalf(cmd.Line, "expected trap %q, but got: %v", cmd.Text, err)
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
-// trapMatches reports whether a trap message satisfies the failure reason an
-// assertion expects. Epsilon appends context to some trap messages (the
-// offending element index, for instance), so the expected reason may stop
-// short of the full message, but only at a word boundary.
-func trapMatches(expected, actual string) bool {
-	rest, ok := strings.CutPrefix(actual, expected)
-	return ok && (rest == "" || rest[0] == ' ')
+// assertFailedWithText reports a test failure unless err states the reason the
+// assertion expects. Epsilon appends context to some messages (the offending
+// element index, for instance), so the expected reason may stop short of the
+// full message, but only at a word boundary.
+func (r *specTestRunner) assertFailedWithText(cmd wabt.Command, err error) {
+	r.t.Helper()
+	if err == nil {
+		r.fatalf(cmd.Line, "expected %q, but got no error", cmd.Text)
+	}
+	rest, ok := strings.CutPrefix(err.Error(), cmd.Text)
+	if !ok || (rest != "" && rest[0] != ' ') {
+		r.fatalf(cmd.Line, "expected %q, but got: %v", cmd.Text, err)
+	}
 }
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
@@ -275,17 +269,13 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
