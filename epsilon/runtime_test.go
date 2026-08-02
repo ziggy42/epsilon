@@ -46,6 +46,26 @@ func TestRuntimeTrivialFunction(t *testing.T) {
 	}
 }
 
+func TestRuntimeRestoresStackAfterStartFunctionTrap(t *testing.T) {
+	wasm, err := wabt.Wat2Wasm(`(module
+		(func $start
+			i32.const 7
+			unreachable)
+		(start $start)
+	)`)
+	if err != nil {
+		t.Fatalf("failed to compile module: %v", err)
+	}
+
+	runtime := NewRuntime()
+	if _, err := runtime.InstantiateModule(bytes.NewReader(wasm)); err == nil {
+		t.Fatal("expected start function to trap")
+	}
+	if stackHeight := runtime.vm.stack.size(); stackHeight != 0 {
+		t.Fatalf("expected empty stack after trap, got height %d", stackHeight)
+	}
+}
+
 func TestRuntimeImportedFunction(t *testing.T) {
 	wasm, _ := wabt.Wat2Wasm(`(module
 		(import "env" "multiply" (func $multiply (param i32 i32) (result i32)))

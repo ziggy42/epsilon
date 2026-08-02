@@ -221,7 +221,7 @@ func (vm *vm) instantiate(
 
 	if module.startIndex != nil {
 		function := vm.store.funcs[instance.funcAddrs[*module.startIndex]]
-		if err := vm.invokeFunction(function); err != nil {
+		if _, err := vm.invoke(function, nil); err != nil {
 			return nil, err
 		}
 	}
