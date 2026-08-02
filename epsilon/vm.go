@@ -1770,7 +1770,7 @@ func (vm *vm) newElementInstance(
 
 func toStoreFuncIndexes(
 	moduleInstance *ModuleInstance,
-	localIndexes []int32,
+	localIndexes []uint32,
 ) []int32 {
 	storeIndices := make([]int32, len(localIndexes))
 	for i, localIndex := range localIndexes {

@@ -87,7 +87,7 @@ type elementSegment struct {
 
 	// functionIndexes is a list of function indices. Used when
 	// functionIndexesExpressions is empty.
-	functionIndexes []int32
+	functionIndexes []uint32
 
 	// functionIndexesExpressions is a list of constant expressions that produce
 	// function references. Used when functionIndexes is empty.

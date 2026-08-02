@@ -365,6 +365,42 @@ func TestParseElementRejectsInvalidReferenceType(t *testing.T) {
 	}
 }
 
+func TestParseElementRejectsOversizedIndexes(t *testing.T) {
+	tooLarge := []byte{0x80, 0x80, 0x80, 0x80, 0x10}
+	tests := []struct {
+		name    string
+		encoded []byte
+	}{
+		{
+			name: "function index",
+			encoded: append(
+				[]byte{0x00, byte(i32Const), 0x00, byte(end), 0x01},
+				tooLarge...,
+			),
+		},
+		{
+			name:    "table index with function indexes",
+			encoded: append([]byte{0x02}, tooLarge...),
+		},
+		{
+			name:    "table index with expressions",
+			encoded: append([]byte{0x06}, tooLarge...),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newParser(
+				bytes.NewReader(test.encoded),
+				DefaultConfig(),
+			).parseElementSegment()
+			if err != errIntegerTooLarge {
+				t.Fatalf("expected %v, got %v", errIntegerTooLarge, err)
+			}
+		})
+	}
+}
+
 func TestParseImportMemory(t *testing.T) {
 	wat := `(module (import "module" "memory" (memory 1)))`
 

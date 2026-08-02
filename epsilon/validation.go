@@ -280,11 +280,11 @@ func (v *validator) validateElementSegment(elem *elementSegment) error {
 	}
 
 	for _, funcIndex := range elem.functionIndexes {
-		v.referencedFunctions[uint32(funcIndex)] = true
+		v.referencedFunctions[funcIndex] = true
 		if elem.kind != FuncRefType {
 			return errTypeMismatch
 		}
-		if err := v.validateFunctionTypeExists(uint32(funcIndex)); err != nil {
+		if err := v.validateFunctionTypeExists(funcIndex); err != nil {
 			return err
 		}
 	}

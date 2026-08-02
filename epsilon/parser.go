@@ -646,14 +646,14 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 		if err != nil {
 			return elementSegment{}, err
 		}
-		indexes, err := parseVector(p, p.parseUint64)
+		indexes, err := parseVector(p, p.parseUint32)
 		if err != nil {
 			return elementSegment{}, err
 		}
 		return elementSegment{
 			mode:             activeElementMode,
 			kind:             FuncRefType,
-			functionIndexes:  uint64SliceToInt32(indexes),
+			functionIndexes:  indexes,
 			tableIndex:       defaultTableIndex,
 			offsetExpression: offset,
 		}, nil
@@ -665,17 +665,17 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 		if elemkind != 0x00 {
 			return elementSegment{}, errInvalidElementKind
 		}
-		indexes, err := parseVector(p, p.parseUint64)
+		indexes, err := parseVector(p, p.parseUint32)
 		if err != nil {
 			return elementSegment{}, err
 		}
 		return elementSegment{
 			mode:            passiveElementMode,
 			kind:            FuncRefType,
-			functionIndexes: uint64SliceToInt32(indexes),
+			functionIndexes: indexes,
 		}, nil
 	case 2: // Active element with explicit table index and func indexes.
-		tableIdx, err := p.parseUint64()
+		tableIndex, err := p.parseUint32()
 		if err != nil {
 			return elementSegment{}, err
 		}
@@ -690,15 +690,15 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 		if elemkind != 0x00 {
 			return elementSegment{}, errInvalidElementKind
 		}
-		indexes, err := parseVector(p, p.parseUint64)
+		indexes, err := parseVector(p, p.parseUint32)
 		if err != nil {
 			return elementSegment{}, err
 		}
 		return elementSegment{
 			mode:             activeElementMode,
 			kind:             FuncRefType,
-			functionIndexes:  uint64SliceToInt32(indexes),
-			tableIndex:       uint32(tableIdx),
+			functionIndexes:  indexes,
+			tableIndex:       tableIndex,
 			offsetExpression: offset,
 		}, nil
 	case 3: // Declarative element with func indexes.
@@ -709,14 +709,14 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 		if elemkind != 0x00 {
 			return elementSegment{}, errInvalidElementKind
 		}
-		indexes, err := parseVector(p, p.parseUint64)
+		indexes, err := parseVector(p, p.parseUint32)
 		if err != nil {
 			return elementSegment{}, err
 		}
 		return elementSegment{
 			mode:            declarativeElementMode,
 			kind:            FuncRefType,
-			functionIndexes: uint64SliceToInt32(indexes),
+			functionIndexes: indexes,
 		}, nil
 	case 4: // Active element with expressions.
 		offset, err := p.parseExpression()
@@ -749,7 +749,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			functionIndexesExpressions: exprs,
 		}, nil
 	case 6: // Active element with explicit table index and expressions.
-		tableIdx, err := p.parseUint64()
+		tableIndex, err := p.parseUint32()
 		if err != nil {
 			return elementSegment{}, err
 		}
@@ -769,7 +769,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			mode:                       activeElementMode,
 			kind:                       kind,
 			functionIndexesExpressions: exprs,
-			tableIndex:                 uint32(tableIdx),
+			tableIndex:                 tableIndex,
 			offsetExpression:           offset,
 		}, nil
 	case 7: // Declarative element with expressions.
@@ -877,14 +877,6 @@ func (p *parser) readN(length uint64) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
-}
-
-func uint64SliceToInt32(slice []uint64) []int32 {
-	result := make([]int32, len(slice))
-	for i, val := range slice {
-		result[i] = int32(val)
-	}
-	return result
 }
 
 func validateSectionOrder(last sectionId, current sectionId) error {
