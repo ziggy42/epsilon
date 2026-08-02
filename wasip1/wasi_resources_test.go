@@ -82,6 +82,48 @@ func TestRightsEscalation_FdFilestatGet(t *testing.T) {
 	}
 }
 
+func TestCompositeRightsRequireAll(t *testing.T) {
+	t.Run("file", func(t *testing.T) {
+		rt := &wasiResourceTable{
+			fds: map[int32]*wasiFileDescriptor{
+				3: {
+					fileType: fileTypeRegularFile,
+					rights:   RightsFdRead,
+				},
+			},
+		}
+		required := RightsFdRead | RightsFdSeek
+		if _, errno := rt.getFileOrDir(3, required); errno != errnoNotCapable {
+			t.Fatalf("expected errnoNotCapable, got %d", errno)
+		}
+
+		rt.fds[3].rights = required
+		if _, errno := rt.getFileOrDir(3, required); errno != errnoSuccess {
+			t.Fatalf("expected success, got %d", errno)
+		}
+	})
+
+	t.Run("socket", func(t *testing.T) {
+		rt := &wasiResourceTable{
+			fds: map[int32]*wasiFileDescriptor{
+				3: {
+					fileType: fileTypeSocketStream,
+					rights:   RightsPollFdReadwrite,
+				},
+			},
+		}
+		required := RightsPollFdReadwrite | RightsFdRead
+		if _, errno := rt.getSocket(3, required); errno != errnoNotCapable {
+			t.Fatalf("expected errnoNotCapable, got %d", errno)
+		}
+
+		rt.fds[3].rights = required
+		if _, errno := rt.getSocket(3, required); errno != errnoSuccess {
+			t.Fatalf("expected success, got %d", errno)
+		}
+	})
+}
+
 func TestRightsEscalation_SockShutdown(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

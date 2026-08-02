@@ -1017,7 +1017,7 @@ func (w *wasiResourceTable) getFileOrDir(
 	if !ok {
 		return nil, errnoBadF
 	}
-	if fd.rights&rights == 0 {
+	if fd.rights&rights != rights {
 		return nil, errnoNotCapable
 	}
 	return fd, errnoSuccess
@@ -1034,7 +1034,7 @@ func (w *wasiResourceTable) getSocket(
 	if fd.fileType != fileTypeSocketDgram && fd.fileType != fileTypeSocketStream {
 		return nil, errnoNotSock
 	}
-	if fd.rights&rights == 0 {
+	if fd.rights&rights != rights {
 		return nil, errnoNotCapable
 	}
 	return fd, errnoSuccess
