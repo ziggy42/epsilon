@@ -106,6 +106,7 @@ const (
 	errnoBadF        int32 = 8  // Bad file descriptor.
 	errnoExist       int32 = 20 // File exists.
 	errnoFault       int32 = 21 // Bad address.
+	errnoFbig        int32 = 22 // File too large.
 	errnoInval       int32 = 28 // Invalid argument.
 	errnoIO          int32 = 29 // I/O error.
 	errnoIsDir       int32 = 31 // Is a directory.

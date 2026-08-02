@@ -161,12 +161,20 @@ func (w *wasiResourceTable) allocate(
 		return mapError(err)
 	}
 
-	targetSize := offset + length
-	if targetSize <= info.Size() {
+	unsignedOffset := uint64(offset)
+	unsignedLength := uint64(length)
+	if unsignedLength > math.MaxUint64-unsignedOffset {
+		return errnoFbig
+	}
+	targetSize := unsignedOffset + unsignedLength
+	if targetSize > math.MaxInt64 {
+		return errnoFbig
+	}
+	if targetSize <= uint64(info.Size()) {
 		return errnoSuccess
 	}
 
-	if err := fd.file.Truncate(targetSize); err != nil {
+	if err := fd.file.Truncate(int64(targetSize)); err != nil {
 		return mapError(err)
 	}
 	return errnoSuccess

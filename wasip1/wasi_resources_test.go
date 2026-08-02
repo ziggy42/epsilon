@@ -18,7 +18,9 @@ package wasip1
 
 import (
 	"encoding/binary"
+	"math"
 	"net"
+	"os"
 	"testing"
 	"time"
 	"unsafe"
@@ -156,6 +158,42 @@ func TestIovecHighBitCountReturnsFault(t *testing.T) {
 			t.Fatal("write callback was called")
 		}
 	})
+}
+
+func TestAllocateRejectsUnrepresentableRanges(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "allocate")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	defer file.Close()
+
+	resources := &wasiResourceTable{
+		fds: map[int32]*wasiFileDescriptor{
+			3: {
+				file:     file,
+				fileType: fileTypeRegularFile,
+				rights:   RightsFdAllocate,
+			},
+		},
+	}
+	tests := []struct {
+		name   string
+		offset int64
+		length int64
+	}{
+		{name: "high bit", offset: math.MinInt64, length: 1},
+		{name: "host range overflow", offset: math.MaxInt64, length: 1},
+		{name: "unsigned addition overflow", offset: -1, length: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			errno := resources.allocate(3, test.offset, test.length)
+			if errno != errnoFbig {
+				t.Fatalf("expected errnoFbig, got %d", errno)
+			}
+		})
+	}
 }
 
 func TestRightsEscalation_SockShutdown(t *testing.T) {
