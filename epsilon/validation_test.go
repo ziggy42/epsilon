@@ -201,6 +201,20 @@ func TestMaxTableElementsRejectsOversizedTableMax(t *testing.T) {
 	}
 }
 
+func TestMaxTableElementsRejectsOversizedImportedTable(t *testing.T) {
+	module, err := getModule(
+		`(module (import "module" "table" (table 1001 funcref)))`,
+	)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxTableElements: 1000}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
+	}
+}
+
 func TestMaxMemoryPagesRejectsOversizedMemory(t *testing.T) {
 	module, err := getModule(`(module (memory 101))`)
 	if err != nil {
@@ -232,6 +246,20 @@ func TestMaxMemoryPagesRejectsOversizedMemoryMax(t *testing.T) {
 	err = newValidator(Config{MaxMemoryPages: 300}).validateModule(module)
 	if err != nil {
 		t.Fatalf("expected success with raised limit, got %v", err)
+	}
+}
+
+func TestMaxMemoryPagesRejectsOversizedImportedMemory(t *testing.T) {
+	module, err := getModule(
+		`(module (import "module" "memory" (memory 101)))`,
+	)
+	if err != nil {
+		t.Fatalf("failed to parse module: %v", err)
+	}
+
+	err = newValidator(Config{MaxMemoryPages: 100}).validateModule(module)
+	if !errors.Is(err, errInvalidLimits) {
+		t.Fatalf("expected errInvalidLimits, got %v", err)
 	}
 }
 

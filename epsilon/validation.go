@@ -127,8 +127,17 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 
 			v.funcTypes = append(v.funcTypes, module.types[t])
 		case TableType:
+			if err := validateLimits(
+				t.Limits,
+				v.config.MaxTableElements,
+			); err != nil {
+				return err
+			}
 			v.tableTypes = append(v.tableTypes, t)
 		case MemoryType:
+			if err := validateLimits(t.Limits, v.config.MaxMemoryPages); err != nil {
+				return err
+			}
 			v.memTypes = append(v.memTypes, t)
 		case GlobalType:
 			v.globalTypes = append(v.globalTypes, t)
