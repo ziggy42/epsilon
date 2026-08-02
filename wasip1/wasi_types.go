@@ -112,8 +112,8 @@ const (
 	errnoIO          int32 = 29 // I/O error.
 	errnoIsDir       int32 = 31 // Is a directory.
 	errnoLoop        int32 = 32 // Too many levels of symbolic links.
-	errnoNameTooLong int32 = 37 // Filename too long.
 	errnoMFile       int32 = 33 // File descriptor value too large.
+	errnoNameTooLong int32 = 37 // Filename too long.
 	errnoNFile       int32 = 41 // Too many files open in system.
 	errnoNoEnt       int32 = 44 // No such file or directory.
 	errnoNoSpc       int32 = 51 // No space left on device.

@@ -1075,7 +1075,7 @@ func TestMapError(t *testing.T) {
 		{err: syscall.EFBIG, want: errnoFbig},
 		{err: syscall.EINTR, want: errnoIntr},
 		{err: syscall.EIO, want: errnoIO},
-		{err: syscall.EMFILE, want: 33},
+		{err: syscall.EMFILE, want: errnoMFile},
 		{err: syscall.ENFILE, want: errnoNFile},
 		{err: syscall.ENOSPC, want: errnoNoSpc},
 		{err: syscall.ENOTSOCK, want: errnoNotSock},
