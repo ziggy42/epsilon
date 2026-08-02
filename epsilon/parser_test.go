@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math"
 	"reflect"
@@ -329,6 +330,54 @@ func TestParseTableTypeRejectsInvalidReferenceType(t *testing.T) {
 	).parseTableType()
 	if err != errInvalidReferenceType {
 		t.Fatalf("expected %v, got %v", errInvalidReferenceType, err)
+	}
+}
+
+func TestParseRejectsInvalidUtf8Names(t *testing.T) {
+	// 0xff never appears in well-formed UTF-8.
+	tests := []struct {
+		name    string
+		encoded []byte
+		parse   func(*parser) error
+	}{
+		{
+			name:    "import module name",
+			encoded: []byte{0x01, 0xff, 0x01, 0x66, 0x00, 0x00},
+			parse: func(p *parser) error {
+				_, err := p.parseImport()
+				return err
+			},
+		},
+		{
+			name:    "import name",
+			encoded: []byte{0x01, 0x66, 0x01, 0xff, 0x00, 0x00},
+			parse: func(p *parser) error {
+				_, err := p.parseImport()
+				return err
+			},
+		},
+		{
+			name:    "export name",
+			encoded: []byte{0x01, 0xff, 0x00, 0x00},
+			parse: func(p *parser) error {
+				_, err := p.parseExport()
+				return err
+			},
+		},
+		{
+			name:    "custom section name",
+			encoded: []byte{0x01, 0xff},
+			parse:   (*parser).parseCustomSection,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			parser := newParser(bytes.NewReader(test.encoded), DefaultConfig())
+			if err := test.parse(parser); !errors.Is(err, errInvalidUTF8) {
+				t.Fatalf("expected %v, got %v", errInvalidUTF8, err)
+			}
+		})
 	}
 }
 

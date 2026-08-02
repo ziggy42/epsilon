@@ -857,6 +857,9 @@ func (p *parser) parseUtf8String() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to read string bytes: %w", err)
 	}
+	if !utf8.Valid(stringBytes) {
+		return "", errInvalidUTF8
+	}
 	return string(stringBytes), nil
 }
 
