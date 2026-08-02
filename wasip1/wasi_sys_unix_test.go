@@ -19,6 +19,7 @@ package wasip1
 import (
 	"errors"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -935,7 +936,14 @@ func TestUtimes_BasicFile(t *testing.T) {
 	mtime := time.Date(2021, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
 
 	fstFlags := fstFlagsAtim | fstFlagsMtim
-	err := utimes(dirFd, "test.txt", atime, mtime, fstFlags, false)
+	err := utimes(
+		dirFd,
+		"test.txt",
+		uint64(atime),
+		uint64(mtime),
+		fstFlags,
+		false,
+	)
 	if err != nil {
 		t.Fatalf("utimes failed: %v", err)
 	}
@@ -958,7 +966,7 @@ func TestUtimes_SymlinkFollow(t *testing.T) {
 	defer dirFd.Close()
 	mtime := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
 
-	err := utimes(dirFd, "link", 0, mtime, fstFlagsMtim, true)
+	err := utimes(dirFd, "link", 0, uint64(mtime), fstFlagsMtim, true)
 	if err != nil {
 		t.Fatalf("utimes with followSymlinks=true failed: %v", err)
 	}
@@ -986,7 +994,7 @@ func TestUtimes_SymlinkNoFollow(t *testing.T) {
 	mtime := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC).UnixNano()
 
 	// No follow symlink: should update symlink itself, NOT target
-	err = utimes(dirFd, "link", 0, mtime, fstFlagsMtim, false)
+	err = utimes(dirFd, "link", 0, uint64(mtime), fstFlagsMtim, false)
 	if err != nil {
 		t.Fatalf("utimes with followSymlinks=false failed: %v", err)
 	}
@@ -1016,7 +1024,14 @@ func TestUtimes_Directory(t *testing.T) {
 
 	mtime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	err := utimes(dirFd, "subdir", 0, mtime.UnixNano(), fstFlagsMtim, false)
+	err := utimes(
+		dirFd,
+		"subdir",
+		0,
+		uint64(mtime.UnixNano()),
+		fstFlagsMtim,
+		false,
+	)
 	if err != nil {
 		t.Fatalf("utimes on directory failed: %v", err)
 	}
@@ -1027,6 +1042,33 @@ func TestUtimes_Directory(t *testing.T) {
 	}
 	if info.ModTime().Sub(mtime).Abs() > time.Second {
 		t.Errorf("dir Mtime: got %v, want %v", info.ModTime(), mtime)
+	}
+}
+
+func TestBuildTimespecPreservesUnsignedTimestamps(t *testing.T) {
+	times, err := buildTimespec(
+		math.MaxUint64,
+		math.MaxUint64,
+		fstFlagsAtim|fstFlagsMtim,
+	)
+	if err != nil {
+		if !errors.Is(err, syscall.ERANGE) {
+			t.Fatalf("buildTimespec failed: %v", err)
+		}
+		return
+	}
+
+	for index, timespec := range times {
+		if int64(timespec.Sec) != 18_446_744_073 ||
+			int64(timespec.Nsec) != 709_551_615 {
+			t.Errorf("time %d: got %+v", index, timespec)
+		}
+	}
+}
+
+func TestMapErrorRange(t *testing.T) {
+	if errno := mapError(syscall.ERANGE); errno != errnoRange {
+		t.Fatalf("expected errnoRange, got %d", errno)
 	}
 }
 

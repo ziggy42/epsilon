@@ -512,8 +512,8 @@ func (w *WasiModule) ToImports() *epsilon.ModuleImports {
 		AddHostFunc("fd_filestat_set_times", bind(func(args []any) int32 {
 			return w.fs.setFileStatTimes(
 				args[0].(int32),
-				args[1].(int64),
-				args[2].(int64),
+				uint64(args[1].(int64)),
+				uint64(args[2].(int64)),
 				args[3].(int32),
 			)
 		})).
@@ -564,8 +564,8 @@ func (w *WasiModule) ToImports() *epsilon.ModuleImports {
 				args[1].(int32),
 				args[2].(int32),
 				args[3].(int32),
-				args[4].(int64),
-				args[5].(int64),
+				uint64(args[4].(int64)),
+				uint64(args[5].(int64)),
 				args[6].(int32),
 			)
 		})).

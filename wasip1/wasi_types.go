@@ -120,6 +120,7 @@ const (
 	errnoNotSup      int32 = 58 // Not supported.
 	errnoPerm        int32 = 63 // Operation not permitted.
 	errnoPipe        int32 = 64 // Broken pipe.
+	errnoRange       int32 = 68 // Result too large.
 	errnoNotCapable  int32 = 76 // Extension: Capabilities insufficient.
 )
 

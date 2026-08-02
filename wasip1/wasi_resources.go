@@ -293,7 +293,7 @@ func (w *wasiResourceTable) setFileStatSize(fdIndex int32, size int64) int32 {
 
 func (w *wasiResourceTable) setFileStatTimes(
 	fdIndex int32,
-	atim, mtim int64,
+	atim, mtim uint64,
 	fstFlags int32,
 ) int32 {
 	fd, errCode := w.getFileOrDir(fdIndex, RightsFdFilestatSetTimes)
@@ -615,7 +615,7 @@ func (w *wasiResourceTable) pathFilestatGet(
 func (w *wasiResourceTable) pathFilestatSetTimes(
 	memory *epsilon.Memory,
 	fdIndex, flags, pathPtr, pathLen int32,
-	atim, mtim int64,
+	atim, mtim uint64,
 	fstFlags int32,
 ) int32 {
 	fd, errCode := w.getDir(fdIndex, RightsPathFilestatSetTimes)
