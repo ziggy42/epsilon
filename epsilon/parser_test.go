@@ -16,6 +16,7 @@ package epsilon
 
 import (
 	"bytes"
+	"io"
 	"reflect"
 	"slices"
 	"testing"
@@ -474,7 +475,7 @@ func TestParseTruncatedFunctionBody(t *testing.T) {
 	// actually an immediate for i32.const.
 	wasm := []byte{
 		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
-		0x01, 0x05, 0x01, 0x60, 0x00, 0x00, // type section
+		0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type section
 		0x03, 0x02, 0x01, 0x00, // function section
 		0x0a, 0x05, 0x01, 0x03, 0x00, 0x41, 0x0b, // i32.const 0x0B (truncated)
 	}
@@ -486,5 +487,71 @@ func TestParseTruncatedFunctionBody(t *testing.T) {
 	}
 	if err != errMissingEndOpcode {
 		t.Errorf("expected errMissingEndOpcode, got %v", err)
+	}
+}
+
+func TestParseSectionPayloadBounds(t *testing.T) {
+	header := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+	}
+	tests := []struct {
+		name    string
+		section []byte
+		wantErr error
+	}{
+		{
+			name:    "content outside payload",
+			section: []byte{byte(typeSectionId), 0x00, 0x00},
+			wantErr: io.EOF,
+		},
+		{
+			name:    "payload shorter than declared",
+			section: []byte{byte(typeSectionId), 0x02, 0x00},
+			wantErr: errSectionSizeMismatch,
+		},
+		{
+			name:    "trailing payload content",
+			section: []byte{byte(typeSectionId), 0x02, 0x00, 0x00},
+			wantErr: errSectionSizeMismatch,
+		},
+		{
+			name: "function body outside payload",
+			section: []byte{
+				byte(codeSectionId), 0x03, 0x01, 0x02, 0x00,
+			},
+			wantErr: io.ErrUnexpectedEOF,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			wasm := append(slices.Clone(header), test.section...)
+			_, err := newParser(
+				bytes.NewReader(wasm),
+				DefaultConfig(),
+			).parse()
+			if err != test.wantErr {
+				t.Fatalf("expected %v, got %v", test.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestParseCustomSectionDoesNotReadPastPayload(t *testing.T) {
+	wasm := []byte{
+		0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+		byte(customSectionId), 0x01, 0x01,
+		byte(typeSectionId), 0x01, 0x00,
+	}
+	reader := bytes.NewReader(wasm)
+	_, err := newParser(reader, DefaultConfig()).parse()
+	if err != io.EOF {
+		t.Fatalf("expected EOF, got %v", err)
+	}
+	if reader.Len() != 3 {
+		t.Fatalf(
+			"expected next section to remain unread, got %d bytes",
+			reader.Len(),
+		)
 	}
 }
