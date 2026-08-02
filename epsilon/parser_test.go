@@ -321,6 +321,50 @@ func TestParseImportTable(t *testing.T) {
 	}
 }
 
+func TestParseTableTypeRejectsInvalidReferenceType(t *testing.T) {
+	_, err := newParser(
+		bytes.NewReader([]byte{0x00}),
+		DefaultConfig(),
+	).parseTableType()
+	if err != errInvalidReferenceType {
+		t.Fatalf("expected %v, got %v", errInvalidReferenceType, err)
+	}
+}
+
+func TestParseElementRejectsInvalidReferenceType(t *testing.T) {
+	tests := []struct {
+		name    string
+		encoded []byte
+	}{
+		{
+			name:    "passive",
+			encoded: []byte{0x05, 0x00},
+		},
+		{
+			name: "active",
+			encoded: []byte{
+				0x06, 0x00, byte(i32Const), 0x00, byte(end), 0x00,
+			},
+		},
+		{
+			name:    "declarative",
+			encoded: []byte{0x07, 0x00},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := newParser(
+				bytes.NewReader(test.encoded),
+				DefaultConfig(),
+			).parseElementSegment()
+			if err != errInvalidReferenceType {
+				t.Fatalf("expected %v, got %v", errInvalidReferenceType, err)
+			}
+		})
+	}
+}
+
 func TestParseImportMemory(t *testing.T) {
 	wat := `(module (import "module" "memory" (memory 1)))`
 

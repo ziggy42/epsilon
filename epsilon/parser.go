@@ -36,6 +36,7 @@ var (
 	errInvalidImportDescriptor   = errors.New("invalid import descriptor")
 	errInvalidLimitsFormat       = errors.New("invalid limits format")
 	errInvalidMagicNumber        = errors.New("invalid magic number")
+	errInvalidReferenceType      = errors.New("invalid reference type")
 	errInvalidUTF8               = errors.New("invalid UTF-8")
 	errMalformedMemopFlags       = errors.New("malformed memop flags")
 	errMissingEndOpcode          = errors.New("missing end opcode")
@@ -576,7 +577,7 @@ func (p *parser) parseValueType() (ValueType, error) {
 }
 
 func (p *parser) parseTableType() (TableType, error) {
-	b, err := p.ReadByte()
+	referenceType, err := p.parseReferenceType()
 	if err != nil {
 		return TableType{}, err
 	}
@@ -584,7 +585,18 @@ func (p *parser) parseTableType() (TableType, error) {
 	if err != nil {
 		return TableType{}, err
 	}
-	return TableType{ReferenceType: ReferenceType(b), Limits: limits}, nil
+	return TableType{ReferenceType: referenceType, Limits: limits}, nil
+}
+
+func (p *parser) parseReferenceType() (ReferenceType, error) {
+	b, err := p.ReadByte()
+	if err != nil {
+		return 0, err
+	}
+	if b != byte(FuncRefType) && b != byte(ExternRefType) {
+		return 0, errInvalidReferenceType
+	}
+	return ReferenceType(b), nil
 }
 
 func (p *parser) parseMemoryType() (MemoryType, error) {
@@ -723,11 +735,10 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			offsetExpression:           offset,
 		}, nil
 	case 5: // Passive element with expressions.
-		b, err := p.ReadByte()
+		kind, err := p.parseReferenceType()
 		if err != nil {
 			return elementSegment{}, err
 		}
-		kind := ReferenceType(b)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
 			return elementSegment{}, err
@@ -746,11 +757,10 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 		if err != nil {
 			return elementSegment{}, err
 		}
-		refTypeByte, err := p.ReadByte()
+		kind, err := p.parseReferenceType()
 		if err != nil {
 			return elementSegment{}, err
 		}
-		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
 			return elementSegment{}, err
@@ -763,11 +773,10 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 			offsetExpression:           offset,
 		}, nil
 	case 7: // Declarative element with expressions.
-		refTypeByte, err := p.ReadByte()
+		kind, err := p.parseReferenceType()
 		if err != nil {
 			return elementSegment{}, err
 		}
-		kind := ReferenceType(refTypeByte)
 		exprs, err := parseVector(p, p.parseExpression)
 		if err != nil {
 			return elementSegment{}, err
