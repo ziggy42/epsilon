@@ -26,23 +26,26 @@ import (
 )
 
 var (
-	errFunctionTypeMismatch      = errors.New("function type count mismatch")
-	errInconsistentDataCount     = errors.New("inconsistent data count")
+	errFunctionTypeMismatch      = errors.New("function and code section have inconsistent lengths")
+	errInconsistentDataCount     = errors.New("data count and data section have inconsistent lengths")
 	errIntRepresentationTooLong  = errors.New("integer representation too long")
 	errIntegerTooLarge           = errors.New("integer too large")
 	errInvalidElementKind        = errors.New("invalid element kind")
 	errInvalidFunctionTypePrefix = errors.New("invalid function type prefix")
-	errInvalidGlobalMutability   = errors.New("invalid global mutability")
-	errInvalidImportDescriptor   = errors.New("invalid import descriptor")
-	errInvalidLimitsFormat       = errors.New("invalid limits format")
-	errInvalidMagicNumber        = errors.New("invalid magic number")
-	errInvalidReferenceType      = errors.New("invalid reference type")
-	errInvalidUTF8               = errors.New("invalid UTF-8")
+	errInvalidGlobalMutability   = errors.New("malformed mutability")
+	errInvalidImportDescriptor   = errors.New("malformed import kind")
+	errInvalidMagicNumber        = errors.New("magic header not detected")
+	errInvalidReferenceType      = errors.New("malformed reference type")
+	errInvalidUTF8               = errors.New("malformed UTF-8 encoding")
 	errMalformedMemopFlags       = errors.New("malformed memop flags")
 	errMissingEndOpcode          = errors.New("missing end opcode")
+	errEndOpcodeExpected         = errors.New("END opcode expected")
 	errPrefixedOpcodeOutOfRange  = errors.New("prefixed opcode out of range")
 	errSectionSizeMismatch       = errors.New("section size mismatch")
 	errUnexpectedContent         = errors.New("unexpected content after last section")
+	errUnexpectedEnd             = errors.New("unexpected end")
+	errLengthOutOfBounds         = errors.New("length out of bounds")
+	errSectionTruncated          = errors.New("unexpected end of section or function")
 )
 
 const (
@@ -56,9 +59,9 @@ const (
 )
 
 // maxInitialCapacity caps the up-front allocation parseVector and similar
-// callers perform from an attacker-controlled count. Real modules rarely
-// exceed a few thousand items per vector, so this is the common-case exact
-// size; pathological counts grow via append+EOF instead of OOMing on a
+// callers perform from an attacker-controlled count. Real modules rarely exceed
+// a few thousand items per vector, so this is the common-case exact size;
+// pathological counts grow via append+EOF instead of OOMing on a
 // pre-allocation.
 const maxInitialCapacity = 4096
 
@@ -95,7 +98,10 @@ type wasmReader interface {
 
 // parser is a parser for WASM modules.
 type parser struct {
-	reader         wasmReader
+	reader wasmReader
+	// bytesRemaining counts down the bytes still owed to the region being read.
+	// Any negative value means the parser is reading outside a bounded region and
+	// consumes whatever the input holds.
 	bytesRemaining int64
 	config         Config
 }
@@ -116,27 +122,54 @@ func newParser(reader io.Reader, config Config) *parser {
 
 func (p *parser) Read(bytes []byte) (int, error) {
 	if p.bytesRemaining == 0 {
-		return 0, io.EOF
+		return 0, errSectionTruncated
 	}
 	if p.bytesRemaining > 0 && int64(len(bytes)) > p.bytesRemaining {
 		bytes = bytes[:p.bytesRemaining]
 	}
 	n, err := p.reader.Read(bytes)
-	if p.bytesRemaining > 0 {
-		p.bytesRemaining -= int64(n)
+	p.bytesRemaining -= int64(n)
+	if n < len(bytes) && err == io.EOF {
+		return n, p.outOfInput()
 	}
 	return n, err
 }
 
 func (p *parser) ReadByte() (byte, error) {
 	if p.bytesRemaining == 0 {
-		return 0, io.EOF
+		return 0, errSectionTruncated
 	}
 	b, err := p.reader.ReadByte()
-	if err == nil && p.bytesRemaining > 0 {
-		p.bytesRemaining--
+	if err != nil {
+		if err == io.EOF {
+			return 0, p.outOfInput()
+		}
+		return 0, err
 	}
-	return b, err
+	p.bytesRemaining--
+	return b, nil
+}
+
+// discardRemaining consumes whatever is left of the bounded region the parser
+// is reading. Reaching its end is the expected outcome here, not a failure.
+func (p *parser) discardRemaining() error {
+	if p.bytesRemaining == 0 {
+		return nil
+	}
+	_, err := io.Copy(io.Discard, p)
+	if err == errSectionTruncated {
+		return nil
+	}
+	return err
+}
+
+// outOfInput states why a read found no more input: bytes still owed to a
+// section mean the section declared a longer payload than the module holds.
+func (p *parser) outOfInput() error {
+	if p.bytesRemaining > 0 {
+		return errLengthOutOfBounds
+	}
+	return errUnexpectedEnd
 }
 
 // parse takes a byte slice and returns a Module.
@@ -158,18 +191,18 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	var dataSegments []dataSegment
 	var dataCount *uint32
 
-	// We initialize lastSection to CustomSectionId since custom sections
-	// can be in any order.
+	// We initialize lastSection to CustomSectionId since custom sections can be
+	// in any order.
 	lastSection := customSectionId
 
 	for {
 		sectionIdByte, err := p.ReadByte()
-		if err == io.EOF {
+		if err == errUnexpectedEnd {
 			break
 		}
 
 		if err != nil {
-			return nil, fmt.Errorf("failed to read section ID: %w", err)
+			return nil, err
 		}
 
 		sectionId := sectionId(sectionIdByte)
@@ -182,7 +215,7 @@ func (p *parser) parse() (*moduleDefinition, error) {
 
 		payloadLen, err := p.parseUint32()
 		if err != nil {
-			return nil, fmt.Errorf("failed to read payload length: %w", err)
+			return nil, err
 		}
 
 		p.bytesRemaining = int64(payloadLen)
@@ -293,17 +326,25 @@ func (p *parser) parse() (*moduleDefinition, error) {
 }
 
 func (p *parser) parseHeader() error {
-	header := make([]byte, 8)
-	if _, err := io.ReadFull(p, header); err != nil {
+	// The magic number is checked before the version is read, so input too short
+	// to hold a header counts as truncated only while what it does hold still
+	// looks like WebAssembly.
+	var header [8]byte
+	magic := header[:len(wasmMagicNumber)]
+	if _, err := io.ReadFull(p, magic); err != nil {
 		return err
 	}
-
-	if !bytes.HasPrefix(header, []byte(wasmMagicNumber)) {
+	if !bytes.Equal(magic, []byte(wasmMagicNumber)) {
 		return errInvalidMagicNumber
 	}
-	version := int32(binary.LittleEndian.Uint32(header[4:8]))
+
+	versionBytes := header[len(wasmMagicNumber):]
+	if _, err := io.ReadFull(p, versionBytes); err != nil {
+		return err
+	}
+	version := int32(binary.LittleEndian.Uint32(versionBytes))
 	if version != supportedWasmVersion {
-		return fmt.Errorf("unsupported WASM version: %d", version)
+		return fmt.Errorf("unknown binary version %d", version)
 	}
 	return nil
 }
@@ -325,8 +366,7 @@ func (p *parser) parseCustomSection() error {
 	}
 
 	// Discard the remaining bytes of the section.
-	_, err = io.Copy(io.Discard, p)
-	return err
+	return p.discardRemaining()
 }
 
 func (p *parser) parseFunction() (function, error) {
@@ -337,7 +377,7 @@ func (p *parser) parseFunction() (function, error) {
 
 	sectionBytesRemaining := p.bytesRemaining
 	if int64(size) > sectionBytesRemaining {
-		return function{}, io.ErrUnexpectedEOF
+		return function{}, errLengthOutOfBounds
 	}
 	p.bytesRemaining = int64(size)
 
@@ -364,19 +404,22 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	result, err := p.readCode(size, nil)
+	result, err := p.readCode(size, false)
 	if err != nil {
+		if err == errSectionTruncated && sectionBytesRemaining > int64(size) {
+			return function{}, errEndOpcodeExpected
+		}
 		return function{}, err
 	}
 
 	// Discard any bytes of the function body the parser didn't consume (e.g.
 	// trailing bytes after an early end opcode) so the underlying reader is
 	// positioned at the start of the next function.
-	if _, err := io.Copy(io.Discard, p); err != nil {
+	if err := p.discardRemaining(); err != nil {
 		return function{}, err
 	}
 	if p.bytesRemaining != 0 {
-		return function{}, io.ErrUnexpectedEOF
+		return function{}, errSectionTruncated
 	}
 	p.bytesRemaining = sectionBytesRemaining - int64(size)
 
@@ -414,7 +457,7 @@ func (p *parser) parseLocalVariables() (localEntry, error) {
 		return localEntry{}, err
 	}
 	if count > math.MaxInt32 {
-		return localEntry{}, fmt.Errorf("too many local variables: %d", count)
+		return localEntry{}, fmt.Errorf("too many locals %d", count)
 	}
 
 	valueType, err := p.parseValueType()
@@ -499,7 +542,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 		if err != nil {
 			return dataSegment{}, err
 		}
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -509,7 +552,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 			offsetExpression: offsetExpression,
 		}, nil
 	case 1:
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -523,7 +566,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 		if err != nil {
 			return dataSegment{}, err
 		}
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -539,11 +582,11 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 }
 
 func (p *parser) parseFunctionType() (FunctionType, error) {
-	b, err := p.ReadByte()
+	prefix, err := p.readSleb128(1)
 	if err != nil {
 		return FunctionType{}, err
 	}
-	if b != 0x60 {
+	if int64(prefix) != -0x20 {
 		return FunctionType{}, errInvalidFunctionTypePrefix
 	}
 
@@ -637,7 +680,7 @@ func (p *parser) parseGlobalType() (GlobalType, error) {
 func (p *parser) parseElementSegment() (elementSegment, error) {
 	flags, err := p.parseUint32()
 	if err != nil {
-		return elementSegment{}, fmt.Errorf("failed to read element flags: %w", err)
+		return elementSegment{}, err
 	}
 
 	switch flags {
@@ -792,9 +835,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	result, err := p.readCode(0, func(instruction []uint64) bool {
-		return opcode(instruction[0]) == end
-	})
+	result, err := p.readCode(0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -802,26 +843,26 @@ func (p *parser) parseExpression() ([]uint64, error) {
 }
 
 func (p *parser) parseLimits() (Limits, error) {
-	b, err := p.ReadByte()
+	// The flags are a single-bit LEB128, so an over-long encoding or a value that
+	// does not fit is rejected as the malformed integer it is, before anything is
+	// read on its behalf.
+	flags, err := p.readUleb128(1)
 	if err != nil {
 		return Limits{}, err
 	}
+
 	min, err := p.parseUint32()
 	if err != nil {
 		return Limits{}, err
 	}
-	switch b {
-	case 0:
+	if flags == 0 {
 		return Limits{Min: min}, nil
-	case 1:
-		max, err := p.parseUint32()
-		if err != nil {
-			return Limits{}, err
-		}
-		return Limits{Min: min, Max: &max}, nil
-	default:
-		return Limits{}, errInvalidLimitsFormat
 	}
+	max, err := p.parseUint32()
+	if err != nil {
+		return Limits{}, err
+	}
+	return Limits{Min: min, Max: &max}, nil
 }
 
 func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
@@ -830,7 +871,7 @@ func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 		return nil, err
 	}
 	items := make([]T, 0, min(count, maxInitialCapacity))
-	for i := uint32(0); i < count; i++ {
+	for range count {
 		parsed, err := parse()
 		if err != nil {
 			return nil, err
@@ -848,6 +889,14 @@ func (p *parser) parseUint32() (uint32, error) {
 	return uint32(val), nil
 }
 
+func (p *parser) parseByteVector() ([]byte, error) {
+	length, err := p.parseUint32()
+	if err != nil {
+		return nil, err
+	}
+	return p.readN(uint64(length))
+}
+
 func (p *parser) parseUtf8String() (string, error) {
 	length, err := p.parseUint32()
 	if err != nil {
@@ -855,7 +904,7 @@ func (p *parser) parseUtf8String() (string, error) {
 	}
 	stringBytes, err := p.readN(uint64(length))
 	if err != nil {
-		return "", fmt.Errorf("failed to read string bytes: %w", err)
+		return "", err
 	}
 	if !utf8.Valid(stringBytes) {
 		return "", errInvalidUTF8
@@ -863,12 +912,20 @@ func (p *parser) parseUtf8String() (string, error) {
 	return string(stringBytes), nil
 }
 
-// readN reads exactly length bytes from the reader. The initial buffer
-// capacity is capped at maxInitialCapacity so an attacker-controlled
-// length cannot force a huge up-front allocation; the buffer grows as needed
-// and a short read surfaces as an error.
+// readN reads exactly length bytes from the reader. The initial buffer capacity
+// is capped at maxInitialCapacity so an attacker-controlled length cannot force
+// a huge up-front allocation; the buffer grows as needed and a short read
+// surfaces as an error.
 func (p *parser) readN(length uint64) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, min(length, maxInitialCapacity)))
+	if length <= maxInitialCapacity {
+		data := make([]byte, int(length))
+		if _, err := io.ReadFull(p, data); err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, maxInitialCapacity))
 	if _, err := io.CopyN(buf, p, int64(length)); err != nil {
 		return nil, err
 	}
@@ -925,24 +982,23 @@ type bytecodeResult struct {
 // bytecode the VM executes, and returns it with the jump caches that map each
 // block/if to its branch targets.
 //
-// Decoding stops at the first instruction for which isEnd returns true; a nil
-// isEnd decodes until the reader reaches EOF, which a function body's bounded
-// reader hits at the end of the body. A sequence that does not end with an end
-// opcode is rejected with errMissingEndOpcode.
+// Decoding stops at the first end opcode when stopAtEnd is true, or when the
+// reader runs out otherwise. A sequence the input ran out of is rejected as
+// truncated, one that merely lacks its end opcode with errMissingEndOpcode.
 //
 // sizeHint only seeds the bytecode buffer capacity to avoid regrowth: it is the
 // body's declared byte length, or 0 if unknown, and need not be accurate.
 func (p *parser) readCode(
 	sizeHint uint32,
-	isEnd func([]uint64) bool,
+	stopAtEnd bool,
 ) (bytecodeResult, error) {
 	// sizeHint is attacker-controlled (the function body's declared size), so cap
 	// the initial capacity at maxInitialCapacity. The buffer still grows via
 	// append as real bytes are decoded; a bogus huge size cannot force a large
 	// up-front allocation.
 	bytecode := make([]uint64, 0, min(sizeHint, maxInitialCapacity))
-	// The jump caches are allocated lazily: a function with no control flow
-	// never branches, so it needs neither map.
+	// The jump caches are allocated lazily: a function with no control flow never
+	// branches, so it needs neither map.
 	var jumpCache map[uint32]uint32
 	var jumpElseCache map[uint32]uint32
 
@@ -952,14 +1008,19 @@ func (p *parser) readCode(
 	for {
 		opcodeVal, err := p.readOpcode()
 		if err != nil {
-			if err == io.EOF {
+			if err == errSectionTruncated || err == errUnexpectedEnd {
+				// Input that ran out mid-sequence is truncated, whatever it stopped
+				// inside; only a sequence that reads to completion can be missing its
+				// end opcode.
+				if lastOp != end || len(controlStack) > 0 {
+					return bytecodeResult{}, err
+				}
 				break
 			}
 			return bytecodeResult{}, err
 		}
 
 		lastOp = opcodeVal
-		currentInstructionStart := len(bytecode)
 		bytecode = append(bytecode, uint64(opcodeVal))
 
 		switch opcodeVal {
@@ -1198,7 +1259,7 @@ func (p *parser) readCode(
 			// No operands
 		}
 
-		if isEnd != nil && isEnd(bytecode[currentInstructionStart:]) {
+		if stopAtEnd && opcodeVal == end {
 			break
 		}
 	}
@@ -1280,16 +1341,17 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 		return 0, 0, 0, err
 	}
 
-	// The alignment exponent must be < 32.
-	// We also have to remove bit 6, used for multi memory.
+	// The alignment exponent must be < 32. Bit 6 is not part of it: it marks an
+	// explicit memory index, which only multi-memory allows.
 	if (align & ^sixthBitMask) >= 32 {
 		return 0, 0, 0, errMalformedMemopFlags
 	}
 
 	memoryIndex := uint64(0)
-	// If bit 6 is set, this instruction is using an explicit memory index.
-	// This is relevant in WASM 3.
 	if align&sixthBitMask != 0 {
+		if !p.config.ExperimentalMultipleMemories {
+			return 0, 0, 0, errMalformedMemopFlags
+		}
 		memoryIndex, err = p.readUint32()
 		if err != nil {
 			return 0, 0, 0, err
@@ -1351,6 +1413,9 @@ func (p *parser) readUleb128(bitWidth uint) (uint64, error) {
 	for byteIndex := uint(0); byteIndex < maxBytes; byteIndex++ {
 		b, err := p.ReadByte()
 		if err != nil {
+			if byteIndex > 0 && err == errSectionTruncated {
+				return 0, errIntRepresentationTooLong
+			}
 			return 0, err
 		}
 
@@ -1379,6 +1444,9 @@ func (p *parser) readSleb128(maxBytes int) (uint64, error) {
 	for {
 		b, err = p.ReadByte()
 		if err != nil {
+			if bytesRead > 0 && err == errSectionTruncated {
+				return 0, errIntRepresentationTooLong
+			}
 			return 0, err
 		}
 		bytesRead++

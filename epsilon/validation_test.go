@@ -148,7 +148,17 @@ func TestMemoryIndexValidation(t *testing.T) {
 		0x0b, // end
 	}
 
-	module, err := newParser(bytes.NewReader(wasm), DefaultConfig()).parse()
+	// The explicit memory index only parses with multi-memory on, so the module
+	// has to be read under the same config it is validated under.
+	config := Config{
+		MaxCallStackDepth:            DefaultMaxCallStackDepth,
+		CallStackPreallocationSize:   DefaultCallStackPreallocationSize,
+		MaxTableElements:             DefaultMaxTableElements,
+		MaxMemoryPages:               DefaultMaxMemoryPages,
+		MaxLocalsPerFunction:         DefaultMaxLocalsPerFunction,
+		ExperimentalMultipleMemories: true,
+	}
+	module, err := newParser(bytes.NewReader(wasm), config).parse()
 	if err != nil {
 		t.Fatalf("failed to parse module: %v", err)
 	}

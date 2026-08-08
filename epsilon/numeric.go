@@ -21,7 +21,6 @@ import (
 
 var (
 	errIntegerDivideByZero        = errors.New("integer divide by zero")
-	errIntegerDivideOverflow      = errors.New("integer divide overflow")
 	errIntegerOverflow            = errors.New("integer overflow")
 	errInvalidConversionToInteger = errors.New("invalid conversion to integer")
 )
@@ -48,7 +47,7 @@ func divS32(a, b int32) (int32, error) {
 		return 0, errIntegerDivideByZero
 	}
 	if a == math.MinInt32 && b == -1 {
-		return 0, errIntegerDivideOverflow
+		return 0, errIntegerOverflow
 	}
 	return a / b, nil
 }
@@ -58,7 +57,7 @@ func divS64(a, b int64) (int64, error) {
 		return 0, errIntegerDivideByZero
 	}
 	if a == math.MinInt64 && b == -1 {
-		return 0, errIntegerDivideOverflow
+		return 0, errIntegerOverflow
 	}
 	return a / b, nil
 }
@@ -138,9 +137,9 @@ func sqrt[T wasmFloat](a T) T {
 
 // minF32 returns the wasm minimum of a and b. Go's min propagates an operand
 // NaN unchanged, which leaves a signaling NaN signaling and varies across
-// architectures; the spec requires an arithmetic NaN, and the canonical NaN
-// is one. Go's min also cannot be used for the zeros, where the sign decides
-// the result rather than the comparison.
+// architectures; the spec requires an arithmetic NaN, and the canonical NaN is
+// one. Go's min also cannot be used for the zeros, where the sign decides the
+// result rather than the comparison.
 func minF32(a, b float32) float32 {
 	if a != a || b != b {
 		return math.Float32frombits(canonicalNaNF32)

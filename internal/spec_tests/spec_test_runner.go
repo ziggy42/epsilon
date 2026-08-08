@@ -41,11 +41,10 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
 	tableLimitMax := uint32(20)
 
-	// Spec tests intentionally declare resources at the WebAssembly spec
-	// maxima (e.g. tables with Max=2^32-1) to exercise edge cases. Set the
-	// configured ceilings to the spec maxima so the runner reflects what
-	// the engine validator must accept by spec, not what hosts ship by
-	// default.
+	// Spec tests intentionally declare resources at the WebAssembly spec maxima
+	// (e.g. tables with Max=2^32-1) to exercise edge cases. Set the configured
+	// ceilings to the spec maxima so the runner reflects what the engine
+	// validator must accept by spec, not what hosts ship by default.
 	runtime := epsilon.NewRuntimeWithConfig(epsilon.Config{
 		MaxCallStackDepth:          epsilon.DefaultMaxCallStackDepth,
 		CallStackPreallocationSize: epsilon.DefaultCallStackPreallocationSize,
@@ -162,13 +161,7 @@ func (r *specTestRunner) run(commands []wabt.Command) {
 
 func (r *specTestRunner) handleAssertExhaustion(cmd wabt.Command) {
 	_, err := r.handleAction(cmd.Action)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected call stack exhaustion, but got no error")
-	}
-
-	if err.Error() != "call stack exhausted" {
-		r.fatalf(cmd.Line, "expected call stack exhaustion, but got: %v", err)
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleRegister(cmd wabt.Command) {
@@ -223,28 +216,70 @@ func (r *specTestRunner) handleAssertReturn(cmd wabt.Command) {
 }
 
 func (r *specTestRunner) handleAssertTrap(cmd wabt.Command) {
+	var err error
 	if cmd.Filename != "" {
 		// This is asserting that instantiating a module will trap.
 		wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
-		_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-		if err == nil {
-			r.fatalf(cmd.Line, "expected trap during instantiation, but got no error")
-		}
+		_, err = r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
 	} else {
 		// This is asserting that a function call will trap.
-		_, err := r.handleAction(cmd.Action)
-		if err == nil {
-			r.fatalf(cmd.Line, "expected trap, but got no error")
-		}
+		_, err = r.handleAction(cmd.Action)
 	}
+	r.assertFailedWithText(cmd, err)
+}
+
+// binaryIndistinguishableReasons maps a reason an assertion expects to one
+// epsilon reports instead, where the two cannot be told apart from the binary
+// a module was compiled to.
+//
+// select.wast expects "invalid result arity" from (select (result) …), but
+// wat2wasm drops the empty result vector and emits the untyped select opcode,
+// so that module is byte-identical to the one the assertion before it expects
+// to fail with "type mismatch". Only the text format tells them apart.
+//
+// The rest are reasons the reference interpreter reaches by reading past a
+// section's declared size and reporting whatever it then trips over: the byte
+// beginning the next section, read as an end opcode, an instruction, or a name
+// length. binary.wast:93 says as much in a comment. Epsilon stops at the size
+// the section declared, so it reports the boundary it hit instead; matching the
+// interpreter would mean letting a declared length be overrun.
+var binaryIndistinguishableReasons = map[string]string{
+	"invalid result arity":  "type mismatch",
+	"section size mismatch": "unexpected end of section or function",
+	"illegal opcode":        "unexpected end of section or function",
+	"length out of bounds":  "unexpected end of section or function",
+}
+
+// assertFailedWithText reports a test failure unless err states the reason the
+// assertion expects.
+func (r *specTestRunner) assertFailedWithText(cmd wabt.Command, err error) {
+	r.t.Helper()
+	if err == nil {
+		r.fatalf(cmd.Line, "expected %q, but got no error", cmd.Text)
+	}
+	if statesReason(cmd.Text, err.Error()) {
+		return
+	}
+	alternative, ok := binaryIndistinguishableReasons[cmd.Text]
+	if ok && statesReason(alternative, err.Error()) {
+		return
+	}
+	r.fatalf(cmd.Line, "expected %q, but got: %v", cmd.Text, err)
+}
+
+// statesReason reports whether message opens with the failure reason an
+// assertion expects. Epsilon appends context to some messages (the offending
+// index, or which check within a broader category failed), so the reason may
+// stop short of the full message, but only at a word boundary.
+func statesReason(reason, message string) bool {
+	rest, ok := strings.CutPrefix(message, reason)
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == ':')
 }
 
 func (r *specTestRunner) handleAssertInvalid(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected validation error, but got no error")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
@@ -256,25 +291,19 @@ func (r *specTestRunner) handleAssertMalformed(cmd wabt.Command) {
 
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected validation error, but got no error")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertUninstantiable(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected uninstantiable module, it wasn't")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAssertUnlinkable(cmd wabt.Command) {
 	wasm := bytes.NewReader(r.wasmDict[cmd.Filename])
 	_, err := r.runtime.InstantiateModuleWithImports(wasm, r.buildImports()...)
-	if err == nil {
-		r.fatalf(cmd.Line, "expected unlinkable module, it wasn't")
-	}
+	r.assertFailedWithText(cmd, err)
 }
 
 func (r *specTestRunner) handleAction(action *wabt.Action) ([]any, error) {
@@ -397,9 +426,9 @@ func scalarMatches(raw, valueType string, actual any) (bool, error) {
 }
 
 const (
-	// canonicalNaN32 is the f32 canonical NaN with the sign bit cleared; a
-	// NaN is arithmetic when its payload is at least the canonical one, i.e.
-	// when the most significant payload bit is set.
+	// canonicalNaN32 is the f32 canonical NaN with the sign bit cleared; a NaN is
+	// arithmetic when its payload is at least the canonical one, i.e. when the
+	// most significant payload bit is set.
 	canonicalNaN32 = uint32(0x7fc00000)
 	canonicalNaN64 = uint64(0x7ff8000000000000)
 )

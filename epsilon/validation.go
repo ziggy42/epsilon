@@ -20,37 +20,44 @@ import (
 )
 
 var (
-	errAlignmentTooLarge           = errors.New("alignment too large")
-	errBrLabelArityMismatch        = errors.New("br label arity mismatch")
-	errBrLabelIndexOutOfBounds     = errors.New("br label index out of bounds")
+	errAlignmentTooLarge           = errors.New("alignment must not be larger than natural")
+	errBrLabelArityMismatch        = errors.New("type mismatch: br label arity mismatch")
 	errControlStackEmpty           = errors.New("control stack empty")
-	errDataCountNotSet             = errors.New("data count not set")
-	errDataIndexOutOfBounds        = errors.New("data index out of bounds")
-	errDuplicateExport             = errors.New("duplicate export")
-	errElementIndexOutOfBounds     = errors.New("element index out of bounds")
+	errDuplicateExport             = errors.New("duplicate export name")
 	errElseMustMatchIf             = errors.New("else must match if")
-	errFunctionIndexOutOfBounds    = errors.New("function index out of bounds")
-	errGlobalIndexOutOfBounds      = errors.New("global index out of bounds")
 	errGlobalIsImmutable           = errors.New("global is immutable")
-	errInvalidCallIndirectType     = errors.New("invalid call_indirect type")
-	errInvalidConstantExpression   = errors.New("invalid constant expression")
+	errIllegalOpcode               = errors.New("illegal opcode")
+	errInvalidCallIndirectType     = errors.New("unknown type")
+	errInvalidConstantExpression   = errors.New("constant expression required")
 	errInvalidLimits               = errors.New("invalid limits")
+	errLimitsMinGreaterThanMax     = errors.New("size minimum must not be greater than maximum")
+	errMemorySizeTooLarge          = errors.New("memory size must be at most 65536 pages (4GiB)")
 	errInvalidRefNullType          = errors.New("invalid ref.null type")
-	errInvalidStartFunction        = errors.New("invalid start function")
-	errInvalidTableType            = errors.New("invalid table type")
+	errInvalidResultArity          = errors.New("invalid result arity")
+	errInvalidStartFunction        = errors.New("start function must have no parameters and no results")
+	errInvalidTableType            = errors.New("type mismatch: table is not funcref")
 	errInvalidBlockType            = errors.New("invalid block type")
-	errLocalIndexOutOfBounds       = errors.New("local index out of bounds")
-	errMemoryIndexOutOfBounds      = errors.New("memory index out of bounds")
 	errMultipleMemoriesNotEnabled  = errors.New("multiple memories not enabled")
+	errDataCountSectionRequired    = errors.New("data count section required")
+	errZeroByteExpected            = errors.New("zero byte expected")
 	errReturnTypeNotSet            = errors.New("return type not set")
-	errSimdLaneIndexOutOfBounds    = errors.New("simd lane index out of bounds")
-	errStackHeightMismatch         = errors.New("stack height mismatch")
-	errTableIndexOutOfBounds       = errors.New("table index out of bounds")
+	errSimdLaneIndexOutOfBounds    = errors.New("invalid lane index")
+	errStackHeightMismatch         = errors.New("type mismatch: stack height mismatch")
 	errTypeMismatch                = errors.New("type mismatch")
 	errUnclosedControlFrame        = errors.New("unclosed control frame")
 	errUndeclaredFunctionReference = errors.New("undeclared function reference")
-	errValueStackUnderflow         = errors.New("value stack underflow")
+	errValueStackUnderflow         = errors.New("type mismatch: value stack underflow")
 )
+
+// unknownIndex reports an index immediate that is out of range for the module
+// index space it addresses, in the "unknown <space> <index>" form the spec
+// words these failures.
+func unknownIndex(space string, index uint64) error {
+	return fmt.Errorf("unknown %s %d", space, index)
+}
+
+// specMaxMemoryPages is the number of 64KiB pages a 32-bit memory may declare.
+const specMaxMemoryPages = 65536
 
 type bottomType struct{}
 
@@ -89,6 +96,7 @@ type validator struct {
 	importedTypes       []GlobalType // Only includes imported globals.
 	elemTypes           []ReferenceType
 	dataCount           *uint32
+	hasDataSegments     bool
 	referencedFunctions map[uint32]bool
 	config              Config
 	code                []uint64
@@ -122,7 +130,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 		switch t := imp.importType.(type) {
 		case functionTypeIndex:
 			if uint32(t) >= uint32(len(v.typeDefs)) {
-				return errTypeMismatch
+				return unknownIndex("type", uint64(t))
 			}
 
 			v.funcTypes = append(v.funcTypes, module.types[t])
@@ -135,7 +143,10 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 			}
 			v.tableTypes = append(v.tableTypes, t)
 		case MemoryType:
-			if err := validateLimits(t.Limits, v.config.MaxMemoryPages); err != nil {
+			if err := validateMemoryLimits(
+				t.Limits,
+				v.config.MaxMemoryPages,
+			); err != nil {
 				return err
 			}
 			v.memTypes = append(v.memTypes, t)
@@ -147,7 +158,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 
 	for _, function := range module.funcs {
 		if function.typeIndex >= uint32(len(module.types)) {
-			return errFunctionIndexOutOfBounds
+			return unknownIndex("type", uint64(function.typeIndex))
 		}
 		v.funcTypes = append(v.funcTypes, module.types[function.typeIndex])
 	}
@@ -161,7 +172,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 	}
 
 	for _, memoryType := range module.memories {
-		err := validateLimits(memoryType.Limits, v.config.MaxMemoryPages)
+		err := validateMemoryLimits(memoryType.Limits, v.config.MaxMemoryPages)
 		if err != nil {
 			return err
 		}
@@ -203,6 +214,7 @@ func (v *validator) validateModule(module *moduleDefinition) error {
 	}
 
 	v.dataCount = module.dataCount
+	v.hasDataSegments = len(module.dataSegments) > 0
 	for _, data := range module.dataSegments {
 		if err := v.validateDataSegment(&data); err != nil {
 			return err
@@ -352,8 +364,8 @@ func (v *validator) validateConstExpression(
 	for v.pc < uint(len(v.code)) {
 		op := opcode(v.next())
 
-		if !v.isConstantOpcode(op) {
-			return errInvalidConstantExpression
+		if err := v.validateConstantOpcode(op); err != nil {
+			return err
 		}
 
 		// The order of the statements is important here. The validation for RefFunc
@@ -375,16 +387,34 @@ func (v *validator) validateConstExpression(
 	return nil
 }
 
-func (v *validator) isConstantOpcode(op opcode) bool {
+// validateConstantOpcode rejects an opcode that may not appear in a constant
+// expression. Only an immutable imported global is in scope for global.get
+// there, so any other global index names one that does not exist yet.
+func (v *validator) validateConstantOpcode(op opcode) error {
 	if op == globalGet {
 		globalIndex := v.code[v.pc]
 		if globalIndex >= uint64(len(v.importedTypes)) {
-			return false
+			return unknownIndex("global", globalIndex)
 		}
-
-		return !v.importedTypes[globalIndex].IsMutable
+		if v.importedTypes[globalIndex].IsMutable {
+			return errInvalidConstantExpression
+		}
+		return nil
 	}
 
+	if isConstantOpcode(op) {
+		return nil
+	}
+
+	// A byte that is no instruction at all is illegal wherever it appears, not
+	// merely an instruction a constant expression may not use.
+	if err := v.validate(op); errors.Is(err, errIllegalOpcode) {
+		return err
+	}
+	return errInvalidConstantExpression
+}
+
+func isConstantOpcode(op opcode) bool {
 	return op == i32Const ||
 		op == i64Const ||
 		op == f32Const ||
@@ -678,7 +708,7 @@ func (v *validator) validate(op opcode) error {
 	case memoryFill:
 		return v.validateMemoryFill()
 	default:
-		return fmt.Errorf("unknown opcode %d", op)
+		return fmt.Errorf("%w %d", errIllegalOpcode, op)
 	}
 }
 
@@ -742,7 +772,7 @@ func (v *validator) validateEnd() error {
 func (v *validator) validateBr() error {
 	labelIndex := uint32(v.next())
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errBrLabelIndexOutOfBounds
+		return unknownIndex("label", uint64(labelIndex))
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -757,7 +787,7 @@ func (v *validator) validateBr() error {
 func (v *validator) validateBrIf() error {
 	labelIndex := uint32(v.next())
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errBrLabelIndexOutOfBounds
+		return unknownIndex("label", uint64(labelIndex))
 	}
 
 	if _, err := v.popExpectedValue(I32); err != nil {
@@ -785,7 +815,7 @@ func (v *validator) validateBrTable() error {
 	}
 
 	if labelIndex >= uint32(len(v.controlStack)) {
-		return errBrLabelIndexOutOfBounds
+		return unknownIndex("label", uint64(labelIndex))
 	}
 
 	frameIndex := len(v.controlStack) - 1 - int(labelIndex)
@@ -794,7 +824,7 @@ func (v *validator) validateBrTable() error {
 
 	for _, index := range table {
 		if index >= uint64(len(v.controlStack)) {
-			return errBrLabelIndexOutOfBounds
+			return unknownIndex("label", index)
 		}
 
 		frameIndex := len(v.controlStack) - 1 - int(index)
@@ -906,7 +936,7 @@ func (v *validator) validateSelect(t ValueType) error {
 func (v *validator) validateSelectT() error {
 	size := v.next()
 	if size != 1 {
-		return errTypeMismatch
+		return errInvalidResultArity
 	}
 	t := toValueType(v.next())
 	if t == bottom {
@@ -945,7 +975,7 @@ func (v *validator) validateLocalSet() error {
 func (v *validator) validateGlobalGet() error {
 	globalIndex := v.next()
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return errGlobalIndexOutOfBounds
+		return unknownIndex("global", globalIndex)
 	}
 	v.pushValue(v.globalTypes[globalIndex].ValueType)
 	return nil
@@ -954,7 +984,7 @@ func (v *validator) validateGlobalGet() error {
 func (v *validator) validateGlobalSet() error {
 	globalIndex := v.next()
 	if globalIndex >= uint64(len(v.globalTypes)) {
-		return errGlobalIndexOutOfBounds
+		return unknownIndex("global", globalIndex)
 	}
 
 	globalType := v.globalTypes[globalIndex]
@@ -970,7 +1000,7 @@ func (v *validator) validateLoad(valueType ValueType, sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
@@ -988,7 +1018,7 @@ func (v *validator) validateStore(valueType ValueType, sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
@@ -1018,7 +1048,7 @@ func (v *validator) validateMemArg(align uint64, nBytes uint32) error {
 func (v *validator) validateMemorySize() error {
 	memoryIndex := uint32(v.next())
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1031,7 +1061,7 @@ func (v *validator) validateMemorySize() error {
 func (v *validator) validateMemoryGrow() error {
 	memoryIndex := uint32(v.next())
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
@@ -1052,14 +1082,10 @@ func (v *validator) validateMemoryFill() error {
 func (v *validator) validateMemoryInit() error {
 	dataIndex := uint32(v.next())
 	memoryIndex := uint32(v.next())
-	if v.dataCount == nil {
-		return errDataCountNotSet
-	}
-
-	if dataIndex >= *v.dataCount {
-		return errDataIndexOutOfBounds
-	}
 	if err := v.validateMemoryExists(memoryIndex); err != nil {
+		return err
+	}
+	if err := v.validateDataSegmentExists(dataIndex); err != nil {
 		return err
 	}
 	_, err := v.popExpectedValues([]ValueType{I32, I32, I32})
@@ -1081,28 +1107,28 @@ func (v *validator) validateMemoryCopy() error {
 
 func (v *validator) validateFunctionTypeExists(index uint32) error {
 	if index >= uint32(len(v.funcTypes)) {
-		return errFunctionIndexOutOfBounds
+		return unknownIndex("function", uint64(index))
 	}
 	return nil
 }
 
 func (v *validator) validateTableExists(tableIndex uint32) error {
 	if tableIndex >= uint32(len(v.tableTypes)) {
-		return errTableIndexOutOfBounds
+		return unknownIndex("table", uint64(tableIndex))
 	}
 	return nil
 }
 
 func (v *validator) validateMemoryExists(memoryIndex uint32) error {
 	if memoryIndex >= uint32(len(v.memTypes)) {
-		return errMemoryIndexOutOfBounds
+		return unknownIndex("memory", uint64(memoryIndex))
 	}
 	return nil
 }
 
 func (v *validator) validateGlobalExists(globalIndex uint32) error {
 	if globalIndex >= uint32(len(v.globalTypes)) {
-		return errGlobalIndexOutOfBounds
+		return unknownIndex("global", uint64(globalIndex))
 	}
 	return nil
 }
@@ -1200,11 +1226,11 @@ func (v *validator) validateTableSet() error {
 func (v *validator) validateTableInit() error {
 	elemIndex := uint32(v.next())
 	tableIndex := uint32(v.next())
-	if elemIndex >= uint32(len(v.elemTypes)) {
-		return errElementIndexOutOfBounds
-	}
 	if err := v.validateTableExists(tableIndex); err != nil {
 		return err
+	}
+	if elemIndex >= uint32(len(v.elemTypes)) {
+		return unknownIndex("elem segment", uint64(elemIndex))
 	}
 	if _, err := v.popExpectedValues([]ValueType{I32, I32, I32}); err != nil {
 		return err
@@ -1285,19 +1311,27 @@ func (v *validator) validateTableFill() error {
 func (v *validator) validateElemDrop() error {
 	elemIndex := uint32(v.next())
 	if elemIndex >= uint32(len(v.elemTypes)) {
-		return errElementIndexOutOfBounds
+		return unknownIndex("elem segment", uint64(elemIndex))
 	}
 	return nil
 }
 
 func (v *validator) validateDataDrop() error {
-	if v.dataCount == nil {
-		return errDataCountNotSet
-	}
+	return v.validateDataSegmentExists(uint32(v.next()))
+}
 
-	dataIndex := uint32(v.next())
+// validateDataSegmentExists rejects a data segment the module does not declare.
+func (v *validator) validateDataSegmentExists(dataIndex uint32) error {
+	if v.dataCount == nil {
+		// A data section without the count section that must accompany it is
+		// malformed; a module carrying neither declares no segments at all.
+		if v.hasDataSegments {
+			return errDataCountSectionRequired
+		}
+		return unknownIndex("data segment", uint64(dataIndex))
+	}
 	if dataIndex >= *v.dataCount {
-		return errDataIndexOutOfBounds
+		return unknownIndex("data segment", uint64(dataIndex))
 	}
 	return nil
 }
@@ -1349,7 +1383,7 @@ func (v *validator) validateVectorScalar(scalar ValueType) error {
 func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
@@ -1374,7 +1408,7 @@ func (v *validator) validateSimdLoadLane(sizeBytes uint32) error {
 func (v *validator) validateSimdStoreLane(sizeBytes uint32) error {
 	align, memoryIndex, _ := v.nextMemArg()
 	if !v.config.ExperimentalMultipleMemories && memoryIndex != 0 {
-		return errMultipleMemoriesNotEnabled
+		return errZeroByteExpected
 	}
 	if err := v.validateMemoryExists(uint32(memoryIndex)); err != nil {
 		return err
@@ -1405,7 +1439,7 @@ func (v *validator) validateShuffle() error {
 
 func (v *validator) getLocalType(index uint64) (ValueType, error) {
 	if index >= uint64(len(v.locals)) {
-		return nil, errLocalIndexOutOfBounds
+		return nil, unknownIndex("local", index)
 	}
 	return v.locals[index], nil
 }
@@ -1566,6 +1600,16 @@ func toValueType(code uint64) ValueType {
 	}
 }
 
+// validateMemoryLimits checks a declared memory against the page count the spec
+// permits before applying the host's own, possibly lower, ceiling.
+func validateMemoryLimits(limits Limits, configuredMax uint32) error {
+	if limits.Min > specMaxMemoryPages ||
+		(limits.Max != nil && *limits.Max > specMaxMemoryPages) {
+		return errMemorySizeTooLarge
+	}
+	return validateLimits(limits, configuredMax)
+}
+
 func validateLimits(limits Limits, maximumRange uint32) error {
 	if limits.Min > maximumRange {
 		return errInvalidLimits
@@ -1580,7 +1624,7 @@ func validateLimits(limits Limits, maximumRange uint32) error {
 	}
 
 	if limits.Min > *limits.Max {
-		return errInvalidLimits
+		return errLimitsMinGreaterThanMax
 	}
 
 	return nil

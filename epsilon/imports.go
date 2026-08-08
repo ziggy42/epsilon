@@ -23,8 +23,8 @@ type resolvedImports struct {
 	globals   []*Global
 }
 
-// resolveImports resolves the imports declared in the given module against
-// the provided map of available imports.
+// resolveImports resolves the imports declared in the given module against the
+// provided map of available imports.
 func resolveImports(
 	module *moduleDefinition,
 	instance *ModuleInstance,
@@ -86,7 +86,18 @@ func findImport(
 			return obj, nil
 		}
 	}
-	return nil, fmt.Errorf("%s.%s not found in imports", module, name)
+	return nil, fmt.Errorf("unknown import %s.%s", module, name)
+}
+
+// incompatibleImport reports an import that was found but whose provided value
+// does not match the type the importing module declares.
+func incompatibleImport(imp moduleImport, detail string) error {
+	return fmt.Errorf(
+		"incompatible import type for %s.%s: %s",
+		imp.moduleName,
+		imp.name,
+		detail,
+	)
 }
 
 func resolveFunctionImport(
@@ -103,9 +114,7 @@ func resolveFunctionImport(
 		}
 
 		if !f.GetType().Equal(functionType) {
-			return nil, fmt.Errorf(
-				"type mismatch for %s.%s", imp.moduleName, imp.name,
-			)
+			return nil, incompatibleImport(imp, "signature mismatch")
 		}
 
 		return f, nil
@@ -119,7 +128,7 @@ func resolveFunctionImport(
 		}, nil
 	}
 
-	return nil, fmt.Errorf("%s.%s not a function", imp.moduleName, imp.name)
+	return nil, incompatibleImport(imp, "not a function")
 }
 
 func resolveGlobalImport(
@@ -130,7 +139,7 @@ func resolveGlobalImport(
 ) (*Global, error) {
 	global, ok := obj.(*Global)
 	if !ok {
-		return nil, fmt.Errorf("%s.%s not a global", imp.moduleName, imp.name)
+		return nil, incompatibleImport(imp, "not a global")
 	}
 
 	if global.owner != instance.vm {
@@ -140,14 +149,10 @@ func resolveGlobalImport(
 	}
 
 	if global.Mutable != globalType.IsMutable {
-		return nil, fmt.Errorf(
-			"mutability mismatch for %s.%s", imp.moduleName, imp.name,
-		)
+		return nil, incompatibleImport(imp, "mutability mismatch")
 	}
 	if global.Type != globalType.ValueType {
-		return nil, fmt.Errorf(
-			"value type mismatch for %s.%s", imp.moduleName, imp.name,
-		)
+		return nil, incompatibleImport(imp, "value type mismatch")
 	}
 	return global, nil
 }
@@ -160,7 +165,7 @@ func resolveMemoryImport(
 ) (*Memory, error) {
 	memory, ok := obj.(*Memory)
 	if !ok {
-		return nil, fmt.Errorf("%s.%s not a memory", imp.moduleName, imp.name)
+		return nil, incompatibleImport(imp, "not a memory")
 	}
 
 	if memory.owner != instance.vm {
@@ -171,7 +176,7 @@ func resolveMemoryImport(
 
 	provided := Limits{Min: uint32(memory.Size()), Max: memory.Limits.Max}
 	if !limitsMatch(provided, memoryType.Limits) {
-		return nil, fmt.Errorf("limit mismatch for %s.%s", imp.moduleName, imp.name)
+		return nil, incompatibleImport(imp, "limit mismatch")
 	}
 	return memory, nil
 }
@@ -184,7 +189,7 @@ func resolveTableImport(
 ) (*Table, error) {
 	table, ok := obj.(*Table)
 	if !ok {
-		return nil, fmt.Errorf("%s.%s not a table", imp.moduleName, imp.name)
+		return nil, incompatibleImport(imp, "not a table")
 	}
 
 	if table.owner != instance.vm {
@@ -194,16 +199,12 @@ func resolveTableImport(
 	}
 
 	if table.Type.ReferenceType != tableType.ReferenceType {
-		return nil, fmt.Errorf(
-			"reference type mismatch for %s.%s", imp.moduleName, imp.name,
-		)
+		return nil, incompatibleImport(imp, "reference type mismatch")
 	}
 
 	provided := Limits{Min: uint32(table.Size()), Max: table.Type.Limits.Max}
 	if !limitsMatch(provided, tableType.Limits) {
-		return nil, fmt.Errorf(
-			"limit mismatch for %s.%s", imp.moduleName, imp.name,
-		)
+		return nil, incompatibleImport(imp, "limit mismatch")
 	}
 	return table, nil
 }
