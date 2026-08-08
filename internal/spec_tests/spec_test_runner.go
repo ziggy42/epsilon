@@ -41,11 +41,10 @@ func newSpecRunner(t *testing.T, wasmDict map[string][]byte) *specTestRunner {
 	importMemoryLimitMax := uint32(2)
 	tableLimitMax := uint32(20)
 
-	// Spec tests intentionally declare resources at the WebAssembly spec
-	// maxima (e.g. tables with Max=2^32-1) to exercise edge cases. Set the
-	// configured ceilings to the spec maxima so the runner reflects what
-	// the engine validator must accept by spec, not what hosts ship by
-	// default.
+	// Spec tests intentionally declare resources at the WebAssembly spec maxima
+	// (e.g. tables with Max=2^32-1) to exercise edge cases. Set the configured
+	// ceilings to the spec maxima so the runner reflects what the engine
+	// validator must accept by spec, not what hosts ship by default.
 	runtime := epsilon.NewRuntimeWithConfig(epsilon.Config{
 		MaxCallStackDepth:          epsilon.DefaultMaxCallStackDepth,
 		CallStackPreallocationSize: epsilon.DefaultCallStackPreallocationSize,
@@ -427,9 +426,9 @@ func scalarMatches(raw, valueType string, actual any) (bool, error) {
 }
 
 const (
-	// canonicalNaN32 is the f32 canonical NaN with the sign bit cleared; a
-	// NaN is arithmetic when its payload is at least the canonical one, i.e.
-	// when the most significant payload bit is set.
+	// canonicalNaN32 is the f32 canonical NaN with the sign bit cleared; a NaN is
+	// arithmetic when its payload is at least the canonical one, i.e. when the
+	// most significant payload bit is set.
 	canonicalNaN32 = uint32(0x7fc00000)
 	canonicalNaN64 = uint64(0x7ff8000000000000)
 )
