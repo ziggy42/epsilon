@@ -98,7 +98,10 @@ type wasmReader interface {
 
 // parser is a parser for WASM modules.
 type parser struct {
-	reader         wasmReader
+	reader wasmReader
+	// bytesRemaining counts down the bytes still owed to the region being
+	// read. Any negative value means the parser is reading outside a bounded
+	// region and consumes whatever the input holds.
 	bytesRemaining int64
 	config         Config
 }
@@ -125,10 +128,8 @@ func (p *parser) Read(bytes []byte) (int, error) {
 		bytes = bytes[:p.bytesRemaining]
 	}
 	n, err := p.reader.Read(bytes)
-	if p.bytesRemaining > 0 {
-		p.bytesRemaining -= int64(n)
-	}
-	if err == io.EOF && n < len(bytes) {
+	p.bytesRemaining -= int64(n)
+	if n < len(bytes) && err == io.EOF {
 		return n, p.outOfInput()
 	}
 	return n, err
@@ -139,15 +140,13 @@ func (p *parser) ReadByte() (byte, error) {
 		return 0, errSectionTruncated
 	}
 	b, err := p.reader.ReadByte()
-	if err == io.EOF {
-		return 0, p.outOfInput()
-	}
 	if err != nil {
+		if err == io.EOF {
+			return 0, p.outOfInput()
+		}
 		return 0, err
 	}
-	if p.bytesRemaining > 0 {
-		p.bytesRemaining--
-	}
+	p.bytesRemaining--
 	return b, nil
 }
 
@@ -874,7 +873,7 @@ func parseVector[T any](parser *parser, parse func() (T, error)) ([]T, error) {
 		return nil, err
 	}
 	items := make([]T, 0, min(count, maxInitialCapacity))
-	for i := uint32(0); i < count; i++ {
+	for range count {
 		parsed, err := parse()
 		if err != nil {
 			return nil, err
