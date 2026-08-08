@@ -1320,8 +1320,7 @@ func (v *validator) validateDataDrop() error {
 	return v.validateDataSegmentExists(uint32(v.next()))
 }
 
-// validateDataSegmentExists rejects a data segment the module does not
-// declare.
+// validateDataSegmentExists rejects a data segment the module does not declare.
 func (v *validator) validateDataSegmentExists(dataIndex uint32) error {
 	if v.dataCount == nil {
 		// A data section without the count section that must accompany it is
@@ -1601,8 +1600,8 @@ func toValueType(code uint64) ValueType {
 	}
 }
 
-// validateMemoryLimits checks a declared memory against the page count the
-// spec permits before applying the host's own, possibly lower, ceiling.
+// validateMemoryLimits checks a declared memory against the page count the spec
+// permits before applying the host's own, possibly lower, ceiling.
 func validateMemoryLimits(limits Limits, configuredMax uint32) error {
 	if limits.Min > specMaxMemoryPages ||
 		(limits.Max != nil && *limits.Max > specMaxMemoryPages) {
