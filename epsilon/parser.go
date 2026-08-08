@@ -327,7 +327,8 @@ func (p *parser) parseHeader() error {
 	// The magic number is checked before the version is read, so input too short
 	// to hold a header counts as truncated only while what it does hold still
 	// looks like WebAssembly.
-	magic := make([]byte, len(wasmMagicNumber))
+	var header [8]byte
+	magic := header[:len(wasmMagicNumber)]
 	if _, err := io.ReadFull(p, magic); err != nil {
 		return err
 	}
@@ -335,7 +336,7 @@ func (p *parser) parseHeader() error {
 		return errInvalidMagicNumber
 	}
 
-	versionBytes := make([]byte, 4)
+	versionBytes := header[len(wasmMagicNumber):]
 	if _, err := io.ReadFull(p, versionBytes); err != nil {
 		return err
 	}
