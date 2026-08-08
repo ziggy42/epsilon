@@ -154,6 +154,9 @@ func (p *parser) ReadByte() (byte, error) {
 // discardRemaining consumes whatever is left of the bounded region the parser
 // is reading. Reaching its end is the expected outcome here, not a failure.
 func (p *parser) discardRemaining() error {
+	if p.bytesRemaining == 0 {
+		return nil
+	}
 	_, err := io.Copy(io.Discard, p)
 	if err == errSectionTruncated {
 		return nil
@@ -990,13 +993,17 @@ func (p *parser) readCode(
 
 	controlStack := []controlEntry{}
 	var lastOp opcode
-	var truncation error
 
 	for {
 		opcodeVal, err := p.readOpcode()
 		if err != nil {
 			if err == errSectionTruncated || err == errUnexpectedEnd {
-				truncation = err
+				// Input that ran out mid-sequence is truncated, whatever it stopped
+				// inside; only a sequence that reads to completion can be missing its
+				// end opcode.
+				if lastOp != end || len(controlStack) > 0 {
+					return bytecodeResult{}, err
+				}
 				break
 			}
 			return bytecodeResult{}, err
@@ -1247,11 +1254,6 @@ func (p *parser) readCode(
 		}
 	}
 
-	// Input that ran out mid-sequence is truncated, whatever it stopped inside;
-	// only a sequence that reads to completion can be missing its end opcode.
-	if truncation != nil && (lastOp != end || len(controlStack) > 0) {
-		return bytecodeResult{}, truncation
-	}
 	if len(bytecode) == 0 || lastOp != end {
 		return bytecodeResult{}, errMissingEndOpcode
 	}
@@ -1331,17 +1333,15 @@ func (p *parser) readMemArg() (uint64, uint64, uint64, error) {
 
 	// The alignment exponent must be < 32. Bit 6 is not part of it: it marks an
 	// explicit memory index, which only multi-memory allows.
-	if align&sixthBitMask != 0 && !p.config.ExperimentalMultipleMemories {
-		return 0, 0, 0, errMalformedMemopFlags
-	}
 	if (align & ^sixthBitMask) >= 32 {
 		return 0, 0, 0, errMalformedMemopFlags
 	}
 
 	memoryIndex := uint64(0)
-	// If bit 6 is set, this instruction is using an explicit memory index.
-	// This is relevant in WASM 3.
 	if align&sixthBitMask != 0 {
+		if !p.config.ExperimentalMultipleMemories {
+			return 0, 0, 0, errMalformedMemopFlags
+		}
 		memoryIndex, err = p.readUint32()
 		if err != nil {
 			return 0, 0, 0, err
