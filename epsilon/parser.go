@@ -59,9 +59,9 @@ const (
 )
 
 // maxInitialCapacity caps the up-front allocation parseVector and similar
-// callers perform from an attacker-controlled count. Real modules rarely
-// exceed a few thousand items per vector, so this is the common-case exact
-// size; pathological counts grow via append+EOF instead of OOMing on a
+// callers perform from an attacker-controlled count. Real modules rarely exceed
+// a few thousand items per vector, so this is the common-case exact size;
+// pathological counts grow via append+EOF instead of OOMing on a
 // pre-allocation.
 const maxInitialCapacity = 4096
 
@@ -99,9 +99,9 @@ type wasmReader interface {
 // parser is a parser for WASM modules.
 type parser struct {
 	reader wasmReader
-	// bytesRemaining counts down the bytes still owed to the region being
-	// read. Any negative value means the parser is reading outside a bounded
-	// region and consumes whatever the input holds.
+	// bytesRemaining counts down the bytes still owed to the region being read.
+	// Any negative value means the parser is reading outside a bounded region and
+	// consumes whatever the input holds.
 	bytesRemaining int64
 	config         Config
 }
@@ -191,8 +191,8 @@ func (p *parser) parse() (*moduleDefinition, error) {
 	var dataSegments []dataSegment
 	var dataCount *uint32
 
-	// We initialize lastSection to CustomSectionId since custom sections
-	// can be in any order.
+	// We initialize lastSection to CustomSectionId since custom sections can be
+	// in any order.
 	lastSection := customSectionId
 
 	for {
@@ -843,9 +843,9 @@ func (p *parser) parseExpression() ([]uint64, error) {
 }
 
 func (p *parser) parseLimits() (Limits, error) {
-	// The flags are a single-bit LEB128, so an over-long encoding or a value
-	// that does not fit is rejected as the malformed integer it is, before
-	// anything is read on its behalf.
+	// The flags are a single-bit LEB128, so an over-long encoding or a value that
+	// does not fit is rejected as the malformed integer it is, before anything is
+	// read on its behalf.
 	flags, err := p.readUleb128(1)
 	if err != nil {
 		return Limits{}, err
@@ -912,10 +912,10 @@ func (p *parser) parseUtf8String() (string, error) {
 	return string(stringBytes), nil
 }
 
-// readN reads exactly length bytes from the reader. The initial buffer
-// capacity is capped at maxInitialCapacity so an attacker-controlled
-// length cannot force a huge up-front allocation; the buffer grows as needed
-// and a short read surfaces as an error.
+// readN reads exactly length bytes from the reader. The initial buffer capacity
+// is capped at maxInitialCapacity so an attacker-controlled length cannot force
+// a huge up-front allocation; the buffer grows as needed and a short read
+// surfaces as an error.
 func (p *parser) readN(length uint64) ([]byte, error) {
 	if length <= maxInitialCapacity {
 		data := make([]byte, int(length))
@@ -997,8 +997,8 @@ func (p *parser) readCode(
 	// append as real bytes are decoded; a bogus huge size cannot force a large
 	// up-front allocation.
 	bytecode := make([]uint64, 0, min(sizeHint, maxInitialCapacity))
-	// The jump caches are allocated lazily: a function with no control flow
-	// never branches, so it needs neither map.
+	// The jump caches are allocated lazily: a function with no control flow never
+	// branches, so it needs neither map.
 	var jumpCache map[uint32]uint32
 	var jumpElseCache map[uint32]uint32
 
