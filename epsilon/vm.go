@@ -1470,9 +1470,9 @@ func (vm *vm) handleCallIndirect(frame *callFrame) error {
 
 	elementIndex := vm.stack.popInt32()
 
-	// An out-of-range table index traps as "undefined element" here, not as
-	// the "out of bounds table access" the table accessor instructions
-	// report for the same condition.
+	// An out-of-range table index traps as "undefined element" here, not as the
+	// "out of bounds table access" the table accessor instructions report for the
+	// same condition.
 	tableElement, err := table.Get(elementIndex)
 	if err != nil {
 		return errUndefinedElement

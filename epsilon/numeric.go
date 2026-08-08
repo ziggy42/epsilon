@@ -137,9 +137,9 @@ func sqrt[T wasmFloat](a T) T {
 
 // minF32 returns the wasm minimum of a and b. Go's min propagates an operand
 // NaN unchanged, which leaves a signaling NaN signaling and varies across
-// architectures; the spec requires an arithmetic NaN, and the canonical NaN
-// is one. Go's min also cannot be used for the zeros, where the sign decides
-// the result rather than the comparison.
+// architectures; the spec requires an arithmetic NaN, and the canonical NaN is
+// one. Go's min also cannot be used for the zeros, where the sign decides the
+// result rather than the comparison.
 func minF32(a, b float32) float32 {
 	if a != a || b != b {
 		return math.Float32frombits(canonicalNaNF32)

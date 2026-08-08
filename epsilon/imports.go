@@ -23,8 +23,8 @@ type resolvedImports struct {
 	globals   []*Global
 }
 
-// resolveImports resolves the imports declared in the given module against
-// the provided map of available imports.
+// resolveImports resolves the imports declared in the given module against the
+// provided map of available imports.
 func resolveImports(
 	module *moduleDefinition,
 	instance *ModuleInstance,
