@@ -404,7 +404,7 @@ func (p *parser) parseFunction() (function, error) {
 		}
 	}
 
-	result, err := p.readCode(size, nil)
+	result, err := p.readCode(size, false)
 	if err != nil {
 		if err == errSectionTruncated && sectionBytesRemaining > int64(size) {
 			return function{}, errEndOpcodeExpected
@@ -542,7 +542,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 		if err != nil {
 			return dataSegment{}, err
 		}
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -552,7 +552,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 			offsetExpression: offsetExpression,
 		}, nil
 	case 1:
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -566,7 +566,7 @@ func (p *parser) parseDataSegment() (dataSegment, error) {
 		if err != nil {
 			return dataSegment{}, err
 		}
-		content, err := parseVector(p, p.ReadByte)
+		content, err := p.parseByteVector()
 		if err != nil {
 			return dataSegment{}, err
 		}
@@ -835,9 +835,7 @@ func (p *parser) parseElementSegment() (elementSegment, error) {
 }
 
 func (p *parser) parseExpression() ([]uint64, error) {
-	result, err := p.readCode(0, func(instruction []uint64) bool {
-		return opcode(instruction[0]) == end
-	})
+	result, err := p.readCode(0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -891,6 +889,14 @@ func (p *parser) parseUint32() (uint32, error) {
 	return uint32(val), nil
 }
 
+func (p *parser) parseByteVector() ([]byte, error) {
+	length, err := p.parseUint32()
+	if err != nil {
+		return nil, err
+	}
+	return p.readN(uint64(length))
+}
+
 func (p *parser) parseUtf8String() (string, error) {
 	length, err := p.parseUint32()
 	if err != nil {
@@ -911,7 +917,15 @@ func (p *parser) parseUtf8String() (string, error) {
 // length cannot force a huge up-front allocation; the buffer grows as needed
 // and a short read surfaces as an error.
 func (p *parser) readN(length uint64) ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, min(length, maxInitialCapacity)))
+	if length <= maxInitialCapacity {
+		data := make([]byte, int(length))
+		if _, err := io.ReadFull(p, data); err != nil {
+			return nil, err
+		}
+		return data, nil
+	}
+
+	buf := bytes.NewBuffer(make([]byte, 0, maxInitialCapacity))
 	if _, err := io.CopyN(buf, p, int64(length)); err != nil {
 		return nil, err
 	}
@@ -968,17 +982,15 @@ type bytecodeResult struct {
 // bytecode the VM executes, and returns it with the jump caches that map each
 // block/if to its branch targets.
 //
-// Decoding stops at the first instruction for which isEnd returns true; a nil
-// isEnd decodes until the reader runs out, which a function body's bounded
-// reader does at the end of the body. A sequence the input ran out of is
-// rejected as truncated, one that merely lacks its end opcode with
-// errMissingEndOpcode.
+// Decoding stops at the first end opcode when stopAtEnd is true, or when the
+// reader runs out otherwise. A sequence the input ran out of is rejected as
+// truncated, one that merely lacks its end opcode with errMissingEndOpcode.
 //
 // sizeHint only seeds the bytecode buffer capacity to avoid regrowth: it is the
 // body's declared byte length, or 0 if unknown, and need not be accurate.
 func (p *parser) readCode(
 	sizeHint uint32,
-	isEnd func([]uint64) bool,
+	stopAtEnd bool,
 ) (bytecodeResult, error) {
 	// sizeHint is attacker-controlled (the function body's declared size), so cap
 	// the initial capacity at maxInitialCapacity. The buffer still grows via
@@ -1009,7 +1021,6 @@ func (p *parser) readCode(
 		}
 
 		lastOp = opcodeVal
-		currentInstructionStart := len(bytecode)
 		bytecode = append(bytecode, uint64(opcodeVal))
 
 		switch opcodeVal {
@@ -1248,7 +1259,7 @@ func (p *parser) readCode(
 			// No operands
 		}
 
-		if isEnd != nil && isEnd(bytecode[currentInstructionStart:]) {
+		if stopAtEnd && opcodeVal == end {
 			break
 		}
 	}
