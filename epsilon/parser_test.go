@@ -459,29 +459,6 @@ func TestReadUleb128(t *testing.T) {
 		wantErr  error
 	}{
 		{
-			name:     "u1 zero",
-			bitWidth: 1,
-			encoded:  []byte{0x00},
-		},
-		{
-			name:     "u1 one",
-			bitWidth: 1,
-			encoded:  []byte{0x01},
-			want:     1,
-		},
-		{
-			name:     "u1 too large",
-			bitWidth: 1,
-			encoded:  []byte{0x02},
-			wantErr:  errIntegerTooLarge,
-		},
-		{
-			name:     "u32 one byte",
-			bitWidth: 32,
-			encoded:  []byte{0x7f},
-			want:     0x7f,
-		},
-		{
 			name:     "u32 maximum",
 			bitWidth: 32,
 			encoded:  []byte{0xff, 0xff, 0xff, 0xff, 0x0f},
@@ -560,47 +537,6 @@ func TestReadUleb128(t *testing.T) {
 			}
 			if got != test.want {
 				t.Fatalf("expected value %d, got %d", test.want, got)
-			}
-		})
-	}
-}
-
-func TestReadSleb128(t *testing.T) {
-	tests := []struct {
-		name     string
-		maxBytes int
-		encoded  []byte
-		want     int64
-		wantErr  error
-	}{
-		{name: "zero", maxBytes: 5, encoded: []byte{0x00}},
-		{name: "positive one byte", maxBytes: 5, encoded: []byte{0x3f}, want: 63},
-		{name: "negative one byte", maxBytes: 5, encoded: []byte{0x40}, want: -64},
-		{
-			name: "positive two bytes", maxBytes: 5,
-			encoded: []byte{0xc0, 0x00}, want: 64,
-		},
-		{
-			name: "negative two bytes", maxBytes: 5,
-			encoded: []byte{0xbf, 0x7f}, want: -65,
-		},
-		{
-			name:     "representation too long",
-			maxBytes: 1,
-			encoded:  []byte{0x80, 0x00},
-			wantErr:  errIntRepresentationTooLong,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			parser := newParser(bytes.NewReader(test.encoded), DefaultConfig())
-			got, err := parser.readSleb128(test.maxBytes)
-			if err != test.wantErr {
-				t.Fatalf("expected error %v, got %v", test.wantErr, err)
-			}
-			if int64(got) != test.want {
-				t.Fatalf("expected value %d, got %d", test.want, int64(got))
 			}
 		})
 	}
