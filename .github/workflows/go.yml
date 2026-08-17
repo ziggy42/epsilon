@@ -36,7 +36,7 @@ jobs:
       with:
         go-version-file: 'go.mod'
     - name: Set up uv
-      uses: astral-sh/setup-uv@v10
+      uses: astral-sh/setup-uv@v10.0.1
     - name: Format check
       run: |
         make fmt fmt-md
@@ -95,7 +95,7 @@ jobs:
     # reporting those differences as failures.
     - name: Set up uv
       if: matrix.os == 'ubuntu-latest'
-      uses: astral-sh/setup-uv@v10
+      uses: astral-sh/setup-uv@v10.0.1
     - name: WASI testsuite
       if: matrix.os == 'ubuntu-latest'
       run: make test-wasi
