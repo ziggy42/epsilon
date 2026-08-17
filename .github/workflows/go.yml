@@ -21,9 +21,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # Checks whose output is compared against the tree, plus the ones that are
-  # platform-independent. These run once: both `git diff --exit-code` steps
-  # would report a toolchain difference between platforms as a failure.
+  # The steps that diff generated output against the tree, plus the ones
+  # that do not vary by platform. Running these anywhere else would report a
+  # toolchain difference as drift.
   checks:
     name: Checks
     runs-on: ubuntu-latest
@@ -56,9 +56,8 @@ jobs:
     - name: Build
       run: make build-all
 
-  # macos-latest is arm64, so the matrix covers both architectures Epsilon
-  # claims support for. `go.mod` is the minimum Go the module declares;
-  # `stable` is the current release.
+  # macos-latest is arm64, so this covers two architectures rather than two
+  # operating systems on one.
   test:
     name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
@@ -90,9 +89,9 @@ jobs:
           hashFiles('Makefile') }}
     - name: Test
       run: make test
-    # The WASI testsuite exercises the host's syscalls, so it asserts on
-    # behaviour the platform decides. It runs on one platform rather than
-    # reporting those differences as failures.
+    # The WASI testsuite asserts on syscall behaviour the host decides, so
+    # it runs on one platform instead of reporting those differences as
+    # failures.
     - name: Set up uv
       if: matrix.os == 'ubuntu-latest'
       uses: astral-sh/setup-uv@v10.0.1
@@ -100,8 +99,8 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: make test-wasi
 
-  # Windows runs the runtime and the spec suite. wasip1 is excluded: it is
-  # Unix-only by design, and `NewWasiModuleBuilder().Build()` reports that.
+  # wasip1 is left out: it is Unix-only, and NewWasiModuleBuilder().Build()
+  # returns an error on every other platform.
   test-windows:
     name: Test (windows-latest)
     runs-on: windows-latest
@@ -113,9 +112,9 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
-    # The Makefile selects a WABT build with `uname` and windows-latest has no
-    # make, so the spec suite's dependency is installed here instead. The
-    # version is read from the Makefile so it stays the one source for it.
+    # windows-latest has no make, and the Makefile selects a WABT build with
+    # uname, so the spec suite's dependency is installed here. The version
+    # comes from the Makefile to keep one source for it.
     - name: Install WABT
       shell: bash
       run: |
