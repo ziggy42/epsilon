@@ -32,11 +32,11 @@ jobs:
       with:
         submodules: recursive
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Set up uv
-      uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v10
     - name: Format check
       run: |
         make fmt fmt-md
@@ -73,19 +73,21 @@ jobs:
         submodules: recursive
     - name: Set up Go (go.mod)
       if: matrix.go == 'go.mod'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Set up Go (${{ matrix.go }})
       if: matrix.go != 'go.mod'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
     - name: Cache WABT
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: .toolchain
-        key: wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
+        key: >-
+          wabt-${{ runner.os }}-${{ runner.arch }}-${{
+          hashFiles('Makefile') }}
     - name: Test
       run: make test
     # The WASI testsuite exercises the host's syscalls, so it asserts on
@@ -93,7 +95,7 @@ jobs:
     # reporting those differences as failures.
     - name: Set up uv
       if: matrix.os == 'ubuntu-latest'
-      uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v10
     - name: WASI testsuite
       if: matrix.os == 'ubuntu-latest'
       run: make test-wasi
@@ -108,7 +110,7 @@ jobs:
       with:
         submodules: recursive
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     # The Makefile selects a WABT build with `uname` and windows-latest has no
@@ -117,10 +119,10 @@ jobs:
     - name: Install WABT
       shell: bash
       run: |
+        base="https://github.com/WebAssembly/wabt/releases/download"
         version=$(sed -n 's/^WABT_VERSION ?= //p' Makefile)
         archive="wabt-$version-windows-x64.tar.gz"
-        curl -fL --no-progress-meter -o "$archive" \
-          "https://github.com/WebAssembly/wabt/releases/download/$version/$archive"
+        curl -fL --no-progress-meter -o "$archive" "$base/$version/$archive"
         mkdir -p .toolchain
         tar -xzf "$archive" -C .toolchain
         mv ".toolchain/wabt-$version" .toolchain/wabt
