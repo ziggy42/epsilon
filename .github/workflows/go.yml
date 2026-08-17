@@ -21,7 +21,11 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build:
+  # Checks whose output is compared against the tree, plus the ones that are
+  # platform-independent. These run once: both `git diff --exit-code` steps
+  # would report a toolchain difference between platforms as a failure.
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -51,5 +55,76 @@ jobs:
       run: make vet
     - name: Build
       run: make build-all
+
+  # macos-latest is arm64, so the matrix covers both architectures Epsilon
+  # claims support for. `go.mod` is the minimum Go the module declares;
+  # `stable` is the current release.
+  test:
+    name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: ['go.mod', 'stable']
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: recursive
+    - name: Set up Go (go.mod)
+      if: matrix.go == 'go.mod'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+    - name: Set up Go (${{ matrix.go }})
+      if: matrix.go != 'go.mod'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+    - name: Cache WABT
+      uses: actions/cache@v4
+      with:
+        path: .toolchain
+        key: wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
     - name: Test
-      run: make test-all
+      run: make test
+    # The WASI testsuite exercises the host's syscalls, so it asserts on
+    # behaviour the platform decides. It runs on one platform rather than
+    # reporting those differences as failures.
+    - name: Set up uv
+      if: matrix.os == 'ubuntu-latest'
+      uses: astral-sh/setup-uv@v5
+    - name: WASI testsuite
+      if: matrix.os == 'ubuntu-latest'
+      run: make test-wasi
+
+  # Windows runs the runtime and the spec suite. wasip1 is excluded: it is
+  # Unix-only by design, and `NewWasiModuleBuilder().Build()` reports that.
+  test-windows:
+    name: Test (windows-latest)
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: recursive
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+    # The Makefile selects a WABT build with `uname` and windows-latest has no
+    # make, so the spec suite's dependency is installed here instead. The
+    # version is read from the Makefile so it stays the one source for it.
+    - name: Install WABT
+      shell: bash
+      run: |
+        version=$(sed -n 's/^WABT_VERSION ?= //p' Makefile)
+        archive="wabt-$version-windows-x64.tar.gz"
+        curl -fL --no-progress-meter -o "$archive" \
+          "https://github.com/WebAssembly/wabt/releases/download/$version/$archive"
+        mkdir -p .toolchain
+        tar -xzf "$archive" -C .toolchain
+        mv ".toolchain/wabt-$version" .toolchain/wabt
+    - name: Build
+      run: go build ./...
+    - name: Test
+      run: go test ./epsilon/... ./internal/spec_tests/...
