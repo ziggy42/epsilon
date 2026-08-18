@@ -20,6 +20,9 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
   # The format and drift steps regenerate files and compare them against the
   # tree, so a second platform would fail them over its own toolchain rather
