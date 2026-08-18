@@ -51,14 +51,14 @@ jobs:
     - name: Build
       run: make build-all
 
-  # macos-latest is arm64, so this covers two architectures rather than two
-  # operating systems on one.
   test:
     name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        # ubuntu-latest is amd64 and macos-latest is arm64, so this also
+        # covers two architectures.
         os: [ubuntu-latest, macos-latest]
         go: ['go.mod', 'stable']
     steps:
