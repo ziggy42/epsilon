@@ -20,36 +20,92 @@ on:
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: read
+
 jobs:
-  build:
+  # The format and drift steps regenerate files and compare them against the
+  # tree, so a second platform would fail them over its own toolchain rather
+  # than over drift. The rest of the job does not vary by platform.
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
       with:
         submodules: recursive
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version-file: 'go.mod'
     - name: Set up uv
-      uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v10.0.1
     - name: Format check
       run: |
         make fmt fmt-md
-        git diff --exit-code \
-          || { echo "::error::Run 'make fmt' and 'make fmt-md', then commit the result."; exit 1; }
+        git diff --exit-code
     - name: Check Wasm drift
       run: |
         touch internal/benchmarks/src/*.c
         make build-wasm
-        git diff --exit-code \
-          || { \
-            echo "::error::Wasm binaries out of sync. Rebuild and commit."; \
-            exit 1; \
-          }
+        git diff --exit-code
     - name: Vet
       run: make vet
     - name: Build
       run: make build-all
+
+  test:
+    name: Test (${{ matrix.os }}, Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest is amd64 and macos-latest is arm64, so this also covers
+        # two architectures.
+        os: [ubuntu-latest, macos-latest]
+        go: ['go.mod', 'stable']
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: recursive
+    - name: Set up Go (from go.mod)
+      if: matrix.go == 'go.mod'
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: 'go.mod'
+    - name: Set up Go (release)
+      if: matrix.go != 'go.mod'
+      uses: actions/setup-go@v7
+      with:
+        go-version: ${{ matrix.go }}
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v10.0.1
     - name: Test
       run: make test-all
+
+  test-windows:
+    name: Test (windows-latest)
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        submodules: recursive
+    - name: Set up Go
+      uses: actions/setup-go@v7
+      with:
+        go-version-file: 'go.mod'
+    # windows-latest has no make, and the Makefile selects a WABT build with
+    # uname, so the spec suite's dependency is installed here. The version comes
+    # from the Makefile to keep one source for it.
+    - name: Install WABT
+      shell: bash
+      run: |
+        base="https://github.com/WebAssembly/wabt/releases/download"
+        version=$(sed -n 's/^WABT_VERSION ?= //p' Makefile)
+        archive="wabt-$version-windows-x64.tar.gz"
+        curl -fL --no-progress-meter -o "$archive" "$base/$version/$archive"
+        mkdir -p .toolchain
+        tar -xzf "$archive" -C .toolchain
+        mv ".toolchain/wabt-$version" .toolchain/wabt
+    - name: Test
+      run: go test ./...

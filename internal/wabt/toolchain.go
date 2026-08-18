@@ -25,5 +25,8 @@ import (
 func resolveBinary(name string) string {
 	_, thisFile, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(thisFile), "..", "..")
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
 	return filepath.Join(root, ".toolchain", "wabt", "bin", name)
 }
