@@ -104,8 +104,5 @@ jobs:
         mkdir -p .toolchain
         tar -xzf "$archive" -C .toolchain
         mv ".toolchain/wabt-$version" .toolchain/wabt
-    - name: Build
-      run: go build ./...
-    # wasip1 is not available on Windows, so we don't test it here.
     - name: Test
-      run: go test ./epsilon/... ./internal/spec_tests/...
+      run: go test ./...
