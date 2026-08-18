@@ -93,8 +93,6 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: make test-wasi
 
-  # wasip1 is left out: it is Unix-only, and NewWasiModuleBuilder().Build()
-  # returns an error on every other platform.
   test-windows:
     name: Test (windows-latest)
     runs-on: windows-latest
@@ -121,5 +119,6 @@ jobs:
         mv ".toolchain/wabt-$version" .toolchain/wabt
     - name: Build
       run: go build ./...
+    # wasip1 is not available on Windows.
     - name: Test
       run: go test ./epsilon/... ./internal/spec_tests/...
