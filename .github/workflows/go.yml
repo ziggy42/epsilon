@@ -75,6 +75,8 @@ jobs:
       uses: actions/setup-go@v7
       with:
         go-version: ${{ matrix.go }}
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v10.0.1
     - name: Cache WABT
       uses: actions/cache@v6
       with:
@@ -82,15 +84,7 @@ jobs:
         key:
           wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
     - name: Test
-      run: make test
-    # The WASI testsuite asserts on syscall behaviour the host decides, so it
-    # runs on one platform instead of reporting those differences as failures.
-    - name: Set up uv
-      if: matrix.os == 'ubuntu-latest'
-      uses: astral-sh/setup-uv@v10.0.1
-    - name: WASI testsuite
-      if: matrix.os == 'ubuntu-latest'
-      run: make test-wasi
+      run: make test-all
 
   test-windows:
     name: Test (windows-latest)
