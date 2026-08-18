@@ -77,12 +77,6 @@ jobs:
         go-version: ${{ matrix.go }}
     - name: Set up uv
       uses: astral-sh/setup-uv@v10.0.1
-    - name: Cache WABT
-      uses: actions/cache@v6
-      with:
-        path: .toolchain
-        key:
-          wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
     - name: Test
       run: make test-all
 
