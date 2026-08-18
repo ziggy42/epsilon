@@ -79,9 +79,8 @@ jobs:
       uses: actions/cache@v6
       with:
         path: .toolchain
-        key: >-
-          wabt-${{ runner.os }}-${{ runner.arch }}-${{
-          hashFiles('Makefile') }}
+        key:
+          wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
     - name: Test
       run: make test
     # The WASI testsuite asserts on syscall behaviour the host decides, so
