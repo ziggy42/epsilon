@@ -21,8 +21,8 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # The steps that diff generated output against the tree, plus the ones
-  # that do not vary by platform. Running these anywhere else would report a
+  # The steps that diff generated output against the tree, plus the ones that
+  # do not vary by platform. Running these anywhere else would report a
   # toolchain difference as drift.
   checks:
     name: Checks
@@ -57,8 +57,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-latest is amd64 and macos-latest is arm64, so this also
-        # covers two architectures.
+        # ubuntu-latest is amd64 and macos-latest is arm64, so this also covers
+        # two architectures.
         os: [ubuntu-latest, macos-latest]
         go: ['go.mod', 'stable']
     steps:
@@ -83,9 +83,8 @@ jobs:
           wabt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Makefile') }}
     - name: Test
       run: make test
-    # The WASI testsuite asserts on syscall behaviour the host decides, so
-    # it runs on one platform instead of reporting those differences as
-    # failures.
+    # The WASI testsuite asserts on syscall behaviour the host decides, so it
+    # runs on one platform instead of reporting those differences as failures.
     - name: Set up uv
       if: matrix.os == 'ubuntu-latest'
       uses: astral-sh/setup-uv@v10.0.1
@@ -105,8 +104,8 @@ jobs:
       with:
         go-version-file: 'go.mod'
     # windows-latest has no make, and the Makefile selects a WABT build with
-    # uname, so the spec suite's dependency is installed here. The version
-    # comes from the Makefile to keep one source for it.
+    # uname, so the spec suite's dependency is installed here. The version comes
+    # from the Makefile to keep one source for it.
     - name: Install WABT
       shell: bash
       run: |
@@ -119,6 +118,6 @@ jobs:
         mv ".toolchain/wabt-$version" .toolchain/wabt
     - name: Build
       run: go build ./...
-    # wasip1 is not available on Windows.
+    # wasip1 is not available on Windows, so we don't test it here.
     - name: Test
       run: go test ./epsilon/... ./internal/spec_tests/...
