@@ -21,9 +21,9 @@ on:
     branches: [ "main" ]
 
 jobs:
-  # The steps that diff generated output against the tree, plus the ones that
-  # do not vary by platform. Running these anywhere else would report a
-  # toolchain difference as drift.
+  # The format and drift steps regenerate files and compare them against the
+  # tree, so a second platform would fail them over its own toolchain rather
+  # than over drift. The rest of the job does not vary by platform.
   checks:
     name: Checks
     runs-on: ubuntu-latest
