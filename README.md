@@ -143,7 +143,7 @@ Targets:
   bench-compare         Compare benchmarks across refs; TARGET=<ref> required
   build-wasm            Rebuild benchmark .wasm files
   setup-wasi-sdk        Install wasi-sdk locally
-  setup-wabt            Install WABT locally (one-time)
+  setup-wabt            Install the configured WABT version locally
 
 Common overrides:
   BENCH_PATTERN=<pat>   go test -bench filter (default: .)
