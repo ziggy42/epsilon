@@ -8,7 +8,7 @@
 .DEFAULT_GOAL := help
 
 WASI_SDK_VERSION ?= 33
-WABT_VERSION ?= 1.0.41
+WABT_VERSION ?= 1.0.42
 
 # ----- platform detection -----------------------------------------------------
 
@@ -199,8 +199,11 @@ endif
 	$(call install-toolchain,$(WASI_SDK_NAME),$(WASI_SDK_URL),\
 	    $(WASI_SDK_DIR),$(WASI_SDK_NAME))
 
-setup-wabt: $(WABT_WAT2WASM) ## Install WABT locally (one-time)
+setup-wabt: $(WABT_WAT2WASM) ## Install the configured WABT version locally
 
+ifneq ($(shell $(WABT_WAT2WASM) --version 2>/dev/null),$(WABT_VERSION))
+.PHONY: $(WABT_WAT2WASM)
+endif
 $(WABT_WAT2WASM):
 ifndef WABT_NAME
 	$(error Prebuilt WABT is not available on $(UNAME_S)-$(UNAME_M))
